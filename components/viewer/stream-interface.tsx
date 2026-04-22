@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { useViewerStream } from "@/lib/webrtc/use-viewer-stream";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream-new";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
