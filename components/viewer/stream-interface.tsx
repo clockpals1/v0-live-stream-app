@@ -365,7 +365,7 @@ export function ViewerStreamInterface({
       console.log('[Viewer] Cleaning up chat channel');
       supabase.removeChannel(channel);
     };
-  }, [stream.id, supabase]);
+  }, [stream.id]);
 
   // Subscribe to viewer count
   useEffect(() => {
@@ -427,7 +427,7 @@ export function ViewerStreamInterface({
       console.log('[Viewer] Cleaning up viewer count channel');
       supabase.removeChannel(channel);
     };
-  }, [stream.id, supabase]);
+  }, [stream.id]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -437,6 +437,11 @@ export function ViewerStreamInterface({
   const joinStream = async () => {
     if (!viewerName.trim()) return;
     
+    // Persist name in localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('viewerName', viewerName.trim());
+    }
+
     try {
       // Register viewer in database
       await supabase.from("viewers").insert({
@@ -546,58 +551,56 @@ export function ViewerStreamInterface({
   };
 
   const toggleFullscreen = async () => {
-    try {
-      const element = videoContainerRef.current || document.documentElement;
-      
-      if (!isFullscreen) {
-        // Enter fullscreen
-        console.log('[Viewer] Attempting to enter fullscreen');
-        
-        // Try different fullscreen methods
-        const fullscreenMethods = [
-          () => element.requestFullscreen(),
-          () => (element as any).webkitRequestFullscreen(),
-          () => (element as any).mozRequestFullScreen(),
-          () => (element as any).msRequestFullscreen(),
-        ];
-        
-        for (const method of fullscreenMethods) {
-          try {
-            await method();
-            console.log('[Viewer] Fullscreen entered successfully');
-            return;
-          } catch (err) {
-            console.log('[Viewer] Method failed, trying next:', err);
-            continue;
-          }
-        }
-        
-        console.warn('[Viewer] Fullscreen not supported on this browser');
-      } else {
-        // Exit fullscreen
-        console.log('[Viewer] Attempting to exit fullscreen');
-        
-        // Try different exit methods
-        const exitMethods = [
-          () => document.exitFullscreen(),
-          () => (document as any).webkitExitFullscreen(),
-          () => (document as any).mozCancelFullScreen(),
-          () => (document as any).msExitFullscreen(),
-        ];
-        
-        for (const method of exitMethods) {
-          try {
-            await method();
-            console.log('[Viewer] Fullscreen exited successfully');
-            return;
-          } catch (err) {
-            console.log('[Viewer] Exit method failed, trying next:', err);
-            continue;
-          }
+    if (!isFullscreen) {
+      const video = videoRef.current;
+      const container = videoContainerRef.current;
+
+      // iOS Safari: only the <video> element supports native fullscreen
+      if (video && typeof (video as any).webkitEnterFullscreen === 'function') {
+        try {
+          (video as any).webkitEnterFullscreen();
+          return;
+        } catch (err) {
+          console.log('[Viewer] webkitEnterFullscreen failed, trying container:', err);
         }
       }
-    } catch (error) {
-      console.error('[Viewer] Fullscreen toggle error:', error);
+
+      // Android / Desktop: try native fullscreen on container
+      const element = container || document.documentElement;
+      try {
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if ((element as any).webkitRequestFullscreen) {
+          (element as any).webkitRequestFullscreen();
+        } else if ((element as any).mozRequestFullScreen) {
+          (element as any).mozRequestFullScreen();
+        } else if ((element as any).msRequestFullscreen) {
+          (element as any).msRequestFullscreen();
+        } else {
+          // CSS pseudo-fullscreen fallback
+          setIsFullscreen(true);
+        }
+      } catch (err) {
+        console.log('[Viewer] Native fullscreen failed, using CSS overlay:', err);
+        setIsFullscreen(true);
+      }
+    } else {
+      // Check if native fullscreen is active
+      const nativeActive = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      if (nativeActive) {
+        try {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
+          else if ((document as any).mozCancelFullScreen) (document as any).mozCancelFullScreen();
+          else if ((document as any).msExitFullscreen) (document as any).msExitFullscreen();
+        } catch (err) {
+          console.log('[Viewer] Exit fullscreen failed:', err);
+          setIsFullscreen(false);
+        }
+      } else {
+        // Exit CSS pseudo-fullscreen
+        setIsFullscreen(false);
+      }
     }
   };
 
@@ -618,11 +621,17 @@ export function ViewerStreamInterface({
       console.error('[Viewer] Fullscreen error:', event);
     };
 
+    // Escape key exits CSS pseudo-fullscreen
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+
     // Add all fullscreen event listeners
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
     document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    document.addEventListener('keydown', handleKeyDown);
     
     document.addEventListener('fullscreenerror', handleFullscreenError);
     document.addEventListener('webkitfullscreenerror', handleFullscreenError);
@@ -633,6 +642,7 @@ export function ViewerStreamInterface({
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+      document.removeEventListener('keydown', handleKeyDown);
       
       document.removeEventListener('fullscreenerror', handleFullscreenError);
       document.removeEventListener('webkitfullscreenerror', handleFullscreenError);
@@ -651,6 +661,40 @@ export function ViewerStreamInterface({
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Restore session from localStorage
+  useEffect(() => {
+    const savedName = typeof window !== 'undefined' ? localStorage.getItem('viewerName') : null;
+    if (savedName && savedName !== 'Guest') {
+      setViewerName(savedName);
+      supabase.from('viewers').insert({
+        stream_id: stream.id,
+        viewer_name: savedName,
+        joined_at: new Date().toISOString(),
+      }).then(() => {
+        setHasJoined(true);
+        setShowNameDialog(false);
+      }).catch(() => {
+        setHasJoined(true);
+        setShowNameDialog(false);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load chat messages immediately on mount
+  useEffect(() => {
+    const loadInitial = async () => {
+      const { data } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('stream_id', stream.id)
+        .order('created_at', { ascending: true });
+      if (data && data.length > 0) setMessages(data);
+    };
+    loadInitial();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream.id]);
 
   // Apply video quality settings
   useEffect(() => {
@@ -1143,7 +1187,7 @@ export function ViewerStreamInterface({
             <div className="lg:col-span-2 flex flex-col gap-4">
               <Card className="overflow-hidden">
                 <CardContent className="p-0">
-                  <div ref={videoContainerRef} className="relative aspect-video bg-black">
+                  <div ref={videoContainerRef} className={`relative bg-black ${isFullscreen ? 'fixed inset-0 z-50 w-screen h-screen' : 'aspect-video'}`}>
                     {getVideoContent()}
                     {/* Unmute prompt — shown when video is playing but muted */}
                     {isMuted && isConnected && remoteStream && (
