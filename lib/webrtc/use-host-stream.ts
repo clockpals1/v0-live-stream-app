@@ -32,7 +32,8 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   // Initialize media stream
   const initializeMedia = useCallback(async () => {
@@ -425,7 +426,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roomCode, handleSignal, supabase]);
+  }, [roomCode, handleSignal]);
 
   // Cleanup on unmount
   useEffect(() => {

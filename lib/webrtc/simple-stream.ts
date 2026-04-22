@@ -278,7 +278,20 @@ export function useSimpleStream({
 
           if (stream?.status === "live") {
             setIsStreamLive(true);
+            setError(null);
+            // Initial join after 1s
             setTimeout(joinStream, 1000);
+            // Retry every 5s until we receive an offer (peerConnection gets created)
+            const retryInterval = setInterval(() => {
+              if (!peerConnectionRef.current) {
+                console.log("[simple] No offer received yet, retrying viewer-join");
+                joinStream();
+              } else {
+                clearInterval(retryInterval);
+              }
+            }, 5000);
+            // Store so cleanup can clear it
+            reconnectTimeoutRef.current = retryInterval as any;
           } else if (stream?.status === "ended") {
             setError("This stream has ended");
           } else {
@@ -291,10 +304,13 @@ export function useSimpleStream({
     joinStreamRef.current = joinStream;
 
     return () => {
+      if (reconnectTimeoutRef.current) {
+        clearInterval(reconnectTimeoutRef.current as any);
+      }
       leaveStream();
       supabase.removeChannel(channel);
     };
-  }, [roomCode, streamId, supabase]);
+  }, [roomCode, streamId]);
 
   return {
     viewerId: viewerIdRef.current,
