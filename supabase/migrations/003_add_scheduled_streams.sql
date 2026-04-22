@@ -14,7 +14,8 @@ CREATE INDEX IF NOT EXISTS idx_streams_scheduled_at ON streams(scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_streams_assigned_host ON streams(assigned_host_id);
 
 -- Allow assigned hosts to view streams they're assigned to
-CREATE POLICY IF NOT EXISTS "Assigned hosts can view their streams" ON streams
+DROP POLICY IF EXISTS "Assigned hosts can view their streams" ON streams;
+CREATE POLICY "Assigned hosts can view their streams" ON streams
   FOR SELECT USING (
     EXISTS (
       SELECT 1 FROM hosts
@@ -24,7 +25,8 @@ CREATE POLICY IF NOT EXISTS "Assigned hosts can view their streams" ON streams
   );
 
 -- Allow assigned hosts to update streams they're assigned to (start/stop)
-CREATE POLICY IF NOT EXISTS "Assigned hosts can update their streams" ON streams
+DROP POLICY IF EXISTS "Assigned hosts can update their streams" ON streams;
+CREATE POLICY "Assigned hosts can update their streams" ON streams
   FOR UPDATE USING (
     EXISTS (
       SELECT 1 FROM hosts
@@ -34,5 +36,6 @@ CREATE POLICY IF NOT EXISTS "Assigned hosts can update their streams" ON streams
   );
 
 -- Allow everyone to view scheduled streams (so viewers can see upcoming)
-CREATE POLICY IF NOT EXISTS "Everyone can view scheduled streams" ON streams
+DROP POLICY IF EXISTS "Everyone can view scheduled streams" ON streams;
+CREATE POLICY "Everyone can view scheduled streams" ON streams
   FOR SELECT USING (status = 'scheduled');
