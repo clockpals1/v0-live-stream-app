@@ -446,7 +446,7 @@ export function ViewerStreamInterface({
       // Register viewer in database
       await supabase.from("viewers").insert({
         stream_id: stream.id,
-        viewer_name: viewerName.trim(),
+        name: viewerName.trim(),
         joined_at: new Date().toISOString(),
       });
       
@@ -669,7 +669,7 @@ export function ViewerStreamInterface({
       setViewerName(savedName);
       supabase.from('viewers').insert({
         stream_id: stream.id,
-        viewer_name: savedName,
+        name: savedName,
         joined_at: new Date().toISOString(),
       }).then(() => {
         setHasJoined(true);

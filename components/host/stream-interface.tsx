@@ -30,6 +30,7 @@ import {
   Wifi,
   WifiOff,
   RotateCw,
+  RefreshCw,
   Smartphone,
   Settings,
   Camera,
@@ -79,10 +80,13 @@ export function HostStreamInterface({
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
+  const [isRefreshingChat, setIsRefreshingChat] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   const {
     mediaStream,
@@ -189,7 +193,21 @@ export function HostStreamInterface({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [stream.id, supabase]);
+  }, [stream.id]);
+
+  const refreshChat = async () => {
+    setIsRefreshingChat(true);
+    try {
+      const { data } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('stream_id', stream.id)
+        .order('created_at', { ascending: true });
+      if (data) setMessages(data);
+    } finally {
+      setIsRefreshingChat(false);
+    }
+  };
 
   // Subscribe to stream status changes
   useEffect(() => {
@@ -212,7 +230,7 @@ export function HostStreamInterface({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [stream.id, supabase]);
+  }, [stream.id]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -616,6 +634,19 @@ export function HostStreamInterface({
               <CardTitle className="flex items-center gap-2 text-base">
                 <MessageCircle className="w-4 h-4" />
                 Live Chat
+                <span className="ml-auto text-xs text-muted-foreground font-normal">
+                  {messages.length} msg{messages.length !== 1 ? 's' : ''}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={refreshChat}
+                  disabled={isRefreshingChat}
+                  className="h-7 w-7 p-0"
+                  title="Refresh chat"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingChat ? 'animate-spin' : ''}`} />
+                </Button>
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col p-0">
