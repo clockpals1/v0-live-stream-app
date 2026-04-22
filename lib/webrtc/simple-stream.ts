@@ -25,6 +25,7 @@ export function useSimpleStream({
   const [hostAudioEnabled, setHostAudioEnabled] = useState(true);
   const [connectionState, setConnectionState] = useState<string>("new");
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [isStreamPaused, setIsStreamPaused] = useState(false);
 
   const viewerIdRef = useRef<string>(Math.random().toString(36).substr(2, 9));
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -169,13 +170,13 @@ export function useSimpleStream({
 
         case "stream-pause": {
           console.log("[simple] Stream paused by host");
-          // Handle stream pause - could show a pause indicator
+          setIsStreamPaused(true);
           break;
         }
 
         case "stream-resume": {
           console.log("[simple] Stream resumed by host");
-          // Handle stream resume - hide pause indicator
+          setIsStreamPaused(false);
           break;
         }
       }
@@ -287,6 +288,7 @@ export function useSimpleStream({
     hostVideoEnabled,
     hostAudioEnabled,
     connectionState,
+    isStreamPaused,
     joinStream,
     leaveStream,
   };

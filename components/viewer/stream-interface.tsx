@@ -41,6 +41,7 @@ import {
   Monitor,
   Smartphone,
   Pause,
+  ArrowLeft,
 } from "lucide-react";
 
 interface Stream {
@@ -382,6 +383,18 @@ export function ViewerStreamInterface({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const formatDuration = (startedAt: string | null, endedAt: string | null): string => {
+    if (!startedAt) return 'unknown time';
+    
+    const start = new Date(startedAt);
+    const end = endedAt ? new Date(endedAt) : new Date();
+    const duration = Math.floor((end.getTime() - start.getTime()) / 1000);
+    
+    if (duration < 60) return `${duration} seconds`;
+    if (duration < 3600) return `${Math.floor(duration / 60)} minutes`;
+    return `${Math.floor(duration / 3600)}h ${Math.floor((duration % 3600) / 60)}m`;
+  };
+
   const toggleFullscreen = () => {
     if (videoRef.current) {
       if (!isFullscreen) {
@@ -523,15 +536,44 @@ export function ViewerStreamInterface({
     // Stream ended
     if (stream.status === "ended") {
       return (
-        <div className="absolute inset-0 flex items-center justify-center bg-muted">
-          <div className="text-center">
-            <Clock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-foreground mb-2">
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
+          <div className="text-center max-w-md mx-auto px-6">
+            <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-red-500">
+              <Circle className="w-10 h-10 text-red-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">
               Stream Ended
             </h2>
-            <p className="text-muted-foreground">
+            <p className="text-gray-300 text-lg mb-6">
               This stream has ended. Thank you for watching!
             </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-center gap-2 text-gray-400">
+                <Users className="w-4 h-4" />
+                <span className="text-sm">Stream was live for {formatDuration(stream.started_at, stream.ended_at)}</span>
+              </div>
+              <div className="flex items-center justify-center gap-2 text-gray-400">
+                <MessageCircle className="w-4 h-4" />
+                <span className="text-sm">{messages.length} messages sent</span>
+              </div>
+            </div>
+            <div className="mt-8 space-y-3">
+              <Button 
+                variant="outline" 
+                className="w-full border-gray-600 text-gray-300 hover:bg-gray-800"
+                onClick={() => window.location.href = '/'}
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Home
+              </Button>
+              <Button 
+                className="w-full bg-red-500 hover:bg-red-600 text-white"
+                onClick={copyShareLink}
+              >
+                <Share2 className="w-4 h-4 mr-2" />
+                {copied ? "Link Copied!" : "Share Stream"}
+              </Button>
+            </div>
           </div>
         </div>
       );
