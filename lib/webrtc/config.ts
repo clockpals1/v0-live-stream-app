@@ -43,6 +43,8 @@ export type SignalType =
   | "viewer-leave"
   | "stream-start"
   | "stream-end"
+  | "stream-pause"
+  | "stream-resume"
   | "track-toggle";
 
 export interface SignalMessage {

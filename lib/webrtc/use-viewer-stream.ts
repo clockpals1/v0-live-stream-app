@@ -190,6 +190,18 @@ export function useViewerStream({
           }
           break;
         }
+
+        case "stream-pause": {
+          console.log("[v0] Stream paused by host");
+          // Handle stream pause - could show a pause indicator
+          break;
+        }
+
+        case "stream-resume": {
+          console.log("[v0] Stream resumed by host");
+          // Handle stream resume - hide pause indicator
+          break;
+        }
       }
     },
     [onStreamEnd]

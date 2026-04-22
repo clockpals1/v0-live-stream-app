@@ -34,10 +34,12 @@ export function useSimpleStream({
   const supabase = createClient();
 
   // Simplified ICE servers with public STUN only
-  const SIMPLE_ICE_SERVERS = [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ];
+  const SIMPLE_ICE_SERVERS: RTCConfiguration = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ]
+  };
 
   // Handle incoming signals
   const handleSignal = useCallback(
@@ -164,6 +166,18 @@ export function useSimpleStream({
           }
           break;
         }
+
+        case "stream-pause": {
+          console.log("[simple] Stream paused by host");
+          // Handle stream pause - could show a pause indicator
+          break;
+        }
+
+        case "stream-resume": {
+          console.log("[simple] Stream resumed by host");
+          // Handle stream resume - hide pause indicator
+          break;
+        }
       }
     },
     [onStreamEnd]
@@ -231,10 +245,10 @@ export function useSimpleStream({
     });
 
     channel
-      .on("broadcast", { event: "signal" }, ({ payload }) => {
+      .on("broadcast", { event: "signal" }, ({ payload }: { payload: any }) => {
         handleSignal(payload);
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: any) => {
         console.log("[simple] Channel status:", status);
         if (status === "SUBSCRIBED") {
           // Check if stream is already live
