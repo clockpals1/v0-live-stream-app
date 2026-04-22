@@ -90,6 +90,7 @@ export function ViewerStreamInterface({
   const [showEmergencyDialog, setShowEmergencyDialog] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState("");
   const [emergencySent, setEmergencySent] = useState(false);
+  const [isRefreshingChat, setIsRefreshingChat] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -317,65 +318,137 @@ export function ViewerStreamInterface({
 
   // Subscribe to chat messages
   useEffect(() => {
-    const channel = supabase
-      .channel(`chat-${stream.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "chat_messages",
-          filter: `stream_id=eq.${stream.id}`,
-        },
-        (payload: any) => {
-          console.log('[Viewer] New chat message received:', payload.new);
-          setMessages((prev) => [...prev, payload.new as ChatMessage]);
-        }
-      )
-      .subscribe();
+    const setupChatChannel = async () => {
+      console.log('[Viewer] Setting up chat channel for stream:', stream.id);
+      
+      const channel = supabase
+        .channel(`chat-${stream.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "chat_messages",
+            filter: `stream_id=eq.${stream.id}`,
+          },
+          (payload: any) => {
+            console.log('[Viewer] New chat message received:', payload.new);
+            setMessages((prev) => [...prev, payload.new as ChatMessage]);
+          }
+        );
 
-    // Load existing messages
-    supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("stream_id", stream.id)
-      .order("created_at", { ascending: true })
-      .then(({ data }: { data: ChatMessage[] | null }) => {
-        console.log('[Viewer] Loaded existing messages:', data?.length || 0);
-        if (data) setMessages(data);
+      const subscription = await channel.subscribe((status) => {
+        console.log('[Viewer] Chat subscription status:', status);
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('[Viewer] Chat channel subscribed successfully');
+          // Load existing messages after subscription
+          loadExistingMessages();
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[Viewer] Chat channel error, retrying...');
+          setTimeout(() => setupChatChannel(), 2000);
+        }
       });
 
+      return () => {
+        console.log('[Viewer] Cleaning up chat channel');
+        supabase.removeChannel(channel);
+      };
+    };
+
+    const loadExistingMessages = async () => {
+      try {
+        console.log('[Viewer] Loading existing chat messages...');
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .select("*")
+          .eq("stream_id", stream.id)
+          .order("created_at", { ascending: true });
+
+        if (error) {
+          console.error('[Viewer] Error loading existing messages:', error);
+        } else {
+          console.log('[Viewer] Loaded existing messages:', data?.length || 0);
+          if (data) setMessages(data);
+        }
+      } catch (error) {
+        console.error('[Viewer] Exception loading existing messages:', error);
+      }
+    };
+
+    const cleanup = setupChatChannel();
+    
     return () => {
-      supabase.removeChannel(channel);
+      if (cleanup) cleanup();
     };
   }, [stream.id, supabase]);
 
   // Subscribe to viewer count
   useEffect(() => {
-    const channel = supabase
-      .channel(`viewers-watch-${stream.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "viewers",
-          filter: `stream_id=eq.${stream.id}`,
-        },
-        async () => {
-          const { count } = await supabase
-            .from("viewers")
-            .select("*", { count: "exact", head: true })
-            .eq("stream_id", stream.id)
-            .is("left_at", null);
+    const setupViewerCountChannel = async () => {
+      console.log('[Viewer] Setting up viewer count channel for stream:', stream.id);
+      
+      // Load initial viewer count
+      await loadViewerCount();
+      
+      const channel = supabase
+        .channel(`viewers-watch-${stream.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "viewers",
+            filter: `stream_id=eq.${stream.id}`,
+          },
+          async (payload) => {
+            console.log('[Viewer] Viewer table changed:', payload);
+            // Reload viewer count on any change
+            await loadViewerCount();
+          }
+        );
 
+      const subscription = await channel.subscribe((status) => {
+        console.log('[Viewer] Viewer count subscription status:', status);
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('[Viewer] Viewer count channel subscribed successfully');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('[Viewer] Viewer count channel error, retrying...');
+          setTimeout(() => setupViewerCountChannel(), 2000);
+        }
+      });
+
+      return () => {
+        console.log('[Viewer] Cleaning up viewer count channel');
+        supabase.removeChannel(channel);
+      };
+    };
+
+    const loadViewerCount = async () => {
+      try {
+        console.log('[Viewer] Loading viewer count...');
+        const { count, error } = await supabase
+          .from("viewers")
+          .select("*", { count: "exact", head: true })
+          .eq("stream_id", stream.id)
+          .is("left_at", null);
+
+        if (error) {
+          console.error('[Viewer] Error loading viewer count:', error);
+        } else {
+          console.log('[Viewer] Viewer count loaded:', count);
           setViewerCount(count || 0);
         }
-      )
-      .subscribe();
+      } catch (error) {
+        console.error('[Viewer] Exception loading viewer count:', error);
+      }
+    };
 
+    const cleanup = setupViewerCountChannel();
+    
     return () => {
-      supabase.removeChannel(channel);
+      if (cleanup) cleanup();
     };
   }, [stream.id, supabase]);
 
@@ -398,6 +471,13 @@ export function ViewerStreamInterface({
       setHasJoined(true);
       setShowNameDialog(false);
       console.log('[Viewer] Successfully joined stream with name:', viewerName);
+      
+      // Immediately update viewer count after joining
+      setTimeout(() => {
+        const currentCount = viewerCount;
+        setViewerCount(currentCount + 1);
+        console.log('[Viewer] Incremented viewer count to:', currentCount + 1);
+      }, 500);
     } catch (error) {
       console.error('[Viewer] Error joining stream:', error);
       // Still allow local join even if database fails
@@ -442,6 +522,31 @@ export function ViewerStreamInterface({
       console.log('[Viewer] Emergency message sent:', emergencyMessage);
     } catch (error) {
       console.error('[Viewer] Error sending emergency message:', error);
+    }
+  };
+
+  const refreshChat = async () => {
+    setIsRefreshingChat(true);
+    try {
+      console.log('[Viewer] Refreshing chat messages...');
+      
+      // Load existing messages
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("stream_id", stream.id)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error('[Viewer] Error refreshing chat:', error);
+      } else if (data) {
+        console.log('[Viewer] Chat refreshed, loaded', data.length, 'messages');
+        setMessages(data);
+      }
+    } catch (error) {
+      console.error('[Viewer] Error refreshing chat:', error);
+    } finally {
+      setIsRefreshingChat(false);
     }
   };
 
@@ -1104,8 +1209,18 @@ export function ViewerStreamInterface({
                 <CardTitle className="flex items-center gap-2 text-base">
                   <MessageCircle className="w-4 h-4" />
                   Live Chat
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={refreshChat}
+                    disabled={isRefreshingChat}
+                    className="ml-auto h-8 w-8 p-0"
+                    title="Refresh chat messages"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isRefreshingChat ? 'animate-spin' : ''}`} />
+                  </Button>
                   {hasJoined && viewerName !== "Guest" && (
-                    <Badge variant="secondary" className="ml-auto text-xs">
+                    <Badge variant="secondary" className="text-xs">
                       {viewerName}
                     </Badge>
                   )}
