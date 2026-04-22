@@ -116,17 +116,13 @@ export function ViewerStreamInterface({
     isStreamPaused,
   } = streamHook;
 
-  // Auto-switch to fallback if connection fails repeatedly
+  // Handle connection errors
   useEffect(() => {
-    if (error && !useFallback && retryCount >= 2) {
-      console.log("Switching to fallback streaming method");
-      setUseFallback(true);
-      setRetryCount(0);
-    }
     if (error) {
+      console.log("Connection error detected:", error);
       setRetryCount(prev => prev + 1);
     }
-  }, [error, useFallback, retryCount]);
+  }, [error, retryCount]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -712,7 +708,7 @@ export function ViewerStreamInterface({
       return (
         <Badge variant="secondary" className="gap-1">
           <Wifi className="w-3 h-3" />
-          Connected {useFallback && "(Fallback)"}
+          Connected
         </Badge>
       );
     }
@@ -736,7 +732,6 @@ export function ViewerStreamInterface({
 
   const handleRetry = () => {
     setRetryCount(0);
-    setUseFallback(!useFallback);
   };
 
   const getVideoContent = () => {
@@ -985,7 +980,7 @@ export function ViewerStreamInterface({
                   className="gap-2"
                 >
                   <RefreshCw className="w-4 h-4" />
-                  Try {useFallback ? "Standard" : "Fallback"} Connection
+                  Retry Connection
                 </Button>
               </div>
             )}
