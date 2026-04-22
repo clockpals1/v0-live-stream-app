@@ -126,6 +126,34 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
     };
   }, [host, supabase]);
 
+  // Load streams from database
+  useEffect(() => {
+    if (!host) return;
+
+    const loadStreams = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("streams")
+          .select("*")
+          .eq("host_id", host.id)
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("Error loading streams:", error);
+        } else {
+          console.log("Loaded streams:", data?.length || 0);
+          setStreams(data || []);
+        }
+      } catch (err) {
+        console.error("Exception loading streams:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadStreams();
+  }, [host, supabase]);
+
   // Load existing emergency messages
   useEffect(() => {
     if (!host) return;
@@ -181,6 +209,11 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
       return;
     }
 
+    // Reset form and loading state
+    setNewStreamTitle("");
+    setLoading(false);
+    
+    // Navigate to stream
     router.push(`/host/stream/${data.room_code}`);
   };
 
