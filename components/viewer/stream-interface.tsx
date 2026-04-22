@@ -233,7 +233,7 @@ export function ViewerStreamInterface({
     
     const handleError = (e: Event) => {
       console.error('[Viewer] Video error:', e);
-      setError('Video playback failed. Please try refreshing.');
+      // setError('Video playback failed. Please try refreshing.');
       const loadingOverlay = document.getElementById('video-loading');
       if (loadingOverlay) {
         loadingOverlay.classList.remove('opacity-100');
@@ -466,18 +466,19 @@ export function ViewerStreamInterface({
   const toggleFullscreen = async () => {
     try {
       if (!isFullscreen) {
-        // Enter fullscreen
-        const videoElement = videoRef.current;
-        if (!videoElement) return;
-
-        if (videoElement.requestFullscreen) {
-          await videoElement.requestFullscreen();
-        } else if ((videoElement as any).webkitRequestFullscreen) {
-          await (videoElement as any).webkitRequestFullscreen();
-        } else if ((videoElement as any).mozRequestFullScreen) {
-          await (videoElement as any).mozRequestFullScreen();
-        } else if ((videoElement as any).msRequestFullscreen) {
-          await (videoElement as any).msRequestFullscreen();
+        // Enter fullscreen - use document element for better compatibility
+        const element = document.documentElement;
+        
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if ((element as any).webkitRequestFullscreen) {
+          await (element as any).webkitRequestFullscreen();
+        } else if ((element as any).mozRequestFullScreen) {
+          await (element as any).mozRequestFullScreen();
+        } else if ((element as any).msRequestFullscreen) {
+          await (element as any).msRequestFullscreen();
+        } else {
+          console.warn('[Viewer] Fullscreen not supported');
         }
       } else {
         // Exit fullscreen

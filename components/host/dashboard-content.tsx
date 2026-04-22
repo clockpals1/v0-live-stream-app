@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -31,6 +31,8 @@ import {
   Pause,
   Play,
   Square,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -46,6 +48,15 @@ interface Stream {
   created_at: string;
 }
 
+interface EmergencyMessage {
+  id: string;
+  stream_id: string;
+  sender_name: string;
+  message: string;
+  created_at: string;
+  is_resolved: boolean;
+}
+
 interface Host {
   id: string;
   user_id: string;
@@ -59,12 +70,91 @@ interface DashboardContentProps {
   streams: Stream[];
 }
 
-export function DashboardContent({ user, host, streams }: DashboardContentProps) {
-  const [title, setTitle] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [deletingStream, setDeletingStream] = useState<string | null>(null);
+export function DashboardContent({ user, host }: DashboardContentProps) {
   const router = useRouter();
+  const [streams, setStreams] = useState<Stream[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newStreamTitle, setNewStreamTitle] = useState("");
+  const [emergencyMessages, setEmergencyMessages] = useState<EmergencyMessage[]>([]);
+  const [showEmergencyPanel, setShowEmergencyPanel] = useState(false);
+  const supabase = createClient();
+
+  // Subscribe to emergency messages
+  useEffect(() => {
+    if (!host) return;
+
+    const channel = supabase
+      .channel('emergency-messages')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `sender_name=like.SYSTEM%`,
+        },
+        (payload: any) => {
+          const message = payload.new;
+          if (message.message && message.message.includes('EMERGENCY:')) {
+            const emergencyMsg: EmergencyMessage = {
+              id: message.id,
+              stream_id: message.stream_id,
+              sender_name: message.sender_name,
+              message: message.message,
+              created_at: message.created_at,
+              is_resolved: false,
+            };
+            
+            setEmergencyMessages(prev => [emergencyMsg, ...prev]);
+            
+            // Show notification
+            toast.error(`Emergency message from ${message.sender_name.replace('SYSTEM - ', '')}`, {
+              duration: 10000,
+              action: {
+                label: 'View',
+                onClick: () => setShowEmergencyPanel(true),
+              },
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [host, supabase]);
+
+  // Load existing emergency messages
+  useEffect(() => {
+    if (!host) return;
+
+    const loadEmergencyMessages = async () => {
+      const { data } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .like('sender_name', 'SYSTEM%')
+        .like('message', 'EMERGENCY%')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (data) {
+        const emergencyMsgs = data.map(msg => ({
+          id: msg.id,
+          stream_id: msg.stream_id,
+          sender_name: msg.sender_name,
+          message: msg.message,
+          created_at: msg.created_at,
+          is_resolved: false,
+        }));
+        setEmergencyMessages(emergencyMsgs);
+      }
+    };
+
+    loadEmergencyMessages();
+  }, [host, supabase]);
+  const [deletingStream, setDeletingStream] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const handleCreateStream = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -233,6 +323,21 @@ export function DashboardContent({ user, host, streams }: DashboardContentProps)
             <span className="font-bold text-foreground">Isunday Stream Live</span>
           </Link>
           <div className="flex items-center gap-4">
+            {/* Emergency Notification Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowEmergencyPanel(true)}
+              className="relative"
+            >
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Emergency
+              {emergencyMessages.length > 0 && (
+                <Badge className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center p-0">
+                  {emergencyMessages.length}
+                </Badge>
+              )}
+            </Button>
             <span className="text-sm text-muted-foreground">
               {host.display_name || user.email}
             </span>
@@ -442,6 +547,81 @@ export function DashboardContent({ user, host, streams }: DashboardContentProps)
           </div>
         </div>
       </main>
+
+      {/* Emergency Panel Dialog */}
+      <AlertDialog open={showEmergencyPanel} onOpenChange={setShowEmergencyPanel}>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              Emergency Messages ({emergencyMessages.length})
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Viewer emergency messages and technical issues reported
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {emergencyMessages.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <AlertTriangle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No emergency messages reported</p>
+              </div>
+            ) : (
+              emergencyMessages.map((msg) => (
+                <Card key={msg.id} className="border-red-200 bg-red-50">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge className="bg-red-500 text-white">
+                            Emergency
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            From: {msg.sender_name.replace('SYSTEM - ', '')}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(msg.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-sm">
+                          {msg.message.replace('EMERGENCY: ', '')}
+                        </p>
+                        {msg.stream_id && (
+                          <div className="mt-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => router.push(`/host/stream/${msg.stream_id}`)}
+                            >
+                              Go to Stream
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEmergencyMessages(prev => prev.filter(m => m.id !== msg.id));
+                        }}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowEmergencyPanel(false)}>
+              Close
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
