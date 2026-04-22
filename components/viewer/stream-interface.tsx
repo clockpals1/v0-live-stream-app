@@ -30,10 +30,15 @@ import {
   Volume2,
   VolumeX,
   Maximize,
+  Minimize,
   Loader2,
   VideoOff,
   RefreshCw,
   AlertTriangle,
+  Settings,
+  WifiOff as DataSaver,
+  Monitor,
+  Smartphone,
 } from "lucide-react";
 
 interface Stream {
@@ -73,6 +78,11 @@ export function ViewerStreamInterface({
   const [isMuted, setIsMuted] = useState(false);
   const [useFallback, setUseFallback] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isDataSaver, setIsDataSaver] = useState(false);
+  const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const [showControls, setShowControls] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -162,7 +172,7 @@ export function ViewerStreamInterface({
   // Subscribe to chat messages
   useEffect(() => {
     const channel = supabase
-      .channel(`chat-viewer-${stream.id}`)
+      .channel(`chat-${stream.id}`)
       .on(
         "postgres_changes",
         {
@@ -172,6 +182,7 @@ export function ViewerStreamInterface({
           filter: `stream_id=eq.${stream.id}`,
         },
         (payload: any) => {
+          console.log('[Viewer] New chat message received:', payload.new);
           setMessages((prev) => [...prev, payload.new as ChatMessage]);
         }
       )
@@ -184,6 +195,7 @@ export function ViewerStreamInterface({
       .eq("stream_id", stream.id)
       .order("created_at", { ascending: true })
       .then(({ data }: { data: ChatMessage[] | null }) => {
+        console.log('[Viewer] Loaded existing messages:', data?.length || 0);
         if (data) setMessages(data);
       });
 
@@ -253,13 +265,104 @@ export function ViewerStreamInterface({
 
   const toggleFullscreen = () => {
     if (videoRef.current) {
-      if (document.fullscreenElement) {
-        document.exitFullscreen();
+      if (!isFullscreen) {
+        if (videoRef.current.requestFullscreen) {
+          videoRef.current.requestFullscreen();
+        } else if ((videoRef.current as any).webkitRequestFullscreen) {
+          (videoRef.current as any).webkitRequestFullscreen();
+        } else if ((videoRef.current as any).mozRequestFullScreen) {
+          (videoRef.current as any).mozRequestFullScreen();
+        }
       } else {
-        videoRef.current.requestFullscreen();
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          (document as any).mozCancelFullScreen();
+        }
       }
     }
   };
+
+  // Handle fullscreen change events
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobile(isMobileDevice);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Apply video quality settings
+  useEffect(() => {
+    if (videoRef.current && remoteStream) {
+      const videoTrack = remoteStream.getVideoTracks()[0];
+      if (videoTrack) {
+        const constraints = {
+          width: isDataSaver ? { ideal: 640 } : videoQuality === 'low' ? { ideal: 480 } : videoQuality === 'medium' ? { ideal: 720 } : videoQuality === 'high' ? { ideal: 1080 } : { ideal: 720 },
+          height: isDataSaver ? { ideal: 360 } : videoQuality === 'low' ? { ideal: 360 } : videoQuality === 'medium' ? { ideal: 480 } : videoQuality === 'high' ? { ideal: 720 } : { ideal: 480 },
+          frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 }
+        };
+        
+        // Apply constraints to the video track
+        videoTrack.applyConstraints(constraints).catch(err => {
+          console.log('Could not apply video constraints:', err);
+        });
+      }
+    }
+  }, [videoQuality, isDataSaver, remoteStream]);
+
+  // Auto-hide controls in fullscreen
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    
+    if (isFullscreen) {
+      const showControlsTemporarily = () => {
+        setShowControls(true);
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          setShowControls(false);
+        }, 3000);
+      };
+      
+      const handleMouseMove = () => showControlsTemporarily();
+      const handleTouchStart = () => showControlsTemporarily();
+      
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('touchstart', handleTouchStart);
+      
+      showControlsTemporarily();
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('touchstart', handleTouchStart);
+        clearTimeout(timeout);
+      };
+    } else {
+      setShowControls(true);
+    }
+  }, [isFullscreen]);
 
   const getConnectionStatusBadge = () => {
     if (stream.status === "ended") {
@@ -319,46 +422,111 @@ export function ViewerStreamInterface({
     if (isStreamLive && isConnected && remoteStream) {
       return (
         <>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            className={`w-full h-full object-cover ${
-              !hostVideoEnabled ? "hidden" : ""
-            }`}
-          />
-          {!hostVideoEnabled && (
-            <div className="absolute inset-0 flex items-center justify-center bg-muted">
-              <div className="text-center">
-                <VideoOff className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">
-                  Host has turned off their camera
-                </p>
+          <div className={`relative w-full h-full ${isFullscreen ? 'bg-black' : ''}`}>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted={isMuted}
+              className={`w-full h-full object-contain ${
+                !hostVideoEnabled ? "hidden" : ""
+              } ${isFullscreen ? 'max-h-screen' : ''}`}
+            />
+            
+            {!hostVideoEnabled && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted">
+                <div className="text-center">
+                  <VideoOff className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">
+                    Host has turned off their camera
+                  </p>
+                </div>
               </div>
+            )}
+            
+            {/* Enhanced video controls */}
+            <div 
+              className={`absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 transition-opacity duration-300 ${
+                showControls || !isFullscreen ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              {/* Quality selector */}
+              <div className="flex items-center bg-black/50 rounded-full px-3 py-2 gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20 p-1"
+                  onClick={() => setIsDataSaver(!isDataSaver)}
+                >
+                  <DataSaver className={`w-4 h-4 ${isDataSaver ? 'text-orange-400' : ''}`} />
+                </Button>
+                
+                <select
+                  value={videoQuality}
+                  onChange={(e) => setVideoQuality(e.target.value as any)}
+                  className="bg-transparent text-white text-sm border-none outline-none cursor-pointer"
+                >
+                  <option value="auto" className="bg-gray-800">Auto</option>
+                  <option value="high" className="bg-gray-800">1080p</option>
+                  <option value="medium" className="bg-gray-800">720p</option>
+                  <option value="low" className="bg-gray-800">480p</option>
+                </select>
+              </div>
+              
+              {/* Audio control */}
+              <Button
+                variant="secondary"
+                size="icon"
+                className="rounded-full bg-black/50 hover:bg-black/70 text-white"
+                onClick={() => setIsMuted(!isMuted)}
+              >
+                {isMuted ? (
+                  <VolumeX className="w-5 h-5" />
+                ) : (
+                  <Volume2 className="w-5 h-5" />
+                )}
+              </Button>
+              
+              {/* Fullscreen control */}
+              <Button
+                variant="secondary"
+                size="icon"
+                className="rounded-full bg-black/50 hover:bg-black/70 text-white"
+                onClick={toggleFullscreen}
+              >
+                {isFullscreen ? (
+                  <Minimize className="w-5 h-5" />
+                ) : (
+                  <Maximize className="w-5 h-5" />
+                )}
+              </Button>
             </div>
-          )}
-          {/* Video controls */}
-          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="icon"
-              className="rounded-full bg-black/50 hover:bg-black/70"
-              onClick={() => setIsMuted(!isMuted)}
-            >
-              {isMuted ? (
-                <VolumeX className="w-5 h-5 text-white" />
-              ) : (
-                <Volume2 className="w-5 h-5 text-white" />
+            
+            {/* Status indicators */}
+            <div className={`absolute top-4 right-4 flex items-center gap-2 transition-opacity duration-300 ${
+              showControls || !isFullscreen ? 'opacity-100' : 'opacity-0'
+            }`}>
+              {isDataSaver && (
+                <Badge className="bg-orange-500 text-white text-xs">
+                  <DataSaver className="w-3 h-3 mr-1" />
+                  Data Saver
+                </Badge>
               )}
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon"
-              className="rounded-full bg-black/50 hover:bg-black/70"
-              onClick={toggleFullscreen}
-            >
-              <Maximize className="w-5 h-5 text-white" />
-            </Button>
+              {isMobile && (
+                <Badge variant="outline" className="text-xs">
+                  <Smartphone className="w-3 h-3 mr-1" />
+                  Mobile
+                </Badge>
+              )}
+            </div>
+            
+            {/* Click to show controls in fullscreen */}
+            {isFullscreen && (
+              <div 
+                className="absolute inset-0 cursor-default"
+                onClick={() => setShowControls(true)}
+              />
+            )}
           </div>
         </>
       );
@@ -429,19 +597,18 @@ export function ViewerStreamInterface({
               Enter your name to join the chat and interact with others
             </DialogDescription>
           </DialogHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              joinStream();
-            }}
-            className="flex flex-col gap-4"
-          >
-            <Input
-              placeholder="Your name"
-              value={viewerName}
-              onChange={(e) => setViewerName(e.target.value)}
-              autoFocus
-            />
+          <form onSubmit={joinStream}>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="name">Your Name</Label>
+                <Input
+                  id="name"
+                  placeholder="Enter your name"
+                  value={viewerName}
+                  onChange={(e) => setViewerName(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 type="button"

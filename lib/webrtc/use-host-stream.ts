@@ -19,6 +19,7 @@ interface UseHostStreamProps {
 
 export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [viewerCount, setViewerCount] = useState(0);
@@ -287,7 +288,62 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     });
 
     setIsStreaming(false);
+    setIsPaused(false);
   }, [streamId, isRecording, supabase]);
+
+  // Pause streaming
+  const pauseStream = useCallback(async () => {
+    if (!isStreaming || isPaused) return;
+
+    // Pause recording
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.pause();
+    }
+
+    // Disable video tracks to save bandwidth
+    if (mediaStreamRef.current) {
+      const videoTrack = mediaStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = false;
+      }
+    }
+
+    // Broadcast pause signal to viewers
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { type: "stream-pause", from: "host" } as SignalMessage,
+    });
+
+    setIsPaused(true);
+  }, [isStreaming, isPaused, isRecording]);
+
+  // Resume streaming
+  const resumeStream = useCallback(async () => {
+    if (!isStreaming || !isPaused) return;
+
+    // Resume recording
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.resume();
+    }
+
+    // Re-enable video tracks
+    if (mediaStreamRef.current) {
+      const videoTrack = mediaStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = videoEnabled;
+      }
+    }
+
+    // Broadcast resume signal to viewers
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { type: "stream-resume", from: "host" } as SignalMessage,
+    });
+
+    setIsPaused(false);
+  }, [isStreaming, isPaused, isRecording, videoEnabled]);
 
   // Toggle video
   const toggleVideo = useCallback(() => {
@@ -387,6 +443,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     mediaStream: mediaStreamRef.current,
     initializeMedia,
     isStreaming,
+    isPaused,
     videoEnabled,
     audioEnabled,
     viewerCount,
@@ -396,6 +453,8 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     hasRecording: recordedChunks.length > 0,
     startStream,
     stopStream,
+    pauseStream,
+    resumeStream,
     toggleVideo,
     toggleAudio,
     downloadRecording,

@@ -29,6 +29,13 @@ import {
   AlertCircle,
   Wifi,
   WifiOff,
+  RotateCw,
+  Smartphone,
+  Settings,
+  Camera,
+  WifiOff as DataSaver,
+  Pause,
+  Play,
 } from "lucide-react";
 
 interface Stream {
@@ -67,6 +74,10 @@ export function HostStreamInterface({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [mediaInitialized, setMediaInitialized] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<'user' | 'environment'>('user');
+  const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const [isDataSaver, setIsDataSaver] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,6 +88,7 @@ export function HostStreamInterface({
     mediaStream,
     initializeMedia,
     isStreaming,
+    isPaused,
     videoEnabled,
     audioEnabled,
     viewerCount,
@@ -86,6 +98,8 @@ export function HostStreamInterface({
     hasRecording,
     startStream,
     stopStream,
+    pauseStream,
+    resumeStream,
     toggleVideo,
     toggleAudio,
     downloadRecording,
@@ -98,6 +112,18 @@ export function HostStreamInterface({
     typeof window !== "undefined"
       ? `${window.location.origin}/watch/${stream.room_code}`
       : "";
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobile(isMobileDevice);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Initialize camera on mount
   useEffect(() => {
@@ -136,6 +162,7 @@ export function HostStreamInterface({
           filter: `stream_id=eq.${stream.id}`,
         },
         (payload: any) => {
+          console.log('[Host] New chat message received:', payload.new);
           setMessages((prev) => [...prev, payload.new as ChatMessage]);
         }
       )
@@ -190,6 +217,70 @@ export function HostStreamInterface({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const rotateCamera = async () => {
+    if (!isMobile) return;
+    
+    const newFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+    setCameraFacingMode(newFacingMode);
+    
+    try {
+      // Stop current stream
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Get media constraints for new camera
+      const constraints = {
+        video: {
+          facingMode: newFacingMode,
+          width: isDataSaver ? { ideal: 640 } : videoQuality === 'low' ? { ideal: 480 } : videoQuality === 'medium' ? { ideal: 720 } : videoQuality === 'high' ? { ideal: 1080 } : { ideal: 720 },
+          height: isDataSaver ? { ideal: 360 } : videoQuality === 'low' ? { ideal: 360 } : videoQuality === 'medium' ? { ideal: 480 } : videoQuality === 'high' ? { ideal: 720 } : { ideal: 480 },
+          frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 }
+        },
+        audio: true
+      };
+      
+      // Get new stream with rotated camera
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      
+      // Update the host stream hook with new media
+      await initializeMedia();
+      
+    } catch (err) {
+      console.error('Failed to rotate camera:', err);
+    }
+  };
+
+  const updateVideoQuality = async () => {
+    if (!mediaStream) return;
+    
+    const videoTrack = mediaStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+    
+    const constraints = {
+      width: isDataSaver ? { ideal: 640 } : videoQuality === 'low' ? { ideal: 480 } : videoQuality === 'medium' ? { ideal: 720 } : videoQuality === 'high' ? { ideal: 1080 } : { ideal: 720 },
+      height: isDataSaver ? { ideal: 360 } : videoQuality === 'low' ? { ideal: 360 } : videoQuality === 'medium' ? { ideal: 480 } : videoQuality === 'high' ? { ideal: 720 } : { ideal: 480 },
+      frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 }
+    };
+    
+    try {
+      await videoTrack.applyConstraints(constraints);
+    } catch (err) {
+      console.log('Could not apply video constraints:', err);
+    }
+  };
+
+  // Apply quality changes when settings change
+  useEffect(() => {
+    if (mediaInitialized) {
+      updateVideoQuality();
+    }
+  }, [videoQuality, isDataSaver, mediaInitialized]);
+
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
@@ -236,10 +327,16 @@ export function HostStreamInterface({
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {isStreaming && (
+            {isStreaming && !isPaused && (
               <Badge className="bg-red-500 text-white animate-pulse">
                 <Circle className="w-2 h-2 mr-1 fill-current" />
                 LIVE
+              </Badge>
+            )}
+            {isStreaming && isPaused && (
+              <Badge className="bg-orange-500 text-white">
+                <Pause className="w-2 h-2 mr-1" />
+                PAUSED
               </Badge>
             )}
             {isRecording && (
@@ -272,6 +369,27 @@ export function HostStreamInterface({
             <Card className="overflow-hidden">
               <CardContent className="p-0">
                 <div className="relative aspect-video bg-black">
+                  {/* Status indicators */}
+                  <div className="absolute top-4 right-4 flex items-center gap-2">
+                    {isMobile && (
+                      <Badge variant="outline" className="text-xs bg-black/50 text-white border-white/20">
+                        <Smartphone className="w-3 h-3 mr-1" />
+                        Mobile
+                      </Badge>
+                    )}
+                    {isDataSaver && (
+                      <Badge className="bg-orange-500 text-white text-xs">
+                        <DataSaver className="w-3 h-3 mr-1" />
+                        Data Saver
+                      </Badge>
+                    )}
+                    {cameraFacingMode === 'environment' && (
+                      <Badge variant="outline" className="text-xs bg-black/50 text-white border-white/20">
+                        <Camera className="w-3 h-3 mr-1" />
+                        Rear Camera
+                      </Badge>
+                    )}
+                  </div>
                   <video
                     ref={videoRef}
                     autoPlay
@@ -287,6 +405,45 @@ export function HostStreamInterface({
                     </div>
                   )}
                   <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2">
+                    {/* Camera rotation for mobile */}
+                    {isMobile && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="rounded-full bg-black/50 hover:bg-black/70 text-white border-white/20"
+                        onClick={rotateCamera}
+                        disabled={!mediaInitialized || isStreaming}
+                      >
+                        <RotateCw className="w-5 h-5" />
+                      </Button>
+                    )}
+                    
+                    {/* Quality controls */}
+                    <div className="flex items-center bg-black/50 rounded-full px-3 py-2 gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-white hover:bg-white/20 p-1"
+                        onClick={() => setIsDataSaver(!isDataSaver)}
+                        disabled={isStreaming}
+                      >
+                        <DataSaver className={`w-4 h-4 ${isDataSaver ? 'text-orange-400' : ''}`} />
+                      </Button>
+                      
+                      <select
+                        value={videoQuality}
+                        onChange={(e) => setVideoQuality(e.target.value as any)}
+                        className="bg-transparent text-white text-sm border-none outline-none cursor-pointer"
+                        disabled={isStreaming}
+                      >
+                        <option value="auto" className="bg-gray-800">Auto</option>
+                        <option value="high" className="bg-gray-800">1080p</option>
+                        <option value="medium" className="bg-gray-800">720p</option>
+                        <option value="low" className="bg-gray-800">480p</option>
+                      </select>
+                    </div>
+                    
+                    {/* Video/Audio controls */}
                     <Button
                       variant={videoEnabled ? "secondary" : "destructive"}
                       size="icon"
@@ -364,10 +521,23 @@ export function HostStreamInterface({
                     </Button>
                   </>
                 ) : isStreaming ? (
-                  <Button variant="destructive" onClick={handleEndStream}>
-                    <Square className="w-4 h-4 mr-2" />
-                    End Stream
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {isPaused ? (
+                      <Button variant="default" onClick={resumeStream}>
+                        <Play className="w-4 h-4 mr-2" />
+                        Resume
+                      </Button>
+                    ) : (
+                      <Button variant="outline" onClick={pauseStream}>
+                        <Pause className="w-4 h-4 mr-2" />
+                        Pause
+                      </Button>
+                    )}
+                    <Button variant="destructive" onClick={handleEndStream}>
+                      <Square className="w-4 h-4 mr-2" />
+                      End Stream
+                    </Button>
+                  </div>
                 ) : (
                   <Button
                     onClick={handleStartStream}
