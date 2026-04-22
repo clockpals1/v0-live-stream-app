@@ -1,0 +1,403 @@
+"use client";
+
+import { useState, useRef, useCallback, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { RealtimeChannel } from "@supabase/supabase-js";
+import { ICE_SERVERS, SignalMessage, HOST_MEDIA_CONSTRAINTS, MAX_VIEWERS } from "./config";
+
+interface ViewerConnection {
+  id: string;
+  name: string;
+  peerConnection: RTCPeerConnection;
+  connected: boolean;
+}
+
+interface UseHostStreamProps {
+  streamId: string;
+  roomCode: string;
+}
+
+export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [viewerCount, setViewerCount] = useState(0);
+  const [viewers, setViewers] = useState<Map<string, ViewerConnection>>(new Map());
+  const [error, setError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
+
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const supabase = createClient();
+
+  // Initialize media stream
+  const initializeMedia = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(HOST_MEDIA_CONSTRAINTS);
+      mediaStreamRef.current = stream;
+      return stream;
+    } catch (err) {
+      console.error("[v0] Error getting user media:", err);
+      setError("Failed to access camera/microphone. Please check permissions.");
+      throw err;
+    }
+  }, []);
+
+  // Create peer connection for a viewer
+  const createPeerConnection = useCallback(
+    async (viewerId: string, viewerName: string) => {
+      if (viewersRef.current.size >= MAX_VIEWERS) {
+        console.log("[v0] Max viewers reached, rejecting:", viewerId);
+        return null;
+      }
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+
+      // Add local tracks to the connection
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, mediaStreamRef.current!);
+        });
+      }
+
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && channelRef.current) {
+          const message: SignalMessage = {
+            type: "ice-candidate",
+            from: "host",
+            to: viewerId,
+            payload: event.candidate.toJSON(),
+          };
+          channelRef.current.send({
+            type: "broadcast",
+            event: "signal",
+            payload: message,
+          });
+        }
+      };
+
+      // Handle connection state changes
+      pc.onconnectionstatechange = () => {
+        console.log(`[v0] Connection state for ${viewerId}:`, pc.connectionState);
+        if (pc.connectionState === "connected") {
+          const viewer = viewersRef.current.get(viewerId);
+          if (viewer) {
+            viewer.connected = true;
+            viewersRef.current.set(viewerId, viewer);
+            setViewers(new Map(viewersRef.current));
+            setViewerCount(viewersRef.current.size);
+          }
+        } else if (
+          pc.connectionState === "disconnected" ||
+          pc.connectionState === "failed" ||
+          pc.connectionState === "closed"
+        ) {
+          removeViewer(viewerId);
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[v0] ICE state for ${viewerId}:`, pc.iceConnectionState);
+      };
+
+      const viewerConnection: ViewerConnection = {
+        id: viewerId,
+        name: viewerName,
+        peerConnection: pc,
+        connected: false,
+      };
+
+      viewersRef.current.set(viewerId, viewerConnection);
+      setViewers(new Map(viewersRef.current));
+
+      return pc;
+    },
+    []
+  );
+
+  // Remove a viewer
+  const removeViewer = useCallback((viewerId: string) => {
+    const viewer = viewersRef.current.get(viewerId);
+    if (viewer) {
+      viewer.peerConnection.close();
+      viewersRef.current.delete(viewerId);
+      setViewers(new Map(viewersRef.current));
+      setViewerCount(viewersRef.current.size);
+    }
+  }, []);
+
+  // Handle incoming signals
+  const handleSignal = useCallback(
+    async (message: SignalMessage) => {
+      if (message.to && message.to !== "host") return;
+
+      switch (message.type) {
+        case "viewer-join": {
+          console.log("[v0] Viewer joining:", message.from, message.viewerName);
+          
+          if (viewersRef.current.size >= MAX_VIEWERS) {
+            console.log("[v0] Max viewers reached");
+            return;
+          }
+
+          const pc = await createPeerConnection(message.from, message.viewerName || "Anonymous");
+          if (!pc) return;
+
+          // Create and send offer
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            const signalMessage: SignalMessage = {
+              type: "offer",
+              from: "host",
+              to: message.from,
+              payload: pc.localDescription?.toJSON(),
+            };
+
+            channelRef.current?.send({
+              type: "broadcast",
+              event: "signal",
+              payload: signalMessage,
+            });
+          } catch (err) {
+            console.error("[v0] Error creating offer:", err);
+          }
+          break;
+        }
+
+        case "answer": {
+          const viewer = viewersRef.current.get(message.from);
+          if (viewer && message.payload) {
+            try {
+              await viewer.peerConnection.setRemoteDescription(
+                new RTCSessionDescription(message.payload as RTCSessionDescriptionInit)
+              );
+            } catch (err) {
+              console.error("[v0] Error setting remote description:", err);
+            }
+          }
+          break;
+        }
+
+        case "ice-candidate": {
+          const viewer = viewersRef.current.get(message.from);
+          if (viewer && message.payload) {
+            try {
+              await viewer.peerConnection.addIceCandidate(
+                new RTCIceCandidate(message.payload as RTCIceCandidateInit)
+              );
+            } catch (err) {
+              console.error("[v0] Error adding ICE candidate:", err);
+            }
+          }
+          break;
+        }
+
+        case "viewer-leave": {
+          removeViewer(message.from);
+          break;
+        }
+      }
+    },
+    [createPeerConnection, removeViewer]
+  );
+
+  // Start streaming
+  const startStream = useCallback(async () => {
+    try {
+      // Make sure media is initialized
+      if (!mediaStreamRef.current) {
+        await initializeMedia();
+      }
+
+      // Update stream status in database
+      await supabase
+        .from("streams")
+        .update({ status: "live", started_at: new Date().toISOString() })
+        .eq("id", streamId);
+
+      // Start recording
+      if (mediaStreamRef.current) {
+        try {
+          const mediaRecorder = new MediaRecorder(mediaStreamRef.current, {
+            mimeType: "video/webm;codecs=vp9,opus",
+          });
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              setRecordedChunks((prev) => [...prev, event.data]);
+            }
+          };
+
+          mediaRecorderRef.current = mediaRecorder;
+          mediaRecorder.start(1000);
+          setIsRecording(true);
+        } catch (err) {
+          console.error("[v0] Recording not supported:", err);
+        }
+      }
+
+      // Broadcast stream start to all viewers
+      channelRef.current?.send({
+        type: "broadcast",
+        event: "signal",
+        payload: { type: "stream-start", from: "host" } as SignalMessage,
+      });
+
+      setIsStreaming(true);
+      setError(null);
+    } catch (err) {
+      console.error("[v0] Error starting stream:", err);
+      setError("Failed to start stream");
+    }
+  }, [streamId, initializeMedia, supabase]);
+
+  // Stop streaming
+  const stopStream = useCallback(async () => {
+    // Stop recording
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+
+    // Close all peer connections
+    viewersRef.current.forEach((viewer) => {
+      viewer.peerConnection.close();
+    });
+    viewersRef.current.clear();
+    setViewers(new Map());
+    setViewerCount(0);
+
+    // Update stream status
+    await supabase
+      .from("streams")
+      .update({ status: "ended", ended_at: new Date().toISOString() })
+      .eq("id", streamId);
+
+    // Broadcast stream end
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { type: "stream-end", from: "host" } as SignalMessage,
+    });
+
+    setIsStreaming(false);
+  }, [streamId, isRecording, supabase]);
+
+  // Toggle video
+  const toggleVideo = useCallback(() => {
+    if (mediaStreamRef.current) {
+      const videoTrack = mediaStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setVideoEnabled(videoTrack.enabled);
+
+        // Notify viewers
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "signal",
+          payload: {
+            type: "track-toggle",
+            from: "host",
+            payload: { video: videoTrack.enabled },
+          } as SignalMessage,
+        });
+      }
+    }
+  }, []);
+
+  // Toggle audio
+  const toggleAudio = useCallback(() => {
+    if (mediaStreamRef.current) {
+      const audioTrack = mediaStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setAudioEnabled(audioTrack.enabled);
+
+        // Notify viewers
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "signal",
+          payload: {
+            type: "track-toggle",
+            from: "host",
+            payload: { audio: audioTrack.enabled },
+          } as SignalMessage,
+        });
+      }
+    }
+  }, []);
+
+  // Download recording
+  const downloadRecording = useCallback(() => {
+    if (recordedChunks.length === 0) return;
+
+    const blob = new Blob(recordedChunks, { type: "video/webm" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `stream-${roomCode}-${Date.now()}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [recordedChunks, roomCode]);
+
+  // Set up signaling channel
+  useEffect(() => {
+    const channel = supabase.channel(`stream-signal-${roomCode}`, {
+      config: {
+        broadcast: { self: false },
+      },
+    });
+
+    channel
+      .on("broadcast", { event: "signal" }, ({ payload }) => {
+        handleSignal(payload as SignalMessage);
+      })
+      .subscribe((status) => {
+        console.log("[v0] Host channel status:", status);
+      });
+
+    channelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomCode, handleSignal, supabase]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      viewersRef.current.forEach((viewer) => {
+        viewer.peerConnection.close();
+      });
+    };
+  }, []);
+
+  return {
+    mediaStream: mediaStreamRef.current,
+    initializeMedia,
+    isStreaming,
+    videoEnabled,
+    audioEnabled,
+    viewerCount,
+    viewers: Array.from(viewers.values()),
+    error,
+    isRecording,
+    hasRecording: recordedChunks.length > 0,
+    startStream,
+    stopStream,
+    toggleVideo,
+    toggleAudio,
+    downloadRecording,
+  };
+}

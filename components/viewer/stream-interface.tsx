@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { useViewerStream } from "@/lib/webrtc/use-viewer-stream";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,13 @@ import {
   MessageCircle,
   Clock,
   Share2,
-  Copy,
+  Wifi,
+  WifiOff,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Loader2,
+  VideoOff,
 } from "lucide-react";
 
 interface Stream {
@@ -48,55 +55,60 @@ interface ViewerStreamInterfaceProps {
   hostName: string;
 }
 
-export function ViewerStreamInterface({ stream: initialStream, hostName }: ViewerStreamInterfaceProps) {
+export function ViewerStreamInterface({
+  stream: initialStream,
+  hostName,
+}: ViewerStreamInterfaceProps) {
   const [stream, setStream] = useState(initialStream);
   const [viewerName, setViewerName] = useState("");
-  const [isJoined, setIsJoined] = useState(false);
-  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [hasJoined, setHasJoined] = useState(false);
   const [viewerCount, setViewerCount] = useState(initialStream.viewer_count);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
 
+  const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
-  const shareLink = typeof window !== "undefined" 
-    ? `${window.location.origin}/watch/${stream.room_code}` 
-    : "";
+  const handleStreamEnd = useCallback(() => {
+    setStream((prev) => ({ ...prev, status: "ended" }));
+  }, []);
 
-  // Join stream as viewer
-  const joinStream = async () => {
-    if (!viewerName.trim()) return;
+  const {
+    isConnected,
+    isStreamLive,
+    remoteStream,
+    error,
+    hostVideoEnabled,
+    connectionState,
+  } = useViewerStream({
+    streamId: stream.id,
+    roomCode: stream.room_code,
+    viewerName: hasJoined ? viewerName : "",
+    onStreamEnd: handleStreamEnd,
+  });
 
-    const { data } = await supabase
-      .from("viewers")
-      .insert({
-        stream_id: stream.id,
-        viewer_name: viewerName.trim(),
-      })
-      .select()
-      .single();
+  const shareLink =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/watch/${stream.room_code}`
+      : "";
 
-    if (data) {
-      setViewerId(data.id);
-      setIsJoined(true);
-      setShowNameDialog(false);
-    }
-  };
-
-  // Leave stream on unmount
+  // Update video element when remote stream changes
   useEffect(() => {
-    return () => {
-      if (viewerId) {
-        supabase
-          .from("viewers")
-          .update({ left_at: new Date().toISOString() })
-          .eq("id", viewerId);
-      }
-    };
-  }, [viewerId, supabase]);
+    if (videoRef.current && remoteStream) {
+      videoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  // Handle mute/unmute
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
 
   // Subscribe to stream status changes
   useEffect(() => {
@@ -172,7 +184,7 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
             .select("*", { count: "exact", head: true })
             .eq("stream_id", stream.id)
             .is("left_at", null);
-          
+
           setViewerCount(count || 0);
         }
       )
@@ -188,9 +200,15 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const joinStream = () => {
+    if (!viewerName.trim()) return;
+    setHasJoined(true);
+    setShowNameDialog(false);
+  };
+
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !isJoined) return;
+    if (!newMessage.trim() || !hasJoined) return;
 
     await supabase.from("chat_messages").insert({
       stream_id: stream.id,
@@ -207,50 +225,156 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const getStatusContent = () => {
-    switch (stream.status) {
-      case "live":
-        return (
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
-            <div className="text-center">
-              <div className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                <Radio className="w-12 h-12 text-primary" />
-              </div>
-              <h2 className="text-2xl font-bold text-foreground mb-2">Stream is Live!</h2>
-              <p className="text-muted-foreground">
-                {hostName} is broadcasting
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Note: This is a demo - video feed requires WebRTC signaling server
-              </p>
-            </div>
-          </div>
-        );
-      case "ended":
-        return (
-          <div className="absolute inset-0 flex items-center justify-center bg-muted">
-            <div className="text-center">
-              <Clock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-              <h2 className="text-xl font-semibold text-foreground mb-2">Stream Ended</h2>
-              <p className="text-muted-foreground">
-                This stream has ended. Thank you for watching!
-              </p>
-            </div>
-          </div>
-        );
-      default:
-        return (
-          <div className="absolute inset-0 flex items-center justify-center bg-muted">
-            <div className="text-center">
-              <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <h2 className="text-xl font-semibold text-foreground mb-2">Waiting for Host</h2>
-              <p className="text-muted-foreground">
-                {hostName} will start the stream soon
-              </p>
-            </div>
-          </div>
-        );
+  const toggleFullscreen = () => {
+    if (videoRef.current) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        videoRef.current.requestFullscreen();
+      }
     }
+  };
+
+  const getConnectionStatusBadge = () => {
+    if (stream.status === "ended") {
+      return null;
+    }
+
+    if (isConnected) {
+      return (
+        <Badge variant="secondary" className="gap-1">
+          <Wifi className="w-3 h-3" />
+          Connected
+        </Badge>
+      );
+    }
+
+    if (connectionState === "connecting" || connectionState === "new") {
+      return (
+        <Badge variant="outline" className="gap-1">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Connecting...
+        </Badge>
+      );
+    }
+
+    return (
+      <Badge variant="outline" className="gap-1">
+        <WifiOff className="w-3 h-3" />
+        Disconnected
+      </Badge>
+    );
+  };
+
+  const getVideoContent = () => {
+    // Stream ended
+    if (stream.status === "ended") {
+      return (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted">
+          <div className="text-center">
+            <Clock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-foreground mb-2">
+              Stream Ended
+            </h2>
+            <p className="text-muted-foreground">
+              This stream has ended. Thank you for watching!
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // Stream is live and connected with video
+    if (isStreamLive && isConnected && remoteStream) {
+      return (
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className={`w-full h-full object-cover ${
+              !hostVideoEnabled ? "hidden" : ""
+            }`}
+          />
+          {!hostVideoEnabled && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted">
+              <div className="text-center">
+                <VideoOff className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">
+                  Host has turned off their camera
+                </p>
+              </div>
+            </div>
+          )}
+          {/* Video controls */}
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="rounded-full bg-black/50 hover:bg-black/70"
+              onClick={() => setIsMuted(!isMuted)}
+            >
+              {isMuted ? (
+                <VolumeX className="w-5 h-5 text-white" />
+              ) : (
+                <Volume2 className="w-5 h-5 text-white" />
+              )}
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="rounded-full bg-black/50 hover:bg-black/70"
+              onClick={toggleFullscreen}
+            >
+              <Maximize className="w-5 h-5 text-white" />
+            </Button>
+          </div>
+        </>
+      );
+    }
+
+    // Stream is live but still connecting
+    if (stream.status === "live" || isStreamLive) {
+      return (
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+          <div className="text-center">
+            <div className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              {isConnected ? (
+                <Radio className="w-12 h-12 text-primary animate-pulse" />
+              ) : (
+                <Loader2 className="w-12 h-12 text-primary animate-spin" />
+              )}
+            </div>
+            <h2 className="text-2xl font-bold text-foreground mb-2">
+              {isConnected ? "Stream is Live!" : "Connecting to Stream..."}
+            </h2>
+            <p className="text-muted-foreground">
+              {isConnected
+                ? `${hostName} is broadcasting`
+                : "Please wait while we connect you"}
+            </p>
+            {error && (
+              <p className="text-sm text-destructive mt-2">{error}</p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Waiting for host
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-muted">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-foreground mb-2">
+            Waiting for Host
+          </h2>
+          <p className="text-muted-foreground">
+            {hostName} will start the stream soon
+          </p>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -281,11 +405,19 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
                 type="button"
                 variant="outline"
                 className="flex-1"
-                onClick={() => setShowNameDialog(false)}
+                onClick={() => {
+                  setViewerName("Guest");
+                  setHasJoined(true);
+                  setShowNameDialog(false);
+                }}
               >
                 Watch Only
               </Button>
-              <Button type="submit" className="flex-1" disabled={!viewerName.trim()}>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={!viewerName.trim()}
+              >
                 Join Chat
               </Button>
             </div>
@@ -300,7 +432,9 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Radio className="w-4 h-4 text-primary-foreground" />
               </div>
-              <span className="font-bold text-foreground">Isunday Stream Live</span>
+              <span className="font-bold text-foreground">
+                Isunday Stream Live
+              </span>
             </Link>
             <div className="flex items-center gap-4">
               {stream.status === "live" && (
@@ -324,7 +458,11 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
               <Card className="overflow-hidden">
                 <CardContent className="p-0">
                   <div className="relative aspect-video bg-black">
-                    {getStatusContent()}
+                    {getVideoContent()}
+                    {/* Connection status */}
+                    <div className="absolute top-4 right-4">
+                      {getConnectionStatusBadge()}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -332,8 +470,12 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
               {/* Stream Info */}
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h1 className="text-xl font-semibold text-foreground">{stream.title}</h1>
-                  <p className="text-sm text-muted-foreground">Hosted by {hostName}</p>
+                  <h1 className="text-xl font-semibold text-foreground">
+                    {stream.title}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    Hosted by {hostName}
+                  </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={copyShareLink}>
                   {copied ? (
@@ -354,7 +496,7 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
                 <CardTitle className="flex items-center gap-2 text-base">
                   <MessageCircle className="w-4 h-4" />
                   Live Chat
-                  {isJoined && (
+                  {hasJoined && viewerName !== "Guest" && (
                     <Badge variant="secondary" className="ml-auto text-xs">
                       {viewerName}
                     </Badge>
@@ -379,15 +521,20 @@ export function ViewerStreamInterface({ stream: initialStream, hostName }: Viewe
                               {new Date(msg.created_at).toLocaleTimeString()}
                             </span>
                           </div>
-                          <p className="text-sm text-muted-foreground">{msg.message}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {msg.message}
+                          </p>
                         </div>
                       ))
                     )}
                     <div ref={messagesEndRef} />
                   </div>
                 </ScrollArea>
-                <form onSubmit={sendMessage} className="p-4 border-t border-border">
-                  {isJoined ? (
+                <form
+                  onSubmit={sendMessage}
+                  className="p-4 border-t border-border"
+                >
+                  {hasJoined && viewerName !== "Guest" ? (
                     <div className="flex items-center gap-2">
                       <Input
                         placeholder="Send a message..."

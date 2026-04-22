@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { useHostStream } from "@/lib/webrtc/use-host-stream";
+import { MAX_VIEWERS } from "@/lib/webrtc/config";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +25,10 @@ import {
   Send,
   MessageCircle,
   Download,
+  CheckCircle2,
+  AlertCircle,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
 interface Stream {
@@ -52,54 +58,70 @@ interface HostStreamInterfaceProps {
   host: Host;
 }
 
-export function HostStreamInterface({ stream: initialStream, host }: HostStreamInterfaceProps) {
+export function HostStreamInterface({
+  stream: initialStream,
+  host,
+}: HostStreamInterfaceProps) {
   const [stream, setStream] = useState(initialStream);
-  const [isStreaming, setIsStreaming] = useState(initialStream.status === "live");
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [audioEnabled, setAudioEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
-  const [viewerCount, setViewerCount] = useState(initialStream.viewer_count);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
+  const [mediaInitialized, setMediaInitialized] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const supabase = createClient();
 
-  const shareLink = typeof window !== "undefined" 
-    ? `${window.location.origin}/watch/${stream.room_code}` 
-    : "";
+  const {
+    mediaStream,
+    initializeMedia,
+    isStreaming,
+    videoEnabled,
+    audioEnabled,
+    viewerCount,
+    viewers,
+    error,
+    isRecording,
+    hasRecording,
+    startStream,
+    stopStream,
+    toggleVideo,
+    toggleAudio,
+    downloadRecording,
+  } = useHostStream({
+    streamId: stream.id,
+    roomCode: stream.room_code,
+  });
 
-  // Initialize camera
+  const shareLink =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/watch/${stream.room_code}`
+      : "";
+
+  // Initialize camera on mount
   useEffect(() => {
-    const initCamera = async () => {
+    const init = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: true,
-        });
-        mediaStreamRef.current = stream;
-        if (videoRef.current) {
+        const stream = await initializeMedia();
+        if (videoRef.current && stream) {
           videoRef.current.srcObject = stream;
         }
-      } catch (error) {
-        console.error("Error accessing camera:", error);
+        setMediaInitialized(true);
+      } catch (err) {
+        console.error("[v0] Failed to initialize media:", err);
       }
     };
 
-    initCamera();
+    init();
+  }, [initializeMedia]);
 
-    return () => {
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, []);
+  // Update video element when media stream changes
+  useEffect(() => {
+    if (videoRef.current && mediaStream) {
+      videoRef.current.srcObject = mediaStream;
+    }
+  }, [mediaStream]);
 
   // Subscribe to chat messages
   useEffect(() => {
@@ -134,33 +156,20 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
     };
   }, [stream.id, supabase]);
 
-  // Subscribe to viewer count updates
+  // Subscribe to stream status changes
   useEffect(() => {
     const channel = supabase
-      .channel(`viewers-${stream.id}`)
+      .channel(`stream-status-${stream.id}`)
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
           schema: "public",
-          table: "viewers",
-          filter: `stream_id=eq.${stream.id}`,
+          table: "streams",
+          filter: `id=eq.${stream.id}`,
         },
-        async () => {
-          // Count active viewers
-          const { count } = await supabase
-            .from("viewers")
-            .select("*", { count: "exact", head: true })
-            .eq("stream_id", stream.id)
-            .is("left_at", null);
-          
-          setViewerCount(count || 0);
-          
-          // Update stream viewer count
-          await supabase
-            .from("streams")
-            .update({ viewer_count: count || 0 })
-            .eq("id", stream.id);
+        (payload) => {
+          setStream(payload.new as Stream);
         }
       )
       .subscribe();
@@ -174,81 +183,6 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const toggleVideo = useCallback(() => {
-    if (mediaStreamRef.current) {
-      const videoTrack = mediaStreamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setVideoEnabled(videoTrack.enabled);
-      }
-    }
-  }, []);
-
-  const toggleAudio = useCallback(() => {
-    if (mediaStreamRef.current) {
-      const audioTrack = mediaStreamRef.current.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setAudioEnabled(audioTrack.enabled);
-      }
-    }
-  }, []);
-
-  const startStream = async () => {
-    await supabase
-      .from("streams")
-      .update({ status: "live", started_at: new Date().toISOString() })
-      .eq("id", stream.id);
-    
-    setStream({ ...stream, status: "live" });
-    setIsStreaming(true);
-
-    // Start recording
-    if (mediaStreamRef.current) {
-      const mediaRecorder = new MediaRecorder(mediaStreamRef.current, {
-        mimeType: "video/webm;codecs=vp9",
-      });
-      
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          setRecordedChunks((prev) => [...prev, event.data]);
-        }
-      };
-      
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000);
-      setIsRecording(true);
-    }
-  };
-
-  const endStream = async () => {
-    // Stop recording
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-
-    await supabase
-      .from("streams")
-      .update({ status: "ended", ended_at: new Date().toISOString() })
-      .eq("id", stream.id);
-    
-    setStream({ ...stream, status: "ended" });
-    setIsStreaming(false);
-  };
-
-  const downloadRecording = () => {
-    if (recordedChunks.length === 0) return;
-    
-    const blob = new Blob(recordedChunks, { type: "video/webm" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${stream.title}-${stream.room_code}.webm`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const copyShareLink = () => {
     navigator.clipboard.writeText(shareLink);
@@ -269,6 +203,18 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
     setNewMessage("");
   };
 
+  const handleEndStream = async () => {
+    await stopStream();
+    setStream((prev) => ({ ...prev, status: "ended" }));
+  };
+
+  const handleStartStream = async () => {
+    await startStream();
+    setStream((prev) => ({ ...prev, status: "live" }));
+  };
+
+  const connectedViewers = viewers.filter((v) => v.connected).length;
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border">
@@ -284,7 +230,9 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Radio className="w-4 h-4 text-primary-foreground" />
               </div>
-              <span className="font-bold text-foreground">Isunday Stream Live</span>
+              <span className="font-bold text-foreground">
+                Isunday Stream Live
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -294,15 +242,30 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                 LIVE
               </Badge>
             )}
+            {isRecording && (
+              <Badge variant="outline" className="text-red-500 border-red-500">
+                <Circle className="w-2 h-2 mr-1 fill-red-500" />
+                REC
+              </Badge>
+            )}
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="w-4 h-4" />
-              <span>{viewerCount} watching</span>
+              <span>
+                {connectedViewers}/{viewerCount} connected
+              </span>
             </div>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-6">
+        {error && (
+          <div className="mb-4 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-destructive" />
+            <p className="text-sm text-destructive">{error}</p>
+          </div>
+        )}
+
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Video Preview */}
           <div className="lg:col-span-2 flex flex-col gap-4">
@@ -314,7 +277,9 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                     autoPlay
                     playsInline
                     muted
-                    className={`w-full h-full object-cover ${!videoEnabled ? "hidden" : ""}`}
+                    className={`w-full h-full object-cover ${
+                      !videoEnabled ? "hidden" : ""
+                    }`}
                   />
                   {!videoEnabled && (
                     <div className="absolute inset-0 flex items-center justify-center bg-muted">
@@ -327,6 +292,7 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                       size="icon"
                       className="rounded-full"
                       onClick={toggleVideo}
+                      disabled={!mediaInitialized}
                     >
                       {videoEnabled ? (
                         <Video className="w-5 h-5" />
@@ -339,6 +305,7 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                       size="icon"
                       className="rounded-full"
                       onClick={toggleAudio}
+                      disabled={!mediaInitialized}
                     >
                       {audioEnabled ? (
                         <Mic className="w-5 h-5" />
@@ -347,6 +314,25 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                       )}
                     </Button>
                   </div>
+                  {/* Connection status indicator */}
+                  <div className="absolute top-4 right-4">
+                    {isStreaming ? (
+                      <Badge variant="secondary" className="gap-1">
+                        <Wifi className="w-3 h-3" />
+                        Broadcasting
+                      </Badge>
+                    ) : mediaInitialized ? (
+                      <Badge variant="outline" className="gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-green-500" />
+                        Ready
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="gap-1">
+                        <WifiOff className="w-3 h-3" />
+                        Initializing...
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -354,29 +340,39 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
             {/* Stream Controls */}
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h1 className="text-xl font-semibold text-foreground">{stream.title}</h1>
-                <p className="text-sm text-muted-foreground">Room: {stream.room_code}</p>
+                <h1 className="text-xl font-semibold text-foreground">
+                  {stream.title}
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Room: {stream.room_code} - Max {MAX_VIEWERS} viewers
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 {stream.status === "ended" ? (
                   <>
-                    {recordedChunks.length > 0 && (
+                    {hasRecording && (
                       <Button variant="outline" onClick={downloadRecording}>
                         <Download className="w-4 h-4 mr-2" />
                         Download Recording
                       </Button>
                     )}
-                    <Button variant="outline" onClick={() => router.push("/host/dashboard")}>
+                    <Button
+                      variant="outline"
+                      onClick={() => router.push("/host/dashboard")}
+                    >
                       Back to Dashboard
                     </Button>
                   </>
                 ) : isStreaming ? (
-                  <Button variant="destructive" onClick={endStream}>
+                  <Button variant="destructive" onClick={handleEndStream}>
                     <Square className="w-4 h-4 mr-2" />
                     End Stream
                   </Button>
                 ) : (
-                  <Button onClick={startStream}>
+                  <Button
+                    onClick={handleStartStream}
+                    disabled={!mediaInitialized}
+                  >
                     <Circle className="w-4 h-4 mr-2 fill-current" />
                     Go Live
                   </Button>
@@ -399,10 +395,41 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Share this link with viewers to join your stream
+                  Share this link with viewers to join your stream (up to{" "}
+                  {MAX_VIEWERS} viewers)
                 </p>
               </CardContent>
             </Card>
+
+            {/* Connected Viewers */}
+            {viewers.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Users className="w-4 h-4" />
+                    Connected Viewers ({connectedViewers})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-2">
+                    {viewers.map((viewer) => (
+                      <Badge
+                        key={viewer.id}
+                        variant={viewer.connected ? "default" : "outline"}
+                        className="gap-1"
+                      >
+                        {viewer.connected ? (
+                          <Wifi className="w-3 h-3" />
+                        ) : (
+                          <WifiOff className="w-3 h-3" />
+                        )}
+                        {viewer.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Chat Panel */}
@@ -431,7 +458,9 @@ export function HostStreamInterface({ stream: initialStream, host }: HostStreamI
                             {new Date(msg.created_at).toLocaleTimeString()}
                           </span>
                         </div>
-                        <p className="text-sm text-muted-foreground">{msg.message}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {msg.message}
+                        </p>
                       </div>
                     ))
                   )}
