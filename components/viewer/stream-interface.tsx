@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { useViewerStream } from "@/lib/webrtc/use-viewer-stream";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,8 +79,7 @@ export function ViewerStreamInterface({
   const [copied, setCopied] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
-  const [useFallback, setUseFallback] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
+    const [retryCount, setRetryCount] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
@@ -100,23 +98,13 @@ export function ViewerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
-  // Always call both hooks to avoid conditional hook usage
-  const simpleStreamHook = useSimpleStream({
+  // Use only the simple stream hook to avoid initialization conflicts
+  const streamHook = useSimpleStream({
     streamId: stream.id,
     roomCode: stream.room_code,
     viewerName: hasJoined ? viewerName : "",
     onStreamEnd: handleStreamEnd,
   });
-
-  const viewerStreamHook = useViewerStream({
-    streamId: stream.id,
-    roomCode: stream.room_code,
-    viewerName: hasJoined ? viewerName : "",
-    onStreamEnd: handleStreamEnd,
-  });
-
-  // Select the appropriate hook based on fallback state
-  const streamHook = useFallback ? simpleStreamHook : viewerStreamHook;
 
   const {
     isConnected,
