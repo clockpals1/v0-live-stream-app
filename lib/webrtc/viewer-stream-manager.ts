@@ -59,13 +59,25 @@ export class ViewerStreamManager {
       
       // Update host track states
       if (videoTracks.length > 0) {
-        this.onHostVideoEnabledCallback?.(!videoTracks[0].muted);
-        console.log('[ViewerManager] Video track enabled:', !videoTracks[0].muted);
+        const videoTrack = videoTracks[0];
+        const videoEnabled = videoTrack.enabled && videoTrack.readyState === 'live';
+        this.onHostVideoEnabledCallback?.(videoEnabled);
+        console.log('[ViewerManager] Video track enabled:', videoEnabled, 'readyState:', videoTrack.readyState, 'enabled:', videoTrack.enabled);
+      } else {
+        // No video tracks available
+        this.onHostVideoEnabledCallback?.(false);
+        console.log('[ViewerManager] No video tracks available');
       }
       
       if (audioTracks.length > 0) {
-        this.onHostAudioEnabledCallback?.(!audioTracks[0].muted);
-        console.log('[ViewerManager] Audio track enabled:', !audioTracks[0].muted);
+        const audioTrack = audioTracks[0];
+        const audioEnabled = audioTrack.enabled && audioTrack.readyState === 'live';
+        this.onHostAudioEnabledCallback?.(audioEnabled);
+        console.log('[ViewerManager] Audio track enabled:', audioEnabled, 'readyState:', audioTrack.readyState, 'enabled:', audioTrack.enabled);
+      } else {
+        // No audio tracks available
+        this.onHostAudioEnabledCallback?.(false);
+        console.log('[ViewerManager] No audio tracks available');
       }
       
       this.onRemoteStreamCallback?.(stream);

@@ -60,9 +60,34 @@ export function useSimpleStream({
           const pc = new RTCPeerConnection(SIMPLE_ICE_SERVERS);
           
           pc.ontrack = (event) => {
-            console.log("[simple] Received track:", event.track.kind);
+            console.log("[simple] Received track:", event.track.kind, event.streams.length);
             if (event.streams.length > 0) {
               const stream = event.streams[0];
+              
+              // Check if stream has video/audio tracks and update states
+              const videoTracks = stream.getVideoTracks();
+              const audioTracks = stream.getAudioTracks();
+              
+              if (videoTracks.length > 0) {
+                const videoTrack = videoTracks[0];
+                const videoEnabled = videoTrack.enabled && videoTrack.readyState === 'live';
+                setHostVideoEnabled(videoEnabled);
+                console.log("[simple] Video track enabled:", videoEnabled, 'readyState:', videoTrack.readyState, 'enabled:', videoTrack.enabled);
+              } else {
+                setHostVideoEnabled(false);
+                console.log("[simple] No video tracks available");
+              }
+              
+              if (audioTracks.length > 0) {
+                const audioTrack = audioTracks[0];
+                const audioEnabled = audioTrack.enabled && audioTrack.readyState === 'live';
+                setHostAudioEnabled(audioEnabled);
+                console.log("[simple] Audio track enabled:", audioEnabled, 'readyState:', audioTrack.readyState, 'enabled:', audioTrack.enabled);
+              } else {
+                setHostAudioEnabled(false);
+                console.log("[simple] No audio tracks available");
+              }
+              
               setRemoteStream(stream);
               setIsConnected(true);
               setError(null);

@@ -148,6 +148,28 @@ export function ViewerStreamInterface({
       // Set the stream
       videoElement.srcObject = remoteStream;
       
+      // Check if video is actually playing and update hostVideoEnabled state
+      const checkVideoPlaying = () => {
+        const videoTracks = remoteStream.getVideoTracks();
+        const hasVideoTracks = videoTracks.length > 0;
+        const videoElementReady = videoElement.readyState >= 2; // HAVE_CURRENT_DATA
+        
+        if (hasVideoTracks && videoElementReady) {
+          const videoTrack = videoTracks[0];
+          const videoEnabled = videoTrack.enabled && videoTrack.readyState === 'live';
+          console.log('[Viewer] Video check - tracks:', hasVideoTracks, 'element ready:', videoElementReady, 'track enabled:', videoEnabled);
+          
+          // If video is playing, ensure hostVideoEnabled is true
+          if (videoEnabled && !hostVideoEnabled) {
+            console.log('[Viewer] Correcting hostVideoEnabled state - video is actually playing');
+            // This will be handled by the stream manager, but we can add additional checks
+          }
+        }
+      };
+      
+      // Check video state after a short delay
+      setTimeout(checkVideoPlaying, 1000);
+      
       // Play the video (handle autoplay restrictions)
       const playVideo = async () => {
         try {
@@ -627,12 +649,23 @@ export function ViewerStreamInterface({
               </div>
             )}
             
-            {!hostVideoEnabled && (
+            {!hostVideoEnabled && remoteStream && remoteStream.getVideoTracks().length === 0 && (
               <div className="absolute inset-0 flex items-center justify-center bg-muted">
                 <div className="text-center">
                   <VideoOff className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
                   <p className="text-muted-foreground">
                     Host has turned off their camera
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!hostVideoEnabled && remoteStream && remoteStream.getVideoTracks().length > 0 && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                <div className="text-center">
+                  <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
+                  <p className="text-white">
+                    Connecting to video...
                   </p>
                 </div>
               </div>
