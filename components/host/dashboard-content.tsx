@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -85,7 +85,8 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
   const [newStreamTitle, setNewStreamTitle] = useState("");
   const [emergencyMessages, setEmergencyMessages] = useState<EmergencyMessage[]>([]);
   const [showEmergencyPanel, setShowEmergencyPanel] = useState(false);
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   // Subscribe to emergency messages
   useEffect(() => {
@@ -131,7 +132,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [host, supabase]);
+  }, [host]);
 
   // Load streams from database
   useEffect(() => {
@@ -139,6 +140,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
 
     const loadStreams = async () => {
       try {
+        // Try full query including assigned streams (requires migration 003)
         const { data, error } = await supabase
           .from("streams")
           .select("*")
@@ -146,7 +148,20 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
           .order("created_at", { ascending: false });
 
         if (error) {
-          console.error("Error loading streams:", error);
+          // assigned_host_id column may not exist yet — fall back to simple query
+          console.warn("Full query failed, falling back to host_id only:", error.message);
+          const { data: fallback, error: fallbackErr } = await supabase
+            .from("streams")
+            .select("*")
+            .eq("host_id", host.id)
+            .order("created_at", { ascending: false });
+
+          if (fallbackErr) {
+            console.error("Fallback query also failed:", fallbackErr);
+          } else {
+            console.log("Loaded streams (fallback):", fallback?.length || 0);
+            setStreams(fallback || []);
+          }
         } else {
           console.log("Loaded streams:", data?.length || 0);
           setStreams(data || []);
@@ -159,7 +174,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
     };
 
     loadStreams();
-  }, [host, supabase]);
+  }, [host]);
 
   // Load existing emergency messages
   useEffect(() => {
@@ -188,7 +203,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
     };
 
     loadEmergencyMessages();
-  }, [host, supabase]);
+  }, [host]);
   const [deletingStream, setDeletingStream] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
@@ -215,7 +230,6 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
     if (!host) return;
     
     setLoading(true);
-    const supabase = createClient();
     const roomCode = nanoid(8);
 
     const { data, error } = await supabase
@@ -243,7 +257,6 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
   };
 
   const handleSignOut = async () => {
-    const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/");
     router.refresh();
@@ -259,7 +272,6 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
 
   const handleDeleteStream = async (streamId: string) => {
     setDeletingStream(streamId);
-    const supabase = createClient();
     
     try {
       const { error } = await supabase
@@ -474,7 +486,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
                             .select("*")
                             .eq("host_id", host.id)
                             .order("created_at", { ascending: false })
-                            .then(({ data }) => { if (data) setStreams(data); });
+                            .then(({ data }: { data: Stream[] | null }) => { if (data) setStreams(data); });
                         }
                       }}
                     />
