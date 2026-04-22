@@ -46,7 +46,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ secrets.CLOUDFLARE_PROJECT_NAME || 'isunday-stream-live' }}
+          projectName: ${{ secrets.CLOUDFLARE_PROJECT_NAME || 'v0-live-stream-app' }}
           directory: .next
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           wranglerVersion: '3'
@@ -54,4 +54,4 @@ jobs:
       - name: Output deployment URL
         run: |
           echo "Deployment completed successfully!"
-          echo "Your application should be available at: https://${{ secrets.CLOUDFLARE_PROJECT_NAME || 'isunday-stream-live' }}.pages.dev"
+          echo "Your application should be available at: https://${{ secrets.CLOUDFLARE_PROJECT_NAME || 'v0-live-stream-app' }}.pages.dev"
