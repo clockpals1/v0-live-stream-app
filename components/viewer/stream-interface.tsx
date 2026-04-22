@@ -100,19 +100,13 @@ export function ViewerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
-  const streamHook = useFallback 
-    ? useSimpleStream({
-        streamId: stream.id,
-        roomCode: stream.room_code,
-        viewerName: hasJoined ? viewerName : "",
-        onStreamEnd: handleStreamEnd,
-      })
-    : useViewerStream({
-        streamId: stream.id,
-        roomCode: stream.room_code,
-        viewerName: hasJoined ? viewerName : "",
-        onStreamEnd: handleStreamEnd,
-      });
+  // Always use the simple stream hook for reliability
+  const streamHook = useSimpleStream({
+    streamId: stream.id,
+    roomCode: stream.room_code,
+    viewerName: hasJoined ? viewerName : "",
+    onStreamEnd: handleStreamEnd,
+  });
 
   const {
     isConnected,
@@ -124,17 +118,13 @@ export function ViewerStreamInterface({
     isStreamPaused,
   } = streamHook;
 
-  // Auto-switch to fallback if connection fails repeatedly
+  // Handle connection errors and retry logic
   useEffect(() => {
-    if (error && !useFallback && retryCount >= 2) {
-      console.log("Switching to fallback streaming method");
-      setUseFallback(true);
-      setRetryCount(0);
-    }
     if (error) {
+      console.log("Connection error detected:", error);
       setRetryCount(prev => prev + 1);
     }
-  }, [error, useFallback, retryCount]);
+  }, [error, retryCount]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -744,7 +734,6 @@ export function ViewerStreamInterface({
 
   const handleRetry = () => {
     setRetryCount(0);
-    setUseFallback(!useFallback);
   };
 
   const getVideoContent = () => {
