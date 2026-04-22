@@ -302,7 +302,7 @@ export function useSimpleStream({
       leaveStream();
       supabase.removeChannel(channel);
     };
-  }, [roomCode, streamId, handleSignal, joinStream, leaveStream, supabase]);
+  }, [roomCode, streamId, supabase]);
 
   return {
     viewerId: viewerIdRef.current,
