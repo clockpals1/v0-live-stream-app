@@ -100,19 +100,23 @@ export function ViewerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
-  const streamHook = useFallback 
-    ? useSimpleStream({
-        streamId: stream.id,
-        roomCode: stream.room_code,
-        viewerName: hasJoined ? viewerName : "",
-        onStreamEnd: handleStreamEnd,
-      })
-    : useViewerStream({
-        streamId: stream.id,
-        roomCode: stream.room_code,
-        viewerName: hasJoined ? viewerName : "",
-        onStreamEnd: handleStreamEnd,
-      });
+  // Always call both hooks to avoid conditional hook usage
+  const simpleStreamHook = useSimpleStream({
+    streamId: stream.id,
+    roomCode: stream.room_code,
+    viewerName: hasJoined ? viewerName : "",
+    onStreamEnd: handleStreamEnd,
+  });
+
+  const viewerStreamHook = useViewerStream({
+    streamId: stream.id,
+    roomCode: stream.room_code,
+    viewerName: hasJoined ? viewerName : "",
+    onStreamEnd: handleStreamEnd,
+  });
+
+  // Select the appropriate hook based on fallback state
+  const streamHook = useFallback ? simpleStreamHook : viewerStreamHook;
 
   const {
     isConnected,
