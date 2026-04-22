@@ -124,7 +124,7 @@ export function ViewerStreamInterface({
       console.log("Connection error detected:", error);
       setRetryCount(prev => prev + 1);
     }
-  }, [error, retryCount]);
+  }, [error]);
 
   const shareLink =
     typeof window !== "undefined"
