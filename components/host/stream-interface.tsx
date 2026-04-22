@@ -135,7 +135,7 @@ export function HostStreamInterface({
           table: "chat_messages",
           filter: `stream_id=eq.${stream.id}`,
         },
-        (payload) => {
+        (payload: any) => {
           setMessages((prev) => [...prev, payload.new as ChatMessage]);
         }
       )
@@ -147,7 +147,7 @@ export function HostStreamInterface({
       .select("*")
       .eq("stream_id", stream.id)
       .order("created_at", { ascending: true })
-      .then(({ data }) => {
+      .then(({ data }: { data: ChatMessage[] | null }) => {
         if (data) setMessages(data);
       });
 
@@ -168,7 +168,7 @@ export function HostStreamInterface({
           table: "streams",
           filter: `id=eq.${stream.id}`,
         },
-        (payload) => {
+        (payload: any) => {
           setStream(payload.new as Stream);
         }
       )

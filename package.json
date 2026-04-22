@@ -5,8 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:production": "next build -c next.config.production.mjs",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node scripts/feature-validation.js",
+    "deploy": "npm run build:production && echo 'Ready for deployment'"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

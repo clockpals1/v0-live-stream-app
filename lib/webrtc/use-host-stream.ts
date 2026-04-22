@@ -357,10 +357,10 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     });
 
     channel
-      .on("broadcast", { event: "signal" }, ({ payload }) => {
+      .on("broadcast", { event: "signal" }, ({ payload }: { payload: any }) => {
         handleSignal(payload as SignalMessage);
       })
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         console.log("[v0] Host channel status:", status);
       });
 

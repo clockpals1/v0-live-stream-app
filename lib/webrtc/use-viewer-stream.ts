@@ -235,10 +235,10 @@ export function useViewerStream({
     });
 
     channel
-      .on("broadcast", { event: "signal" }, ({ payload }) => {
+      .on("broadcast", { event: "signal" }, ({ payload }: { payload: any }) => {
         handleSignal(payload as SignalMessage);
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: any) => {
         console.log("[v0] Viewer channel status:", status);
         if (status === "SUBSCRIBED") {
           // Check if stream is already live
