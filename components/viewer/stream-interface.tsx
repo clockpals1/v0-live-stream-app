@@ -78,7 +78,7 @@ export function ViewerStreamInterface({
   const [newMessage, setNewMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(true);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [useFallback, setUseFallback] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -92,18 +92,20 @@ export function ViewerStreamInterface({
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   const handleStreamEnd = useCallback(() => {
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
-  // Always use the simple stream hook for reliability
+  // Always use the simple stream hook — join WebRTC immediately on mount
   const streamHook = useSimpleStream({
     streamId: stream.id,
     roomCode: stream.room_code,
-    viewerName: hasJoined ? viewerName : "",
+    viewerName: viewerName || "Viewer",
     onStreamEnd: handleStreamEnd,
   });
 
@@ -545,7 +547,7 @@ export function ViewerStreamInterface({
 
   const toggleFullscreen = async () => {
     try {
-      const element = document.documentElement;
+      const element = videoContainerRef.current || document.documentElement;
       
       if (!isFullscreen) {
         // Enter fullscreen
@@ -796,9 +798,6 @@ export function ViewerStreamInterface({
               className={`w-full h-full object-contain ${
                 !hostVideoEnabled ? "hidden" : ""
               } ${isFullscreen ? 'max-h-screen' : ''}`}
-              style={{
-                transform: 'scaleX(-1)', // Mirror video for more natural feel
-              }}
             />
             
             {/* Loading overlay */}
@@ -1144,8 +1143,22 @@ export function ViewerStreamInterface({
             <div className="lg:col-span-2 flex flex-col gap-4">
               <Card className="overflow-hidden">
                 <CardContent className="p-0">
-                  <div className="relative aspect-video bg-black">
+                  <div ref={videoContainerRef} className="relative aspect-video bg-black">
                     {getVideoContent()}
+                    {/* Unmute prompt — shown when video is playing but muted */}
+                    {isMuted && isConnected && remoteStream && (
+                      <div
+                        className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none"
+                      >
+                        <button
+                          className="pointer-events-auto bg-black/70 hover:bg-black/90 text-white text-sm px-4 py-2 rounded-full flex items-center gap-2 border border-white/20"
+                          onClick={() => setIsMuted(false)}
+                        >
+                          <VolumeX className="w-4 h-4" />
+                          Click to unmute
+                        </button>
+                      </div>
+                    )}
                     {/* Connection status */}
                     <div className="absolute top-4 right-4">
                       {getConnectionStatusBadge()}

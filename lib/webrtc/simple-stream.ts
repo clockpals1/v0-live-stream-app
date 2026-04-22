@@ -32,7 +32,8 @@ export function useSimpleStream({
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const joinStreamRef = useRef<() => void>(() => {});
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   // Simplified ICE servers with public STUN only
   const SIMPLE_ICE_SERVERS: RTCConfiguration = {
