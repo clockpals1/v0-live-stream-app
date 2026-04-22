@@ -78,10 +78,10 @@ interface DashboardContentProps {
   streams: Stream[];
 }
 
-export function DashboardContent({ user, host }: DashboardContentProps) {
+export function DashboardContent({ user, host, streams: initialStreams }: DashboardContentProps) {
   const router = useRouter();
-  const [streams, setStreams] = useState<Stream[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [streams, setStreams] = useState<Stream[]>(initialStreams || []);
+  const [loading, setLoading] = useState(false);
   const [newStreamTitle, setNewStreamTitle] = useState("");
   const [emergencyMessages, setEmergencyMessages] = useState<EmergencyMessage[]>([]);
   const [showEmergencyPanel, setShowEmergencyPanel] = useState(false);

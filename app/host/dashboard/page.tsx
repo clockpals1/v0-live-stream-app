@@ -17,12 +17,27 @@ export default async function HostDashboardPage() {
     .eq("user_id", user.id)
     .single();
 
-  // Get user's streams
-  const { data: streams } = await supabase
-    .from("streams")
-    .select("*")
-    .eq("host_id", host?.id)
-    .order("created_at", { ascending: false });
+  // Get streams where this host is owner OR assigned broadcaster
+  // Fall back to simple host_id query if assigned_host_id column not yet migrated
+  let streams = null;
+  if (host) {
+    const { data: fullData, error: fullErr } = await supabase
+      .from("streams")
+      .select("*")
+      .or(`host_id.eq.${host.id},assigned_host_id.eq.${host.id}`)
+      .order("created_at", { ascending: false });
+
+    if (fullErr) {
+      const { data: fallbackData } = await supabase
+        .from("streams")
+        .select("*")
+        .eq("host_id", host.id)
+        .order("created_at", { ascending: false });
+      streams = fallbackData;
+    } else {
+      streams = fullData;
+    }
+  }
 
   return (
     <DashboardContent 
