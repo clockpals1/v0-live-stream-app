@@ -79,7 +79,7 @@ export function ViewerStreamInterface({
   const [copied, setCopied] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
-    const [retryCount, setRetryCount] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
@@ -98,23 +98,14 @@ export function ViewerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
-  // Use only the simple stream hook to avoid initialization conflicts
-  const streamHook = useSimpleStream({
-    streamId: stream.id,
-    roomCode: stream.room_code,
-    viewerName: hasJoined ? viewerName : "",
-    onStreamEnd: handleStreamEnd,
-  });
-
-  const {
-    isConnected,
-    isStreamLive,
-    remoteStream,
-    error,
-    hostVideoEnabled,
-    connectionState,
-    isStreamPaused,
-  } = streamHook;
+  // Temporarily disable stream hook to isolate the issue
+  const [isConnected, setIsConnected] = useState(false);
+  const [isStreamLive, setIsStreamLive] = useState(false);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [hostVideoEnabled, setHostVideoEnabled] = useState(true);
+  const [connectionState, setConnectionState] = useState<string>("new");
+  const [isStreamPaused, setIsStreamPaused] = useState(false);
 
   // Handle connection errors
   useEffect(() => {
