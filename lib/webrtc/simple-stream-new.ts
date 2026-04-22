@@ -42,6 +42,39 @@ export function useSimpleStream({
     ]
   };
 
+  // Join stream (declared FIRST to avoid TDZ in closures below)
+  const joinStream = useCallback(() => {
+    if (!channelRef.current) return;
+
+    const joinMessage = {
+      type: "viewer-join",
+      from: viewerIdRef.current,
+      to: "host",
+      viewerName: viewerName,
+    };
+
+    channelRef.current.send({
+      type: "broadcast",
+      event: "signal",
+      payload: joinMessage,
+    });
+  }, [viewerName]);
+
+  // Leave stream
+  const leaveStream = useCallback(() => {
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "signal",
+        payload: {
+          type: "viewer-leave",
+          from: viewerIdRef.current,
+          to: "host",
+        },
+      });
+    }
+  }, []);
+
   // Handle incoming signals
   const handleSignal = useCallback(
     async (message: any) => {
@@ -218,39 +251,6 @@ export function useSimpleStream({
     setTimeout(() => {
       joinStream();
     }, 1000);
-  }, []);
-
-  // Join stream
-  const joinStream = useCallback(() => {
-    if (!channelRef.current) return;
-
-    const joinMessage = {
-      type: "viewer-join",
-      from: viewerIdRef.current,
-      to: "host",
-      viewerName: viewerName,
-    };
-
-    channelRef.current.send({
-      type: "broadcast",
-      event: "signal",
-      payload: joinMessage,
-    });
-  }, [viewerName]);
-
-  // Leave stream
-  const leaveStream = useCallback(() => {
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: "broadcast",
-        event: "signal",
-        payload: {
-          type: "viewer-leave",
-          from: viewerIdRef.current,
-          to: "host",
-        },
-      });
-    }
   }, []);
 
   // Set up signaling channel
