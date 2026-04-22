@@ -24,71 +24,69 @@ export function useViewerStream({ streamId, roomCode, viewerName, onStreamEnd }:
 
   // Initialize stream manager
   useEffect(() => {
-    const initializeStreamManager = async () => {
-      try {
-        console.log('[useViewerStream] Initializing stream manager');
-        
-        const streamManager = new ViewerStreamManager({
-          streamId,
-          roomCode,
-          viewerName,
-          onStreamEnd,
-          onStreamStart: () => {
-            console.log('[useViewerStream] Stream started');
-            setIsStreamLive(true);
-            setError(null);
-          },
-          onConnectionChange: (connected) => {
-            console.log('[useViewerStream] Connection changed:', connected);
-            setIsConnected(connected);
-          },
-        });
-
-        // Set up callbacks
-        streamManager.setOnRemoteStream((stream) => {
-          console.log('[useViewerStream] Remote stream received');
-          setRemoteStream(stream);
-        });
-
-        streamManager.setOnIsConnected((connected) => {
+    console.log('[useViewerStream] Setting up stream manager');
+    
+    try {
+      const streamManager = new ViewerStreamManager({
+        streamId,
+        roomCode,
+        viewerName,
+        onStreamEnd,
+        onStreamStart: () => {
+          console.log('[useViewerStream] Stream started');
+          setIsStreamLive(true);
+          setError(null);
+        },
+        onConnectionChange: (connected) => {
+          console.log('[useViewerStream] Connection changed:', connected);
           setIsConnected(connected);
-        });
+        },
+      });
 
-        streamManager.setOnIsStreamLive((live) => {
-          setIsStreamLive(live);
-        });
+      // Set up callbacks
+      streamManager.setOnRemoteStream((stream) => {
+        console.log('[useViewerStream] Remote stream received');
+        setRemoteStream(stream);
+      });
 
-        streamManager.setOnError((error) => {
-          setError(error);
-        });
+      streamManager.setOnIsConnected((connected) => {
+        setIsConnected(connected);
+      });
 
-        streamManager.setOnHostVideoEnabled((enabled) => {
-          setHostVideoEnabled(enabled);
-        });
+      streamManager.setOnIsStreamLive((live) => {
+        setIsStreamLive(live);
+      });
 
-        streamManager.setOnHostAudioEnabled((enabled) => {
-          setHostAudioEnabled(enabled);
-        });
+      streamManager.setOnError((error) => {
+        setError(error);
+      });
 
-        streamManager.setOnIsStreamPaused((paused) => {
-          setIsStreamPaused(paused);
-        });
+      streamManager.setOnHostVideoEnabled((enabled) => {
+        setHostVideoEnabled(enabled);
+      });
 
-        // Initialize the stream manager
-        await streamManager.initialize();
-        
-        streamManagerRef.current = streamManager;
-        console.log('[useViewerStream] Stream manager initialized successfully');
-      } catch (error) {
-        console.error('[useViewerStream] Failed to initialize stream manager:', error);
+      streamManager.setOnHostAudioEnabled((enabled) => {
+        setHostAudioEnabled(enabled);
+      });
+
+      streamManager.setOnIsStreamPaused((paused) => {
+        setIsStreamPaused(paused);
+      });
+
+      // Initialize the stream manager
+      streamManager.initialize().catch(error => {
+        console.error('[useViewerStream] Error initializing stream manager:', error);
         setError('Failed to initialize stream connection');
-      }
-    };
-
-    initializeStreamManager();
+      });
+      
+      streamManagerRef.current = streamManager;
+      console.log('[useViewerStream] Stream manager setup complete');
+    } catch (error) {
+      console.error('[useViewerStream] Error setting up stream manager:', error);
+      setError('Failed to setup stream connection');
+    }
 
     return () => {
-      console.log('[useViewerStream] Cleaning up stream manager');
       if (streamManagerRef.current) {
         streamManagerRef.current.cleanup();
         streamManagerRef.current = null;
