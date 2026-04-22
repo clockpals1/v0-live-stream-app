@@ -33,13 +33,31 @@ jobs:
       - name: Run tests
         run: npm run test || echo "Tests skipped - no test script"
 
+      - name: Clean and prepare build
+        run: |
+          echo "Cleaning previous builds..."
+          rm -rf .next out
+          rm -f wrangler.toml wrangler.jsonc open-next.config.ts .dev.vars
+          
       - name: Build application
-        run: npm run build
+        run: |
+          echo "Building static export for Cloudflare Pages..."
+          npm run build:static
+          
+          # Verify static output was created
+          if [ ! -d "out" ]; then
+            echo "Error: Static output directory 'out' was not created"
+            exit 1
+          fi
+          
+          echo "Static build completed successfully"
+          ls -la out/
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
           NEXT_PUBLIC_MAX_VIEWERS: ${{ secrets.NEXT_PUBLIC_MAX_VIEWERS || '50' }}
+          NODE_ENV: production
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
