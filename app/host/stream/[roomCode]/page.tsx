@@ -26,12 +26,12 @@ export default async function HostStreamPage({ params }: Props) {
     redirect("/host/dashboard");
   }
 
-  // Get stream
+  // Get stream — allow both the owner AND the assigned host to access
   const { data: stream } = await supabase
     .from("streams")
     .select("*")
     .eq("room_code", roomCode)
-    .eq("host_id", host.id)
+    .or(`host_id.eq.${host.id},assigned_host_id.eq.${host.id}`)
     .single();
 
   if (!stream) {

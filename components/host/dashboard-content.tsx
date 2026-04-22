@@ -11,7 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import {
   Radio,
   Video,
@@ -33,6 +35,8 @@ import {
   Square,
   AlertTriangle,
   X,
+  CalendarClock,
+  MapPin,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -41,12 +45,15 @@ interface Stream {
   id: string;
   room_code: string;
   title: string;
-  status: "waiting" | "live" | "ended";
+  status: "waiting" | "scheduled" | "live" | "ended";
   viewer_count: number;
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
   recording_url: string | null;
+  scheduled_at: string | null;
+  description: string | null;
+  assigned_host_id: string | null;
 }
 
 interface EmergencyMessage {
@@ -135,7 +142,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
         const { data, error } = await supabase
           .from("streams")
           .select("*")
-          .eq("host_id", host.id)
+          .or(`host_id.eq.${host.id},assigned_host_id.eq.${host.id}`)
           .order("created_at", { ascending: false });
 
         if (error) {
@@ -184,6 +191,24 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
   }, [host, supabase]);
   const [deletingStream, setDeletingStream] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [, forceUpdate] = useState(0);
+
+  // Countdown re-render every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => forceUpdate(n => n + 1), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getCountdown = (scheduledAt: string): string => {
+    const diff = new Date(scheduledAt).getTime() - Date.now();
+    if (diff <= 0) return "Starting soon";
+    const days = Math.floor(diff / 86400000);
+    const hours = Math.floor((diff % 86400000) / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
+    if (days > 0) return `In ${days}d ${hours}h`;
+    if (hours > 0) return `In ${hours}h ${mins}m`;
+    return `In ${mins} min${mins !== 1 ? "s" : ""}`;
+  };
 
   const handleCreateStream = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -309,6 +334,8 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
         return <Badge className="bg-red-500 text-white">Live</Badge>;
       case "ended":
         return <Badge variant="secondary">Ended</Badge>;
+      case "scheduled":
+        return <Badge className="bg-blue-500 text-white gap-1"><CalendarClock className="w-3 h-3" />Scheduled</Badge>;
       default:
         return <Badge variant="outline">Waiting</Badge>;
     }
@@ -385,48 +412,144 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
 
       <main className="container mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Create Stream Card */}
+          {/* Create / Schedule Stream Card */}
           <Card className="lg:col-span-1">
-            <CardHeader>
+            <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2">
                 <Plus className="w-5 h-5" />
                 New Stream
               </CardTitle>
               <CardDescription>
-                Start a new live stream event
+                Go live instantly or schedule for later
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleCreateStream} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="title">Stream Title</Label>
-                  <Input
-                    id="title"
-                    placeholder="My Live Event"
-                    value={newStreamTitle}
-                    onChange={(e) => setNewStreamTitle(e.target.value)}
-                  />
-                </div>
-                <Button type="submit" disabled={loading} className="w-full">
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Video className="w-4 h-4 mr-2" />
-                      Create Stream
-                    </>
+              <Tabs defaultValue="instant">
+                <TabsList className="w-full mb-4">
+                  <TabsTrigger value="instant" className="flex-1">
+                    <Video className="w-3.5 h-3.5 mr-1.5" />
+                    Instant
+                  </TabsTrigger>
+                  <TabsTrigger value="schedule" className="flex-1">
+                    <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
+                    Schedule
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="instant">
+                  <form onSubmit={handleCreateStream} className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="title">Stream Title</Label>
+                      <Input
+                        id="title"
+                        placeholder="My Live Event"
+                        value={newStreamTitle}
+                        onChange={(e) => setNewStreamTitle(e.target.value)}
+                      />
+                    </div>
+                    <Button type="submit" disabled={loading} className="w-full">
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Video className="w-4 h-4 mr-2" />
+                          Go Live Now
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                </TabsContent>
+
+                <TabsContent value="schedule">
+                  {host && (
+                    <ScheduleStreamForm
+                      currentHostId={host.id}
+                      onScheduled={() => {
+                        if (host) {
+                          supabase
+                            .from("streams")
+                            .select("*")
+                            .eq("host_id", host.id)
+                            .order("created_at", { ascending: false })
+                            .then(({ data }) => { if (data) setStreams(data); });
+                        }
+                      }}
+                    />
                   )}
-                </Button>
-              </form>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
 
           {/* Streams List */}
-          <div className="lg:col-span-2">
-            <h2 className="text-xl font-semibold text-foreground mb-4">Your Streams</h2>
+          <div className="lg:col-span-2 flex flex-col gap-6">
+
+            {/* Upcoming Scheduled Streams */}
+            {streams.filter(s => s.status === "scheduled").length > 0 && (
+              <div>
+                <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <CalendarClock className="w-5 h-5 text-blue-500" />
+                  Upcoming Scheduled
+                </h2>
+                <div className="grid gap-3">
+                  {streams
+                    .filter(s => s.status === "scheduled")
+                    .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())
+                    .map((stream) => (
+                      <Card key={stream.id} className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h3 className="font-semibold text-foreground truncate">{stream.title}</h3>
+                                {getStatusBadge(stream.status)}
+                              </div>
+                              {stream.description && (
+                                <p className="text-sm text-muted-foreground mb-2 line-clamp-1">{stream.description}</p>
+                              )}
+                              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                                <span className="flex items-center gap-1 font-medium text-blue-600">
+                                  <Clock className="w-3.5 h-3.5" />
+                                  {stream.scheduled_at ? getCountdown(stream.scheduled_at) : ""}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <CalendarClock className="w-3.5 h-3.5" />
+                                  {stream.scheduled_at ? new Date(stream.scheduled_at).toLocaleString() : ""}
+                                </span>
+                                <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
+                                  {stream.room_code}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Button asChild size="sm">
+                                <Link href={`/host/stream/${stream.room_code}`}>
+                                  <Play className="w-4 h-4 mr-1" />
+                                  Start
+                                </Link>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => copyShareLink(stream.room_code)}
+                                title="Copy viewer link"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h2 className="text-xl font-semibold text-foreground mb-4">Your Streams</h2>
             {streams.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">
@@ -438,7 +561,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
               </Card>
             ) : (
               <div className="grid gap-4">
-                {streams.map((stream) => (
+                {streams.filter(s => s.status !== "scheduled").map((stream) => (
                   <Card key={stream.id} className="group hover:shadow-md transition-shadow duration-200">
                     <CardContent className="p-6">
                       <div className="flex items-start justify-between gap-4">
@@ -578,6 +701,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
                 ))}
               </div>
             )}
+            </div>
           </div>
         </div>
       </main>

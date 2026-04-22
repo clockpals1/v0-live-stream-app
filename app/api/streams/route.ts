@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { title } = await request.json()
+    const { title, scheduled_at, description, assigned_host_id } = await request.json()
     
     // Get host record
     const { data: host, error: hostError } = await supabase
@@ -32,9 +32,12 @@ export async function POST(request: Request) {
       .from('streams')
       .insert({
         host_id: host.id,
+        assigned_host_id: assigned_host_id || host.id,
         room_code: roomCode,
         title: title || 'Live Stream',
-        status: 'waiting'
+        description: description || null,
+        status: scheduled_at ? 'scheduled' : 'waiting',
+        scheduled_at: scheduled_at || null,
       })
       .select()
       .single()
