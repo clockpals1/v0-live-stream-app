@@ -46,6 +46,7 @@ interface Stream {
   started_at: string | null;
   ended_at: string | null;
   created_at: string;
+  recording_url: string | null;
 }
 
 interface EmergencyMessage {
@@ -139,7 +140,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
         .limit(10);
 
       if (data) {
-        const emergencyMsgs = data.map(msg => ({
+        const emergencyMsgs = data.map((msg: any) => ({
           id: msg.id,
           stream_id: msg.stream_id,
           sender_name: msg.sender_name,
@@ -169,7 +170,7 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
       .insert({
         host_id: host.id,
         room_code: roomCode,
-        title: title || "Live Stream",
+        title: newStreamTitle || "Live Stream",
       })
       .select()
       .single();
@@ -369,8 +370,8 @@ export function DashboardContent({ user, host }: DashboardContentProps) {
                   <Input
                     id="title"
                     placeholder="My Live Event"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
+                    value={newStreamTitle}
+                    onChange={(e) => setNewStreamTitle(e.target.value)}
                   />
                 </div>
                 <Button type="submit" disabled={loading} className="w-full">
