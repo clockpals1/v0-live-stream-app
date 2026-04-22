@@ -42,6 +42,7 @@ import {
   Smartphone,
   Pause,
   ArrowLeft,
+  HelpCircle,
 } from "lucide-react";
 
 interface Stream {
@@ -86,6 +87,9 @@ export function ViewerStreamInterface({
   const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
   const [showControls, setShowControls] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [showEmergencyDialog, setShowEmergencyDialog] = useState(false);
+  const [emergencyMessage, setEmergencyMessage] = useState("");
+  const [emergencySent, setEmergencySent] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -380,10 +384,26 @@ export function ViewerStreamInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const joinStream = () => {
+  const joinStream = async () => {
     if (!viewerName.trim()) return;
-    setHasJoined(true);
-    setShowNameDialog(false);
+    
+    try {
+      // Register viewer in database
+      await supabase.from("viewers").insert({
+        stream_id: stream.id,
+        viewer_name: viewerName.trim(),
+        joined_at: new Date().toISOString(),
+      });
+      
+      setHasJoined(true);
+      setShowNameDialog(false);
+      console.log('[Viewer] Successfully joined stream with name:', viewerName);
+    } catch (error) {
+      console.error('[Viewer] Error joining stream:', error);
+      // Still allow local join even if database fails
+      setHasJoined(true);
+      setShowNameDialog(false);
+    }
   };
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -397,6 +417,32 @@ export function ViewerStreamInterface({
     });
 
     setNewMessage("");
+  };
+
+  const sendEmergencyMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emergencyMessage.trim() || !hasJoined) return;
+
+    try {
+      // Send as a special system message with high priority
+      await supabase.from("chat_messages").insert({
+        stream_id: stream.id,
+        sender_name: `SYSTEM - ${viewerName}`,
+        message: `EMERGENCY: ${emergencyMessage.trim()}`,
+        is_emergency: true,
+      });
+
+      setEmergencyMessage("");
+      setEmergencySent(true);
+      setShowEmergencyDialog(false);
+      
+      // Reset success message after 5 seconds
+      setTimeout(() => setEmergencySent(false), 5000);
+      
+      console.log('[Viewer] Emergency message sent:', emergencyMessage);
+    } catch (error) {
+      console.error('[Viewer] Error sending emergency message:', error);
+    }
   };
 
   const copyShareLink = () => {
@@ -417,25 +463,36 @@ export function ViewerStreamInterface({
     return `${Math.floor(duration / 3600)}h ${Math.floor((duration % 3600) / 60)}m`;
   };
 
-  const toggleFullscreen = () => {
-    if (videoRef.current) {
+  const toggleFullscreen = async () => {
+    try {
       if (!isFullscreen) {
-        if (videoRef.current.requestFullscreen) {
-          videoRef.current.requestFullscreen();
-        } else if ((videoRef.current as any).webkitRequestFullscreen) {
-          (videoRef.current as any).webkitRequestFullscreen();
-        } else if ((videoRef.current as any).mozRequestFullScreen) {
-          (videoRef.current as any).mozRequestFullScreen();
+        // Enter fullscreen
+        const videoElement = videoRef.current;
+        if (!videoElement) return;
+
+        if (videoElement.requestFullscreen) {
+          await videoElement.requestFullscreen();
+        } else if ((videoElement as any).webkitRequestFullscreen) {
+          await (videoElement as any).webkitRequestFullscreen();
+        } else if ((videoElement as any).mozRequestFullScreen) {
+          await (videoElement as any).mozRequestFullScreen();
+        } else if ((videoElement as any).msRequestFullscreen) {
+          await (videoElement as any).msRequestFullscreen();
         }
       } else {
+        // Exit fullscreen
         if (document.exitFullscreen) {
-          document.exitFullscreen();
+          await document.exitFullscreen();
         } else if ((document as any).webkitExitFullscreen) {
-          (document as any).webkitExitFullscreen();
+          await (document as any).webkitExitFullscreen();
         } else if ((document as any).mozCancelFullScreen) {
-          (document as any).mozCancelFullScreen();
+          await (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          await (document as any).msExitFullscreen();
         }
       }
+    } catch (error) {
+      console.error('[Viewer] Fullscreen toggle error:', error);
     }
   };
 
@@ -727,6 +784,17 @@ export function ViewerStreamInterface({
                   <Maximize className="w-5 h-5" />
                 )}
               </Button>
+              
+              {/* Emergency contact button */}
+              <Button
+                variant="secondary"
+                size="icon"
+                className="rounded-full bg-red-500/80 hover:bg-red-600 text-white"
+                onClick={() => setShowEmergencyDialog(true)}
+                title="Report issue to host"
+              >
+                <HelpCircle className="w-5 h-5" />
+              </Button>
             </div>
             
             {/* Status indicators */}
@@ -860,6 +928,64 @@ export function ViewerStreamInterface({
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Emergency Contact Dialog */}
+      <Dialog open={showEmergencyDialog} onOpenChange={setShowEmergencyDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              Report Issue to Host
+            </DialogTitle>
+            <DialogDescription>
+              If you're experiencing technical issues or need to contact the host urgently, use this emergency message.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={sendEmergencyMessage}>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="emergency">Describe your issue</Label>
+                <textarea
+                  id="emergency"
+                  placeholder="e.g., Video not loading, Can't hear audio, Technical problem..."
+                  value={emergencyMessage}
+                  onChange={(e) => setEmergencyMessage(e.target.value)}
+                  className="min-h-[100px] w-full p-3 border rounded-md resize-none"
+                  maxLength={500}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {emergencyMessage.length}/500 characters
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowEmergencyDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 bg-red-500 hover:bg-red-600"
+                disabled={!emergencyMessage.trim()}
+              >
+                Send Emergency Message
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Emergency Success Notification */}
+      {emergencySent && (
+        <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4" />
+          Emergency message sent to host
+        </div>
+      )}
 
       <div className="min-h-screen bg-background">
         <header className="border-b border-border">
