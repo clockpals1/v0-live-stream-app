@@ -42,10 +42,45 @@ export function useSimpleStream({
     ]
   };
 
+  // Join stream (declared FIRST to avoid TDZ in closures below)
+  const joinStream = useCallback(() => {
+    if (!channelRef.current) return;
+
+    const joinMessage = {
+      type: "viewer-join",
+      from: viewerIdRef.current,
+      to: "host",
+      viewerName: viewerName,
+    };
+
+    channelRef.current.send({
+      type: "broadcast",
+      event: "signal",
+      payload: joinMessage,
+    });
+  }, [viewerName]);
+
+  // Leave stream
+  const leaveStream = useCallback(() => {
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "signal",
+        payload: {
+          type: "viewer-leave",
+          from: viewerIdRef.current,
+          to: "host",
+        },
+      });
+    }
+  }, []);
+
   // Handle incoming signals
   const handleSignal = useCallback(
     async (message: any) => {
       if (message.to && message.to !== viewerIdRef.current) return;
+
+      console.log("[simple] Received signal:", message.type);
 
       switch (message.type) {
         case "offer": {
@@ -58,6 +93,7 @@ export function useSimpleStream({
           }
           
           const pc = new RTCPeerConnection(SIMPLE_ICE_SERVERS);
+          peerConnectionRef.current = pc;
           
           pc.ontrack = (event) => {
             console.log("[simple] Received track:", event.track.kind, event.streams.length);
@@ -72,7 +108,7 @@ export function useSimpleStream({
                 const videoTrack = videoTracks[0];
                 const videoEnabled = videoTrack.enabled && videoTrack.readyState === 'live';
                 setHostVideoEnabled(videoEnabled);
-                console.log("[simple] Video track enabled:", videoEnabled, 'readyState:', videoTrack.readyState, 'enabled:', videoTrack.enabled);
+                console.log("[simple] Video track enabled:", videoEnabled);
               } else {
                 setHostVideoEnabled(false);
                 console.log("[simple] No video tracks available");
@@ -82,7 +118,7 @@ export function useSimpleStream({
                 const audioTrack = audioTracks[0];
                 const audioEnabled = audioTrack.enabled && audioTrack.readyState === 'live';
                 setHostAudioEnabled(audioEnabled);
-                console.log("[simple] Audio track enabled:", audioEnabled, 'readyState:', audioTrack.readyState, 'enabled:', audioTrack.enabled);
+                console.log("[simple] Audio track enabled:", audioEnabled);
               } else {
                 setHostAudioEnabled(false);
                 console.log("[simple] No audio tracks available");
@@ -93,7 +129,21 @@ export function useSimpleStream({
               setError(null);
             }
           };
-
+          
+          pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            console.log("[simple] Connection state:", state);
+            setConnectionState(state);
+            
+            if (state === 'connected') {
+              setIsConnected(true);
+              setError(null);
+            } else if (state === 'failed' || state === 'disconnected') {
+              setIsConnected(false);
+              setRemoteStream(null);
+            }
+          };
+          
           pc.onicecandidate = (event) => {
             if (event.candidate && channelRef.current) {
               channelRef.current.send({
@@ -103,49 +153,31 @@ export function useSimpleStream({
                   type: "ice-candidate",
                   from: viewerIdRef.current,
                   to: "host",
-                  payload: event.candidate.toJSON(),
+                  payload: event.candidate,
                 },
               });
             }
           };
-
-          pc.onconnectionstatechange = () => {
-            console.log("[simple] Connection state:", pc.connectionState);
-            setConnectionState(pc.connectionState);
-            
-            if (pc.connectionState === "connected") {
-              setIsConnected(true);
-              setError(null);
-              setReconnectAttempts(0);
-            } else if (pc.connectionState === "failed") {
-              setIsConnected(false);
-              setRemoteStream(null);
-              setError("Connection failed. Trying alternative method...");
-              
-              // Try alternative connection method
-              setTimeout(() => {
-                attemptAlternativeConnection();
-              }, 2000);
-            }
-          };
-
-          peerConnectionRef.current = pc;
-
+          
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(message.payload));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-
-            channelRef.current?.send({
-              type: "broadcast",
-              event: "signal",
-              payload: {
-                type: "answer",
-                from: viewerIdRef.current,
-                to: "host",
-                payload: pc.localDescription?.toJSON(),
-              },
-            });
+            
+            if (channelRef.current) {
+              channelRef.current.send({
+                type: "broadcast",
+                event: "signal",
+                payload: {
+                  type: "answer",
+                  from: viewerIdRef.current,
+                  to: "host",
+                  payload: answer,
+                },
+              });
+            }
+            
+            console.log("[simple] Answer sent to host");
           } catch (err) {
             console.error("[simple] Error handling offer:", err);
             setError("Connection failed. Please refresh the page.");
@@ -221,47 +253,6 @@ export function useSimpleStream({
     }, 1000);
   }, []);
 
-  // Join stream
-  const joinStream = useCallback(() => {
-    if (!channelRef.current) return;
-
-    const joinMessage = {
-      type: "viewer-join",
-      from: viewerIdRef.current,
-      to: "host",
-      viewerName: viewerName,
-    };
-
-    channelRef.current.send({
-      type: "broadcast",
-      event: "signal",
-      payload: joinMessage,
-    });
-  }, [viewerName]);
-
-  // Leave stream
-  const leaveStream = useCallback(() => {
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: "broadcast",
-        event: "signal",
-        payload: {
-          type: "viewer-leave",
-          from: viewerIdRef.current,
-          to: "host",
-        },
-      });
-    }
-
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-
-    setIsConnected(false);
-    setRemoteStream(null);
-  }, []);
-
   // Set up signaling channel
   useEffect(() => {
     const channel = supabase.channel(`stream-signal-${roomCode}`, {
@@ -316,5 +307,6 @@ export function useSimpleStream({
     isStreamPaused,
     joinStream,
     leaveStream,
+    attemptAlternativeConnection,
   };
 }
