@@ -58,9 +58,28 @@ export function useViewerStream({
             console.log("[v0] Received track:", event.track.kind, event.streams.length);
             if (event.streams.length > 0) {
               const stream = event.streams[0];
+              console.log("[v0] Setting remote stream with tracks:", stream.getTracks().length);
+              
+              // Check if stream has video/audio tracks
+              const videoTracks = stream.getVideoTracks();
+              const audioTracks = stream.getAudioTracks();
+              
+              console.log("[v0] Video tracks:", videoTracks.length, "Audio tracks:", audioTracks.length);
+              
+              // Set host track states
+              if (videoTracks.length > 0) {
+                setHostVideoEnabled(!videoTracks[0].muted);
+              }
+              if (audioTracks.length > 0) {
+                setHostAudioEnabled(!audioTracks[0].muted);
+              }
+              
               setRemoteStream(stream);
               setIsConnected(true);
               setError(null);
+              setReconnectAttempts(0);
+            } else {
+              console.warn("[v0] No streams received in track event");
             }
           };
 

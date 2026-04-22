@@ -133,12 +133,128 @@ export function ViewerStreamInterface({
       ? `${window.location.origin}/watch/${stream.room_code}`
       : "";
 
-  // Update video element when remote stream changes
+  // Update video element when remote stream changes with enhanced error handling
   useEffect(() => {
-    if (videoRef.current && remoteStream) {
-      videoRef.current.srcObject = remoteStream;
+    const videoElement = videoRef.current;
+    
+    if (!videoElement) return;
+    
+    if (remoteStream) {
+      console.log('[Viewer] Setting video stream:', remoteStream.id, remoteStream.getVideoTracks().length, remoteStream.getAudioTracks().length);
+      
+      // Set the stream
+      videoElement.srcObject = remoteStream;
+      
+      // Play the video (handle autoplay restrictions)
+      const playVideo = async () => {
+        try {
+          await videoElement.play();
+          console.log('[Viewer] Video playing successfully');
+        } catch (error) {
+          console.error('[Viewer] Error playing video:', error);
+          // Handle autoplay restrictions
+          if (error instanceof Error && error.name === 'NotAllowedError') {
+            // Add user interaction hint
+            console.log('[Viewer] Autoplay blocked, waiting for user interaction');
+          }
+        }
+      };
+      
+      // Try to play immediately
+      playVideo();
+      
+      // Also try on user interaction
+      const handleUserInteraction = () => {
+        playVideo();
+        document.removeEventListener('click', handleUserInteraction);
+        document.removeEventListener('touchstart', handleUserInteraction);
+      };
+      
+      document.addEventListener('click', handleUserInteraction, { once: true });
+      document.addEventListener('touchstart', handleUserInteraction, { once: true });
+      
+    } else {
+      console.log('[Viewer] Clearing video stream');
+      videoElement.srcObject = null;
     }
   }, [remoteStream]);
+
+  // Handle video element events
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
+    
+    const handleLoadStart = () => {
+      console.log('[Viewer] Video load start');
+      const loadingOverlay = document.getElementById('video-loading');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('opacity-0');
+        loadingOverlay.classList.add('opacity-100');
+      }
+    };
+    
+    const handleCanPlay = () => {
+      console.log('[Viewer] Video can play');
+      const loadingOverlay = document.getElementById('video-loading');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('opacity-100');
+        loadingOverlay.classList.add('opacity-0');
+      }
+    };
+    
+    const handleError = (e: Event) => {
+      console.error('[Viewer] Video error:', e);
+      setError('Video playback failed. Please try refreshing.');
+      const loadingOverlay = document.getElementById('video-loading');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('opacity-100');
+        loadingOverlay.classList.add('opacity-0');
+      }
+    };
+    
+    const handleStalled = () => {
+      console.log('[Viewer] Video stalled');
+      const loadingOverlay = document.getElementById('video-loading');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('opacity-0');
+        loadingOverlay.classList.add('opacity-100');
+      }
+    };
+    
+    const handleSuspend = () => {
+      console.log('[Viewer] Video suspended');
+      const loadingOverlay = document.getElementById('video-loading');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('opacity-0');
+        loadingOverlay.classList.add('opacity-100');
+      }
+    };
+    
+    const handlePlaying = () => {
+      console.log('[Viewer] Video playing');
+      const loadingOverlay = document.getElementById('video-loading');
+      if (loadingOverlay) {
+        loadingOverlay.classList.remove('opacity-100');
+        loadingOverlay.classList.add('opacity-0');
+      }
+    };
+    
+    videoElement.addEventListener('loadstart', handleLoadStart);
+    videoElement.addEventListener('canplay', handleCanPlay);
+    videoElement.addEventListener('error', handleError);
+    videoElement.addEventListener('stalled', handleStalled);
+    videoElement.addEventListener('suspend', handleSuspend);
+    videoElement.addEventListener('playing', handlePlaying);
+    
+    return () => {
+      videoElement.removeEventListener('loadstart', handleLoadStart);
+      videoElement.removeEventListener('canplay', handleCanPlay);
+      videoElement.removeEventListener('error', handleError);
+      videoElement.removeEventListener('stalled', handleStalled);
+      videoElement.removeEventListener('suspend', handleSuspend);
+      videoElement.removeEventListener('playing', handlePlaying);
+    };
+  }, []);
 
   // Handle mute/unmute
   useEffect(() => {
@@ -429,10 +545,22 @@ export function ViewerStreamInterface({
               autoPlay
               playsInline
               muted={isMuted}
+              controls={false}
               className={`w-full h-full object-contain ${
                 !hostVideoEnabled ? "hidden" : ""
               } ${isFullscreen ? 'max-h-screen' : ''}`}
+              style={{
+                transform: 'scaleX(-1)', // Mirror video for more natural feel
+              }}
             />
+            
+            {/* Loading overlay */}
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 pointer-events-none opacity-0 transition-opacity duration-300" id="video-loading">
+              <div className="text-center">
+                <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-2" />
+                <p className="text-white text-sm">Loading stream...</p>
+              </div>
+            </div>
             
             {!hostVideoEnabled && (
               <div className="absolute inset-0 flex items-center justify-center bg-muted">
