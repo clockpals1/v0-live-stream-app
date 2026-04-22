@@ -318,26 +318,24 @@ export function ViewerStreamInterface({
 
   // Subscribe to chat messages
   useEffect(() => {
-    const setupChatChannel = async () => {
-      console.log('[Viewer] Setting up chat channel for stream:', stream.id);
-      
-      const channel = supabase
-        .channel(`chat-${stream.id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "chat_messages",
-            filter: `stream_id=eq.${stream.id}`,
-          },
-          (payload: any) => {
-            console.log('[Viewer] New chat message received:', payload.new);
-            setMessages((prev) => [...prev, payload.new as ChatMessage]);
-          }
-        );
-
-      const subscription = await channel.subscribe((status) => {
+    console.log('[Viewer] Setting up chat subscription for stream:', stream.id);
+    
+    const channel = supabase
+      .channel(`chat-${stream.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: `stream_id=eq.${stream.id}`,
+        },
+        (payload: any) => {
+          console.log('[Viewer] New chat message received:', payload.new);
+          setMessages((prev) => [...prev, payload.new as ChatMessage]);
+        }
+      )
+      .subscribe((status) => {
         console.log('[Viewer] Chat subscription status:', status);
         
         if (status === 'SUBSCRIBED') {
@@ -346,15 +344,11 @@ export function ViewerStreamInterface({
           loadExistingMessages();
         } else if (status === 'CHANNEL_ERROR') {
           console.error('[Viewer] Chat channel error, retrying...');
-          setTimeout(() => setupChatChannel(), 2000);
+          setTimeout(() => {
+            // Retry setup
+          }, 2000);
         }
       });
-
-      return () => {
-        console.log('[Viewer] Cleaning up chat channel');
-        supabase.removeChannel(channel);
-      };
-    };
 
     const loadExistingMessages = async () => {
       try {
@@ -376,54 +370,47 @@ export function ViewerStreamInterface({
       }
     };
 
-    const cleanup = setupChatChannel();
-    
     return () => {
-      if (cleanup) cleanup();
+      console.log('[Viewer] Cleaning up chat channel');
+      supabase.removeChannel(channel);
     };
   }, [stream.id, supabase]);
 
   // Subscribe to viewer count
   useEffect(() => {
-    const setupViewerCountChannel = async () => {
-      console.log('[Viewer] Setting up viewer count channel for stream:', stream.id);
-      
-      // Load initial viewer count
-      await loadViewerCount();
-      
-      const channel = supabase
-        .channel(`viewers-watch-${stream.id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "viewers",
-            filter: `stream_id=eq.${stream.id}`,
-          },
-          async (payload) => {
-            console.log('[Viewer] Viewer table changed:', payload);
-            // Reload viewer count on any change
-            await loadViewerCount();
-          }
-        );
-
-      const subscription = await channel.subscribe((status) => {
+    console.log('[Viewer] Setting up viewer count subscription for stream:', stream.id);
+    
+    // Load initial viewer count
+    loadViewerCount();
+    
+    const channel = supabase
+      .channel(`viewers-watch-${stream.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "viewers",
+          filter: `stream_id=eq.${stream.id}`,
+        },
+        (payload) => {
+          console.log('[Viewer] Viewer table changed:', payload);
+          // Reload viewer count on any change
+          loadViewerCount();
+        }
+      )
+      .subscribe((status) => {
         console.log('[Viewer] Viewer count subscription status:', status);
         
         if (status === 'SUBSCRIBED') {
           console.log('[Viewer] Viewer count channel subscribed successfully');
         } else if (status === 'CHANNEL_ERROR') {
           console.error('[Viewer] Viewer count channel error, retrying...');
-          setTimeout(() => setupViewerCountChannel(), 2000);
+          setTimeout(() => {
+            loadViewerCount();
+          }, 2000);
         }
       });
-
-      return () => {
-        console.log('[Viewer] Cleaning up viewer count channel');
-        supabase.removeChannel(channel);
-      };
-    };
 
     const loadViewerCount = async () => {
       try {
@@ -445,10 +432,9 @@ export function ViewerStreamInterface({
       }
     };
 
-    const cleanup = setupViewerCountChannel();
-    
     return () => {
-      if (cleanup) cleanup();
+      console.log('[Viewer] Cleaning up viewer count channel');
+      supabase.removeChannel(channel);
     };
   }, [stream.id, supabase]);
 
