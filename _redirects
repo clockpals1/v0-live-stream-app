@@ -1,0 +1,5 @@
+# Cloudflare Pages redirects for Next.js
+/api/* /api/:splat 200
+/host/* /host/:splat 200
+/auth/* /auth/:splat 200
+/watch/* /watch/:splat 200
