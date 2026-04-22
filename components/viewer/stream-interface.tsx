@@ -368,7 +368,27 @@ export function ViewerStreamInterface({
   // Subscribe to viewer count
   useEffect(() => {
     console.log('[Viewer] Setting up viewer count subscription for stream:', stream.id);
-    
+
+    const loadViewerCount = async () => {
+      try {
+        console.log('[Viewer] Loading viewer count...');
+        const { count, error } = await supabase
+          .from("viewers")
+          .select("*", { count: "exact", head: true })
+          .eq("stream_id", stream.id)
+          .is("left_at", null);
+
+        if (error) {
+          console.error('[Viewer] Error loading viewer count:', error);
+        } else {
+          console.log('[Viewer] Viewer count loaded:', count);
+          setViewerCount(count || 0);
+        }
+      } catch (error) {
+        console.error('[Viewer] Exception loading viewer count:', error);
+      }
+    };
+
     // Load initial viewer count
     loadViewerCount();
     
@@ -400,26 +420,6 @@ export function ViewerStreamInterface({
           }, 2000);
         }
       });
-
-    const loadViewerCount = async () => {
-      try {
-        console.log('[Viewer] Loading viewer count...');
-        const { count, error } = await supabase
-          .from("viewers")
-          .select("*", { count: "exact", head: true })
-          .eq("stream_id", stream.id)
-          .is("left_at", null);
-
-        if (error) {
-          console.error('[Viewer] Error loading viewer count:', error);
-        } else {
-          console.log('[Viewer] Viewer count loaded:', count);
-          setViewerCount(count || 0);
-        }
-      } catch (error) {
-        console.error('[Viewer] Exception loading viewer count:', error);
-      }
-    };
 
     return () => {
       console.log('[Viewer] Cleaning up viewer count channel');
