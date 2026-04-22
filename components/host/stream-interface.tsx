@@ -125,7 +125,7 @@ export function HostStreamInterface({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Initialize camera on mount
+  // Initialize camera on mount and check if stream should resume
   useEffect(() => {
     const init = async () => {
       try {
@@ -134,13 +134,21 @@ export function HostStreamInterface({
           videoRef.current.srcObject = stream;
         }
         setMediaInitialized(true);
+        
+        // Check if stream was live and should resume
+        if (stream.status === 'live' && !isStreaming) {
+          console.log('[Host] Stream was live, resuming automatically...');
+          setTimeout(() => {
+            startStream();
+          }, 1000); // Give time for media to initialize
+        }
       } catch (err) {
         console.error("[v0] Failed to initialize media:", err);
       }
     };
 
     init();
-  }, [initializeMedia]);
+  }, [initializeMedia, stream.status, isStreaming, startStream]);
 
   // Update video element when media stream changes
   useEffect(() => {

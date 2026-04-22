@@ -465,31 +465,53 @@ export function ViewerStreamInterface({
 
   const toggleFullscreen = async () => {
     try {
+      const element = document.documentElement;
+      
       if (!isFullscreen) {
-        // Enter fullscreen - use document element for better compatibility
-        const element = document.documentElement;
+        // Enter fullscreen
+        console.log('[Viewer] Attempting to enter fullscreen');
         
-        if (element.requestFullscreen) {
-          await element.requestFullscreen();
-        } else if ((element as any).webkitRequestFullscreen) {
-          await (element as any).webkitRequestFullscreen();
-        } else if ((element as any).mozRequestFullScreen) {
-          await (element as any).mozRequestFullScreen();
-        } else if ((element as any).msRequestFullscreen) {
-          await (element as any).msRequestFullscreen();
-        } else {
-          console.warn('[Viewer] Fullscreen not supported');
+        // Try different fullscreen methods
+        const fullscreenMethods = [
+          () => element.requestFullscreen(),
+          () => (element as any).webkitRequestFullscreen(),
+          () => (element as any).mozRequestFullScreen(),
+          () => (element as any).msRequestFullscreen(),
+        ];
+        
+        for (const method of fullscreenMethods) {
+          try {
+            await method();
+            console.log('[Viewer] Fullscreen entered successfully');
+            return;
+          } catch (err) {
+            console.log('[Viewer] Method failed, trying next:', err);
+            continue;
+          }
         }
+        
+        console.warn('[Viewer] Fullscreen not supported on this browser');
       } else {
         // Exit fullscreen
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-        } else if ((document as any).webkitExitFullscreen) {
-          await (document as any).webkitExitFullscreen();
-        } else if ((document as any).mozCancelFullScreen) {
-          await (document as any).mozCancelFullScreen();
-        } else if ((document as any).msExitFullscreen) {
-          await (document as any).msExitFullscreen();
+        console.log('[Viewer] Attempting to exit fullscreen');
+        
+        // Try different exit methods
+        const exitMethods = [
+          () => document.exitFullscreen(),
+          () => (document as any).webkitExitFullscreen(),
+          () => (document as any).mozCancelFullScreen(),
+          () => (document as any).msExitFullscreen(),
+        ];
+        
+        for (const method of exitMethods) {
+          try {
+            await method();
+            console.log('[Viewer] Fullscreen exited successfully');
+            return;
+          } catch (err) {
+            console.log('[Viewer] Exit method failed, trying next:', err);
+            continue;
+          }
         }
       }
     } catch (error) {
@@ -500,17 +522,39 @@ export function ViewerStreamInterface({
   // Handle fullscreen change events
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isFullscreenActive = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(isFullscreenActive);
+      console.log('[Viewer] Fullscreen state changed:', isFullscreenActive);
     };
 
+    const handleFullscreenError = (event: Event) => {
+      console.error('[Viewer] Fullscreen error:', event);
+    };
+
+    // Add all fullscreen event listeners
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    
+    document.addEventListener('fullscreenerror', handleFullscreenError);
+    document.addEventListener('webkitfullscreenerror', handleFullscreenError);
+    document.addEventListener('mozfullscreenerror', handleFullscreenError);
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+      
+      document.removeEventListener('fullscreenerror', handleFullscreenError);
+      document.removeEventListener('webkitfullscreenerror', handleFullscreenError);
+      document.removeEventListener('mozfullscreenerror', handleFullscreenError);
     };
   }, []);
 
@@ -893,7 +937,7 @@ export function ViewerStreamInterface({
               Enter your name to join the chat and interact with others
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={joinStream}>
+          <form onSubmit={(e) => { e.preventDefault(); joinStream(); }}>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="name">Your Name</Label>
@@ -902,6 +946,7 @@ export function ViewerStreamInterface({
                   placeholder="Enter your name"
                   value={viewerName}
                   onChange={(e) => setViewerName(e.target.value)}
+                  required
                 />
               </div>
             </div>
