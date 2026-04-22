@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useViewerStream } from "@/lib/webrtc/use-viewer-stream";
+import { useSimpleStream } from "@/lib/webrtc/simple-stream";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,8 @@ import {
   Maximize,
   Loader2,
   VideoOff,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 
 interface Stream {
@@ -68,6 +71,8 @@ export function ViewerStreamInterface({
   const [copied, setCopied] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,6 +82,20 @@ export function ViewerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
+  const streamHook = useFallback 
+    ? useSimpleStream({
+        streamId: stream.id,
+        roomCode: stream.room_code,
+        viewerName: hasJoined ? viewerName : "",
+        onStreamEnd: handleStreamEnd,
+      })
+    : useViewerStream({
+        streamId: stream.id,
+        roomCode: stream.room_code,
+        viewerName: hasJoined ? viewerName : "",
+        onStreamEnd: handleStreamEnd,
+      });
+
   const {
     isConnected,
     isStreamLive,
@@ -84,12 +103,19 @@ export function ViewerStreamInterface({
     error,
     hostVideoEnabled,
     connectionState,
-  } = useViewerStream({
-    streamId: stream.id,
-    roomCode: stream.room_code,
-    viewerName: hasJoined ? viewerName : "",
-    onStreamEnd: handleStreamEnd,
-  });
+  } = streamHook;
+
+  // Auto-switch to fallback if connection fails repeatedly
+  useEffect(() => {
+    if (error && !useFallback && retryCount >= 2) {
+      console.log("Switching to fallback streaming method");
+      setUseFallback(true);
+      setRetryCount(0);
+    }
+    if (error) {
+      setRetryCount(prev => prev + 1);
+    }
+  }, [error, useFallback, retryCount]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -244,7 +270,7 @@ export function ViewerStreamInterface({
       return (
         <Badge variant="secondary" className="gap-1">
           <Wifi className="w-3 h-3" />
-          Connected
+          Connected {useFallback && "(Fallback)"}
         </Badge>
       );
     }
@@ -264,6 +290,11 @@ export function ViewerStreamInterface({
         Disconnected
       </Badge>
     );
+  };
+
+  const handleRetry = () => {
+    setRetryCount(0);
+    setUseFallback(!useFallback);
   };
 
   const getVideoContent = () => {
@@ -354,7 +385,18 @@ export function ViewerStreamInterface({
                 : "Please wait while we connect you"}
             </p>
             {error && (
-              <p className="text-sm text-destructive mt-2">{error}</p>
+              <div className="mt-4 space-y-2">
+                <p className="text-sm text-destructive">{error}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Try {useFallback ? "Standard" : "Fallback"} Connection
+                </Button>
+              </div>
             )}
           </div>
         </div>

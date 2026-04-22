@@ -3,59 +3,61 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { ICE_SERVERS, SignalMessage, RECONNECT_ATTEMPTS, RECONNECT_DELAY } from "./config";
-import { nanoid } from "nanoid";
 
-interface UseViewerStreamProps {
+interface UseSimpleStreamProps {
   streamId: string;
   roomCode: string;
   viewerName: string;
   onStreamEnd?: () => void;
 }
 
-export function useViewerStream({
+export function useSimpleStream({
   streamId,
   roomCode,
   viewerName,
   onStreamEnd,
-}: UseViewerStreamProps) {
+}: UseSimpleStreamProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hostVideoEnabled, setHostVideoEnabled] = useState(true);
   const [hostAudioEnabled, setHostAudioEnabled] = useState(true);
-  const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>("new");
+  const [connectionState, setConnectionState] = useState<string>("new");
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
 
-  const viewerIdRef = useRef<string>(nanoid(10));
+  const viewerIdRef = useRef<string>(Math.random().toString(36).substr(2, 9));
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const joinStreamRef = useRef<() => void>(() => {});
   const supabase = createClient();
 
+  // Simplified ICE servers with public STUN only
+  const SIMPLE_ICE_SERVERS = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+
   // Handle incoming signals
   const handleSignal = useCallback(
-    async (message: SignalMessage) => {
-      // Only process messages meant for this viewer or broadcast messages
+    async (message: any) => {
       if (message.to && message.to !== viewerIdRef.current) return;
 
       switch (message.type) {
         case "offer": {
-          console.log("[v0] Received offer from host");
+          console.log("[simple] Received offer from host");
           
-          // Close existing connection if any
+          // Close existing connection
           if (peerConnectionRef.current) {
             peerConnectionRef.current.close();
             peerConnectionRef.current = null;
           }
           
-          // Create fresh peer connection
-          const pc = new RTCPeerConnection(ICE_SERVERS);
+          const pc = new RTCPeerConnection(SIMPLE_ICE_SERVERS);
           
           pc.ontrack = (event) => {
-            console.log("[v0] Received track:", event.track.kind, event.streams.length);
+            console.log("[simple] Received track:", event.track.kind);
             if (event.streams.length > 0) {
               const stream = event.streams[0];
               setRemoteStream(stream);
@@ -66,84 +68,59 @@ export function useViewerStream({
 
           pc.onicecandidate = (event) => {
             if (event.candidate && channelRef.current) {
-              const signalMessage: SignalMessage = {
-                type: "ice-candidate",
-                from: viewerIdRef.current,
-                to: "host",
-                payload: event.candidate.toJSON(),
-              };
               channelRef.current.send({
                 type: "broadcast",
                 event: "signal",
-                payload: signalMessage,
+                payload: {
+                  type: "ice-candidate",
+                  from: viewerIdRef.current,
+                  to: "host",
+                  payload: event.candidate.toJSON(),
+                },
               });
             }
           };
 
           pc.onconnectionstatechange = () => {
-            console.log("[v0] Viewer connection state:", pc.connectionState);
+            console.log("[simple] Connection state:", pc.connectionState);
             setConnectionState(pc.connectionState);
             
             if (pc.connectionState === "connected") {
               setIsConnected(true);
               setError(null);
               setReconnectAttempts(0);
-            } else if (
-              pc.connectionState === "disconnected" ||
-              pc.connectionState === "failed"
-            ) {
+            } else if (pc.connectionState === "failed") {
               setIsConnected(false);
               setRemoteStream(null);
+              setError("Connection failed. Trying alternative method...");
               
-              // Try to reconnect
-              if (reconnectAttempts < RECONNECT_ATTEMPTS) {
-                setError(`Connection lost. Reconnecting... (${reconnectAttempts + 1}/${RECONNECT_ATTEMPTS})`);
-                reconnectTimeoutRef.current = setTimeout(() => {
-                  setReconnectAttempts((prev) => prev + 1);
-                  // Request new offer from host
-                  joinStreamRef.current();
-                }, RECONNECT_DELAY);
-              } else {
-                setError("Connection failed. Please refresh the page to try again.");
-              }
+              // Try alternative connection method
+              setTimeout(() => {
+                attemptAlternativeConnection();
+              }, 2000);
             }
-          };
-
-          pc.oniceconnectionstatechange = () => {
-            console.log("[v0] Viewer ICE state:", pc.iceConnectionState);
-            if (pc.iceConnectionState === "failed") {
-              setError("ICE connection failed. Check your network connection.");
-            }
-          };
-
-          pc.onicegatheringstatechange = () => {
-            console.log("[v0] ICE gathering state:", pc.iceGatheringState);
           };
 
           peerConnectionRef.current = pc;
 
           try {
-            const offerDesc = new RTCSessionDescription(message.payload as RTCSessionDescriptionInit);
-            await pc.setRemoteDescription(offerDesc);
-
+            await pc.setRemoteDescription(new RTCSessionDescription(message.payload));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-
-            const answerMessage: SignalMessage = {
-              type: "answer",
-              from: viewerIdRef.current,
-              to: "host",
-              payload: pc.localDescription?.toJSON(),
-            };
 
             channelRef.current?.send({
               type: "broadcast",
               event: "signal",
-              payload: answerMessage,
+              payload: {
+                type: "answer",
+                from: viewerIdRef.current,
+                to: "host",
+                payload: pc.localDescription?.toJSON(),
+              },
             });
           } catch (err) {
-            console.error("[v0] Error handling offer:", err);
-            setError("Failed to establish connection. Please try again.");
+            console.error("[simple] Error handling offer:", err);
+            setError("Connection failed. Please refresh the page.");
           }
           break;
         }
@@ -152,23 +129,20 @@ export function useViewerStream({
           if (peerConnectionRef.current && message.payload) {
             try {
               await peerConnectionRef.current.addIceCandidate(
-                new RTCIceCandidate(message.payload as RTCIceCandidateInit)
+                new RTCIceCandidate(message.payload)
               );
             } catch (err) {
-              console.error("[v0] Error adding ICE candidate:", err);
+              console.error("[simple] Error adding ICE candidate:", err);
             }
           }
           break;
         }
 
         case "stream-start": {
-          console.log("[v0] Stream started, joining...");
+          console.log("[simple] Stream started");
           setIsStreamLive(true);
           setError(null);
-          // Wait a moment then request to join the stream
-          setTimeout(() => {
-            joinStream();
-          }, 1000);
+          setTimeout(() => joinStream(), 500);
           break;
         }
 
@@ -181,7 +155,7 @@ export function useViewerStream({
         }
 
         case "track-toggle": {
-          const payload = message.payload as { video?: boolean; audio?: boolean };
+          const payload = message.payload;
           if (payload.video !== undefined) {
             setHostVideoEnabled(payload.video);
           }
@@ -195,11 +169,23 @@ export function useViewerStream({
     [onStreamEnd]
   );
 
+  // Alternative connection attempt
+  const attemptAlternativeConnection = useCallback(() => {
+    console.log("[simple] Trying alternative connection method");
+    setError("Attempting alternative connection...");
+    
+    // Try to reconnect with a new viewer ID
+    viewerIdRef.current = Math.random().toString(36).substr(2, 9);
+    setTimeout(() => {
+      joinStream();
+    }, 1000);
+  }, []);
+
   // Join stream
   const joinStream = useCallback(() => {
     if (!channelRef.current) return;
 
-    const joinMessage: SignalMessage = {
+    const joinMessage = {
       type: "viewer-join",
       from: viewerIdRef.current,
       to: "host",
@@ -216,16 +202,14 @@ export function useViewerStream({
   // Leave stream
   const leaveStream = useCallback(() => {
     if (channelRef.current) {
-      const leaveMessage: SignalMessage = {
-        type: "viewer-leave",
-        from: viewerIdRef.current,
-        to: "host",
-      };
-
       channelRef.current.send({
         type: "broadcast",
         event: "signal",
-        payload: leaveMessage,
+        payload: {
+          type: "viewer-leave",
+          from: viewerIdRef.current,
+          to: "host",
+        },
       });
     }
 
@@ -247,11 +231,11 @@ export function useViewerStream({
     });
 
     channel
-      .on("broadcast", { event: "signal" }, ({ payload }: { payload: any }) => {
-        handleSignal(payload as SignalMessage);
+      .on("broadcast", { event: "signal" }, ({ payload }) => {
+        handleSignal(payload);
       })
-      .subscribe(async (status: any) => {
-        console.log("[v0] Viewer channel status:", status);
+      .subscribe(async (status) => {
+        console.log("[simple] Channel status:", status);
         if (status === "SUBSCRIBED") {
           // Check if stream is already live
           const { data: stream } = await supabase
@@ -262,52 +246,23 @@ export function useViewerStream({
 
           if (stream?.status === "live") {
             setIsStreamLive(true);
-            // Wait a moment then join
-            setTimeout(joinStream, 500);
+            setTimeout(joinStream, 1000);
+          } else if (stream?.status === "ended") {
+            setError("This stream has ended");
+          } else {
+            setError("Waiting for stream to start...");
           }
         }
       });
 
     channelRef.current = channel;
+    joinStreamRef.current = joinStream;
 
     return () => {
       leaveStream();
       supabase.removeChannel(channel);
     };
   }, [roomCode, streamId, handleSignal, joinStream, leaveStream, supabase]);
-
-  // Update viewer record in database
-  useEffect(() => {
-    let viewerRecordId: string | null = null;
-
-    const trackViewer = async () => {
-      const { data } = await supabase
-        .from("viewers")
-        .insert({
-          stream_id: streamId,
-          viewer_name: viewerName,
-        })
-        .select()
-        .single();
-
-      if (data) {
-        viewerRecordId = data.id;
-      }
-    };
-
-    if (viewerName) {
-      trackViewer();
-    }
-
-    return () => {
-      if (viewerRecordId) {
-        supabase
-          .from("viewers")
-          .update({ left_at: new Date().toISOString() })
-          .eq("id", viewerRecordId);
-      }
-    };
-  }, [streamId, viewerName, supabase]);
 
   return {
     viewerId: viewerIdRef.current,

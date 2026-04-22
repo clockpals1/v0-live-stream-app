@@ -9,6 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import {
   Radio,
   Video,
@@ -19,6 +22,15 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  Download,
+  Trash2,
+  Share2,
+  MoreVertical,
+  Eye,
+  EyeOff,
+  Pause,
+  Play,
+  Square,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -51,6 +63,7 @@ export function DashboardContent({ user, host, streams }: DashboardContentProps)
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [deletingStream, setDeletingStream] = useState<string | null>(null);
   const router = useRouter();
 
   const handleCreateStream = async (e: React.FormEvent) => {
@@ -91,7 +104,79 @@ export function DashboardContent({ user, host, streams }: DashboardContentProps)
     const link = `${window.location.origin}/watch/${roomCode}`;
     navigator.clipboard.writeText(link);
     setCopiedCode(roomCode);
+    toast.success("Share link copied to clipboard!");
     setTimeout(() => setCopiedCode(null), 2000);
+  };
+
+  const handleDeleteStream = async (streamId: string) => {
+    setDeletingStream(streamId);
+    const supabase = createClient();
+    
+    try {
+      const { error } = await supabase
+        .from("streams")
+        .delete()
+        .eq("id", streamId);
+
+      if (error) {
+        console.error("Error deleting stream:", error);
+        toast.error("Failed to delete stream");
+      } else {
+        toast.success("Stream deleted successfully");
+        router.refresh();
+      }
+    } catch (err) {
+      console.error("Error deleting stream:", err);
+      toast.error("Failed to delete stream");
+    } finally {
+      setDeletingStream(null);
+    }
+  };
+
+  const handleDownloadRecording = async (stream: Stream) => {
+    if (!stream.recording_url) {
+      toast.error("No recording available for this stream");
+      return;
+    }
+
+    try {
+      const response = await fetch(stream.recording_url);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `${stream.title.replace(/\s+/g, '_')}_recording.webm`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success("Recording downloaded successfully");
+    } catch (err) {
+      console.error("Error downloading recording:", err);
+      toast.error("Failed to download recording");
+    }
+  };
+
+  const shareStream = async (stream: Stream) => {
+    const shareData = {
+      title: stream.title,
+      text: `Join my live stream: ${stream.title}`,
+      url: `${window.location.origin}/watch/${stream.room_code}`
+    };
+
+    if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+      try {
+        await navigator.share(shareData);
+        toast.success("Stream shared successfully");
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          copyShareLink(stream.room_code);
+        }
+      }
+    } else {
+      copyShareLink(stream.room_code);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -213,55 +298,140 @@ export function DashboardContent({ user, host, streams }: DashboardContentProps)
                 </CardContent>
               </Card>
             ) : (
-              <div className="flex flex-col gap-4">
+              <div className="grid gap-4">
                 {streams.map((stream) => (
-                  <Card key={stream.id}>
-                    <CardContent className="p-4">
+                  <Card key={stream.id} className="group hover:shadow-md transition-shadow duration-200">
+                    <CardContent className="p-6">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="font-medium text-foreground truncate">
-                              {stream.title}
-                            </h3>
+                          <div className="flex items-center gap-3 mb-3">
+                            <div className="flex items-center gap-2">
+                              {stream.status === "live" && (
+                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                              )}
+                              <h3 className="font-semibold text-foreground text-lg truncate">
+                                {stream.title}
+                              </h3>
+                            </div>
                             {getStatusBadge(stream.status)}
                           </div>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1">
+                          
+                          <div className="flex items-center gap-6 text-sm text-muted-foreground mb-3">
+                            <span className="flex items-center gap-2">
                               <Users className="w-4 h-4" />
-                              {stream.viewer_count} viewers
+                              <span className="font-medium">{stream.viewer_count}</span>
+                              <span>viewers</span>
                             </span>
-                            <span className="flex items-center gap-1">
+                            <span className="flex items-center gap-2">
                               <Clock className="w-4 h-4" />
-                              {new Date(stream.created_at).toLocaleDateString()}
+                              <span>{new Date(stream.created_at).toLocaleDateString()}</span>
                             </span>
+                            {stream.started_at && (
+                              <span className="flex items-center gap-2">
+                                <Play className="w-4 h-4" />
+                                <span>Started {new Date(stream.started_at).toLocaleTimeString()}</span>
+                              </span>
+                            )}
                           </div>
-                          <div className="mt-2 text-xs text-muted-foreground font-mono">
-                            Code: {stream.room_code}
+                          
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-1 rounded">
+                              Code: {stream.room_code}
+                            </span>
+                            {stream.recording_url && (
+                              <Badge variant="outline" className="text-xs">
+                                <Download className="w-3 h-3 mr-1" />
+                                Recording Available
+                              </Badge>
+                            )}
                           </div>
                         </div>
+                        
                         <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => copyShareLink(stream.room_code)}
-                          >
-                            {copiedCode === stream.room_code ? (
-                              "Copied!"
-                            ) : (
-                              <>
-                                <Copy className="w-4 h-4 mr-1" />
-                                Share
-                              </>
-                            )}
-                          </Button>
                           {stream.status !== "ended" && (
-                            <Button asChild size="sm">
+                            <Button asChild size="sm" className="shrink-0">
                               <Link href={`/host/stream/${stream.room_code}`}>
-                                <ExternalLink className="w-4 h-4 mr-1" />
-                                {stream.status === "live" ? "Manage" : "Start"}
+                                {stream.status === "live" ? (
+                                  <>
+                                    <Square className="w-4 h-4 mr-1" />
+                                    Manage
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="w-4 h-4 mr-1" />
+                                    Start
+                                  </>
+                                )}
                               </Link>
                             </Button>
                           )}
+                          
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="outline" size="sm" className="shrink-0">
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={() => shareStream(stream)}>
+                                <Share2 className="w-4 h-4 mr-2" />
+                                Share Stream
+                              </DropdownMenuItem>
+                              
+                              <DropdownMenuItem onClick={() => copyShareLink(stream.room_code)}>
+                                <Copy className="w-4 h-4 mr-2" />
+                                Copy Link
+                              </DropdownMenuItem>
+                              
+                              {stream.recording_url && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => handleDownloadRecording(stream)}>
+                                    <Download className="w-4 h-4 mr-2" />
+                                    Download Recording
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                              
+                              <DropdownMenuSeparator />
+                              
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onSelect={(e) => e.preventDefault()}
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Delete Stream
+                                  </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Stream</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to delete "{stream.title}"? This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => handleDeleteStream(stream.id)}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                      {deletingStream === stream.id ? (
+                                        <>
+                                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                          Deleting...
+                                        </>
+                                      ) : (
+                                        "Delete Stream"
+                                      )}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                     </CardContent>
