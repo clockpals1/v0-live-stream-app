@@ -9,8 +9,8 @@ const nextConfig = {
     unoptimized: true,
   },
   
-  // Base path for deployment
-  basePath: process.env.NODE_ENV === 'production' ? '' : '',
+  // Disable server-side features for static export
+  distDir: 'out',
   
   // Environment variables
   env: {
