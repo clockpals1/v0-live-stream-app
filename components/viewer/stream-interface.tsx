@@ -40,6 +40,7 @@ import {
   WifiOff as DataSaver,
   Monitor,
   Smartphone,
+  Pause,
 } from "lucide-react";
 
 interface Stream {
@@ -114,6 +115,7 @@ export function ViewerStreamInterface({
     error,
     hostVideoEnabled,
     connectionState,
+    isStreamPaused,
   } = streamHook;
 
   // Auto-switch to fallback if connection fails repeatedly
@@ -561,6 +563,27 @@ export function ViewerStreamInterface({
                 <p className="text-white text-sm">Loading stream...</p>
               </div>
             </div>
+            
+            {/* Pause notification overlay */}
+            {isStreamPaused && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70 pointer-events-none transition-opacity duration-300">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-orange-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-orange-500">
+                    <Pause className="w-8 h-8 text-orange-400" />
+                  </div>
+                  <h3 className="text-white text-xl font-semibold mb-2">Stream Paused</h3>
+                  <p className="text-gray-300 text-sm max-w-md">
+                    The host has paused the stream. Please wait a moment while they resume...
+                  </p>
+                  <div className="mt-4">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 text-orange-400 animate-spin" />
+                      <span className="text-orange-400 text-sm">Will resume shortly</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {!hostVideoEnabled && (
               <div className="absolute inset-0 flex items-center justify-center bg-muted">

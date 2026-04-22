@@ -18,6 +18,7 @@ export function useViewerStream({ streamId, roomCode, viewerName, onStreamEnd }:
   const [hostVideoEnabled, setHostVideoEnabled] = useState(true);
   const [hostAudioEnabled, setHostAudioEnabled] = useState(true);
   const [connectionState, setConnectionState] = useState<string>('new');
+  const [isStreamPaused, setIsStreamPaused] = useState(false);
 
   const streamManagerRef = useRef<ViewerStreamManager | null>(null);
 
@@ -67,6 +68,10 @@ export function useViewerStream({ streamId, roomCode, viewerName, onStreamEnd }:
 
         streamManager.setOnHostAudioEnabled((enabled) => {
           setHostAudioEnabled(enabled);
+        });
+
+        streamManager.setOnIsStreamPaused((paused) => {
+          setIsStreamPaused(paused);
         });
 
         // Initialize the stream manager
@@ -125,6 +130,7 @@ export function useViewerStream({ streamId, roomCode, viewerName, onStreamEnd }:
     hostVideoEnabled,
     hostAudioEnabled,
     connectionState,
+    isStreamPaused,
     joinStream,
     leaveStream,
     getConnectionState,

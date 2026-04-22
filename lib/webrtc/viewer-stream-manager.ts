@@ -34,6 +34,7 @@ export class ViewerStreamManager {
   private onErrorCallback?: (error: string | null) => void;
   private onHostVideoEnabledCallback?: (enabled: boolean) => void;
   private onHostAudioEnabledCallback?: (enabled: boolean) => void;
+  private onIsStreamPausedCallback?: (paused: boolean) => void;
 
   constructor(props: ViewerStreamManagerProps) {
     this.streamId = props.streamId;
@@ -190,11 +191,13 @@ export class ViewerStreamManager {
         break;
 
       case 'stream-pause':
-        console.log('[ViewerManager] Stream paused');
+        console.log('[ViewerManager] Stream paused by host');
+        this.onIsStreamPausedCallback?.(true);
         break;
 
       case 'stream-resume':
-        console.log('[ViewerManager] Stream resumed');
+        console.log('[ViewerManager] Stream resumed by host');
+        this.onIsStreamPausedCallback?.(false);
         break;
 
       case 'track-toggle':
@@ -328,6 +331,10 @@ export class ViewerStreamManager {
 
   setOnHostAudioEnabled(callback: (enabled: boolean) => void): void {
     this.onHostAudioEnabledCallback = callback;
+  }
+
+  setOnIsStreamPaused(callback: (paused: boolean) => void): void {
+    this.onIsStreamPausedCallback = callback;
   }
 
   /**
