@@ -73,7 +73,23 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
         ...HOST_MEDIA_CONSTRAINTS,
         video: { ...(HOST_MEDIA_CONSTRAINTS.video as MediaTrackConstraints), facingMode },
       };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // On iOS/Android, combined video+audio getUserMedia can silently succeed but
+      // return a video-only stream when the mic wasn't pre-permitted. Attempt a
+      // separate audio-only request and merge the track if that happens.
+      if (stream.getAudioTracks().length === 0) {
+        console.warn("[cohost] No audio track in combined getUserMedia — retrying audio separately");
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: HOST_MEDIA_CONSTRAINTS.audio,
+          });
+          audioStream.getAudioTracks().forEach((t) => stream.addTrack(t));
+          console.log("[cohost] Audio track added via separate capture");
+        } catch (audioErr) {
+          console.warn("[cohost] Could not capture audio separately:", audioErr);
+        }
+      }
 
       // Detect if the browser silently kills the camera (suspend, permission revoke, etc.)
       stream.getVideoTracks()[0]?.addEventListener("ended", () => {

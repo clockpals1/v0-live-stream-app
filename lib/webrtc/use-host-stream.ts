@@ -78,8 +78,14 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
       }
       // Guarantee an audio transceiver always exists so replaceTrack() can relay
       // co-host audio even when the admin's own stream captured no microphone.
+      // IMPORTANT: pass streams:[sourceStream] so the receiver's ontrack fires with
+      // event.streams[0] containing the audio track — without this event.streams is
+      // empty, the viewer's handler skips it, and audio never enters remoteStream.
       if (!audioSenderRef) {
-        const at = pc.addTransceiver("audio", { direction: "sendonly" });
+        const at = pc.addTransceiver("audio", {
+          direction: "sendonly",
+          streams: sourceStream ? [sourceStream] : [],
+        });
         audioSenderRef = at.sender;
       }
 

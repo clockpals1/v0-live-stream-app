@@ -971,6 +971,27 @@ export function ViewerStreamInterface({
             </div>
             
 
+            {/* Unmute overlay — shown when muted so mobile viewers know to tap */}
+            {isMuted && isConnected && remoteStream && (
+              <div
+                className="absolute inset-0 flex items-end justify-center pb-20 pointer-events-none z-10"
+              >
+                <button
+                  className="pointer-events-auto flex items-center gap-2 bg-black/70 hover:bg-black/90 text-white text-sm font-medium px-4 py-2 rounded-full border border-white/20 backdrop-blur-sm"
+                  onClick={() => {
+                    setIsMuted(false);
+                    if (videoRef.current) {
+                      videoRef.current.muted = false;
+                      videoRef.current.play().catch(() => {});
+                    }
+                  }}
+                >
+                  <VolumeX className="w-4 h-4 text-red-400" />
+                  Tap to unmute
+                </button>
+              </div>
+            )}
+
             {/* Pause notification overlay */}
             {isStreamPaused && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70 pointer-events-none transition-opacity duration-300">
@@ -1048,7 +1069,19 @@ export function ViewerStreamInterface({
                 variant="secondary"
                 size="icon"
                 className="rounded-full bg-black/50 hover:bg-black/70 text-white"
-                onClick={() => setIsMuted(!isMuted)}
+                onClick={() => {
+                  const newMuted = !isMuted;
+                  setIsMuted(newMuted);
+                  // Set directly on the DOM element inside the click handler so iOS
+                  // considers this a user-gesture context — React's useEffect is
+                  // async and iOS Safari blocks audio enabling outside gesture scope.
+                  if (videoRef.current) {
+                    videoRef.current.muted = newMuted;
+                    if (!newMuted) {
+                      videoRef.current.play().catch(() => {});
+                    }
+                  }
+                }}
               >
                 {isMuted ? (
                   <VolumeX className="w-5 h-5" />

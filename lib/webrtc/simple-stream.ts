@@ -102,6 +102,7 @@ export function useSimpleStream({
           
           pc.ontrack = (event) => {
             console.log("[simple] Received track:", event.track.kind, event.streams.length);
+
             if (event.streams.length > 0) {
               const stream = event.streams[0];
               
@@ -130,6 +131,18 @@ export function useSimpleStream({
               }
               
               setRemoteStream(stream);
+              setIsConnected(true);
+              setError(null);
+            } else {
+              // Track arrived with no associated stream (sender used addTransceiver
+              // without streams option). Merge into existing remoteStream so the
+              // video element's srcObject receives the track data.
+              console.log("[simple] Track has no streams — merging into remoteStream:", event.track.kind);
+              setRemoteStream((prev) => {
+                const tracks = prev ? [...prev.getTracks()] : [];
+                if (!tracks.some((t) => t.id === event.track.id)) tracks.push(event.track);
+                return new MediaStream(tracks);
+              });
               setIsConnected(true);
               setError(null);
             }
