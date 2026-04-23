@@ -42,8 +42,10 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   const pendingJoinsRef = useRef<{ from: string; viewerName: string }[]>([]);
   // Prevents accepting new viewer connections while co-host is stopped
   const acceptingRef = useRef(false);
+  // Shared broadcast channel so director panel updates without postgres_changes publication
+  const statusChannelRef = useRef<RealtimeChannel | null>(null);
 
-  // Update participant status in DB
+  // Update participant status in DB AND broadcast to director panel
   const updateStatus = useCallback(async (status: "ready" | "live" | "offline") => {
     const { error: dbError } = await supabase
       .from("stream_participants")
@@ -52,6 +54,12 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
     if (dbError) {
       console.error(`[cohost] updateStatus(${status}) failed:`, dbError.message, dbError.code);
     }
+    // Broadcast so director panel reacts without needing a DB publication
+    statusChannelRef.current?.send({
+      type: "broadcast",
+      event: "participant-status",
+      payload: { participantId, status },
+    });
   }, [participantId, supabase]);
 
   // Initialize camera (also used to reconnect after a drop)
@@ -321,24 +329,31 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
     }
   }, []);
 
-  // Set up isolated signaling channel
+  // Set up isolated signaling channel + shared status broadcast channel
   useEffect(() => {
     const channel = supabase.channel(signalingChannel, {
       config: { broadcast: { self: false } },
     });
-
     channel
       .on("broadcast", { event: "signal" }, ({ payload }: { payload: any }) => {
         handleSignal(payload as SignalMessage);
       })
       .subscribe();
-
     channelRef.current = channel;
+
+    // Shared channel: admin's director panel subscribes here for instant status updates
+    const statusChannel = supabase.channel(`stream-cams-${streamId}`, {
+      config: { broadcast: { self: false } },
+    });
+    statusChannel.subscribe();
+    statusChannelRef.current = statusChannel;
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(statusChannel);
+      statusChannelRef.current = null;
     };
-  }, [signalingChannel, handleSignal, supabase]);
+  }, [signalingChannel, handleSignal, supabase, streamId]);
 
   // Mark offline on unmount
   useEffect(() => {

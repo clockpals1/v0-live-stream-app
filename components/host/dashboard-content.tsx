@@ -57,6 +57,18 @@ interface Stream {
   assigned_host_id: string | null;
 }
 
+interface CohostParticipant {
+  id: string;
+  slot_label: string;
+  status: "invited" | "ready" | "live" | "offline";
+  stream: {
+    id: string;
+    title: string;
+    room_code: string;
+    status: string;
+  };
+}
+
 interface EmergencyMessage {
   id: string;
   stream_id: string;
@@ -87,8 +99,26 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
   const [newStreamTitle, setNewStreamTitle] = useState("");
   const [emergencyMessages, setEmergencyMessages] = useState<EmergencyMessage[]>([]);
   const [showEmergencyPanel, setShowEmergencyPanel] = useState(false);
+  const [cohostParticipants, setCohostParticipants] = useState<CohostParticipant[]>([]);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  // Load streams where this host is a co-host participant
+  useEffect(() => {
+    if (!host) return;
+    const load = async () => {
+      const { data } = await supabase
+        .from("stream_participants")
+        .select("id, slot_label, status, stream:streams(id, title, room_code, status)")
+        .eq("host_id", host.id)
+        .neq("status", "offline");
+      if (data) {
+        const filtered = (data as any[]).filter((p) => p.stream && p.stream.status !== "ended");
+        setCohostParticipants(filtered as CohostParticipant[]);
+      }
+    };
+    load();
+  }, [host]);
 
   // Subscribe to emergency messages
   useEffect(() => {
@@ -574,7 +604,59 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             )}
 
             <div>
-              <h2 className="text-xl font-semibold text-foreground mb-4">Your Streams</h2>
+              {/* Co-Hosting Streams */}
+            {cohostParticipants.length > 0 && (
+              <div className="mb-6">
+                <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-purple-500" />
+                  Streams You&apos;re Co-Hosting
+                </h2>
+                <div className="grid gap-3">
+                  {cohostParticipants.map((p) => (
+                    <Card key={p.id} className="border-purple-200 bg-purple-50/50 dark:bg-purple-950/20">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              {p.status === "live" && (
+                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
+                              )}
+                              <h3 className="font-semibold text-foreground truncate">{p.stream.title}</h3>
+                              {p.stream.status === "live" ? (
+                                <Badge className="bg-red-500 text-white text-xs shrink-0">Live</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-xs shrink-0">Waiting</Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className="font-medium text-purple-600">{p.slot_label}</span>
+                              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+                                {p.stream.room_code}
+                              </span>
+                              <span className={`text-xs font-medium ${
+                                p.status === "live" ? "text-red-500" :
+                                p.status === "ready" ? "text-blue-500" :
+                                "text-yellow-600"
+                              }`}>
+                                {p.status === "live" ? "Broadcasting" : p.status === "ready" ? "Camera Ready" : "Invited"}
+                              </span>
+                            </div>
+                          </div>
+                          <Button asChild size="sm" className="shrink-0 bg-purple-600 hover:bg-purple-700">
+                            <Link href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}>
+                              <Video className="w-4 h-4 mr-1" />
+                              {p.status === "live" ? "Manage" : "Go Live"}
+                            </Link>
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <h2 className="text-xl font-semibold text-foreground mb-4">Your Streams</h2>
             {streams.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">

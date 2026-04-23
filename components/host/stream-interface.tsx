@@ -166,9 +166,9 @@ export function HostStreamInterface({
   useEffect(() => {
     const init = async () => {
       try {
-        const stream = await initializeMedia('environment');
-        if (videoRef.current && stream) {
-          videoRef.current.srcObject = stream;
+        const mediaStreamResult = await initializeMedia('environment');
+        if (videoRef.current && mediaStreamResult) {
+          videoRef.current.srcObject = mediaStreamResult;
         }
         setMediaInitialized(true);
         
@@ -197,11 +197,30 @@ export function HostStreamInterface({
   // Real-time chat via Broadcast (reliable; no Supabase publication config needed)
   useEffect(() => {
     const hostName = host.display_name || "Host";
+
+    const loadMessages = async () => {
+      const { data } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("stream_id", stream.id)
+        .order("created_at", { ascending: true });
+      if (data) {
+        // Merge: keep any broadcast-arrived messages that aren't in DB yet
+        setMessages((prev) => {
+          const ids = new Set(data.map((m: ChatMessage) => m.id));
+          const extras = prev.filter((m) => !ids.has(m.id));
+          return [...data, ...extras].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+        });
+      }
+    };
+
     const channel = supabase
       .channel(`chat-room-${stream.id}`, {
         config: { broadcast: { self: true } },
       })
-      .on("broadcast", { event: "chat-message" }, ({ payload }) => {
+      .on("broadcast", { event: "chat-message" }, ({ payload }: { payload: any }) => {
         const msg = payload as ChatMessage;
         setMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev;
@@ -214,19 +233,11 @@ export function HostStreamInterface({
           vibrateDevice();
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") loadMessages();
+      });
 
     chatChannelRef.current = channel;
-
-    // Load existing messages on mount
-    supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("stream_id", stream.id)
-      .order("created_at", { ascending: true })
-      .then(({ data }: { data: ChatMessage[] | null }) => {
-        if (data) setMessages(data);
-      });
 
     return () => {
       supabase.removeChannel(channel);

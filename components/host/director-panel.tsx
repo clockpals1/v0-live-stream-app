@@ -111,10 +111,24 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
     loadHosts();
   }, [streamId]);
 
-  // Realtime updates for participant status changes
+  // Real-time participant status via Broadcast (no Postgres publication needed)
   useEffect(() => {
     const channel = supabase
-      .channel(`participants-${streamId}`)
+      .channel(`stream-cams-${streamId}`)
+      .on("broadcast", { event: "participant-status" }, ({ payload }: { payload: any }) => {
+        const { participantId, status } = payload as { participantId: string; status: string };
+        setParticipants((prev) =>
+          prev.map((p) => (p.id === participantId ? { ...p, status: status as Participant["status"] } : p))
+        );
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [streamId]);
+
+  // Fallback: Postgres Changes (works only if stream_participants is in realtime publication)
+  useEffect(() => {
+    const channel = supabase
+      .channel(`participants-pg-${streamId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "stream_participants", filter: `stream_id=eq.${streamId}` },
