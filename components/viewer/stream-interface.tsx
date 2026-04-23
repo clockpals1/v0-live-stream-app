@@ -90,6 +90,7 @@ export function ViewerStreamInterface({
   const [emergencyMessage, setEmergencyMessage] = useState("");
   const [emergencySent, setEmergencySent] = useState(false);
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
+  const [streamElapsed, setStreamElapsed] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -538,6 +539,21 @@ export function ViewerStreamInterface({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const formatElapsed = (s: number) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  };
+
+  const getNameColor = (name: string) => {
+    const colors = ['text-blue-400', 'text-emerald-400', 'text-purple-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-yellow-400', 'text-rose-400', 'text-indigo-400', 'text-teal-400'];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  };
+
   const formatDuration = (startedAt: string | null, endedAt: string | null): string => {
     if (!startedAt) return 'unknown time';
     
@@ -714,6 +730,31 @@ export function ViewerStreamInterface({
       }
     }
   }, [videoQuality, isDataSaver, remoteStream]);
+
+  // Live duration timer
+  useEffect(() => {
+    if (stream.status !== 'live' || !stream.started_at) return;
+    const start = new Date(stream.started_at).getTime();
+    const tick = () => setStreamElapsed(Math.floor((Date.now() - start) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [stream.status, stream.started_at]);
+
+  // Periodic viewer count refresh — backup if realtime misses events
+  useEffect(() => {
+    if (stream.status !== 'live') return;
+    const refresh = async () => {
+      const { count } = await supabase
+        .from('viewers')
+        .select('*', { count: 'exact', head: true })
+        .eq('stream_id', stream.id)
+        .is('left_at', null);
+      if (count !== null) setViewerCount(count);
+    };
+    const id = setInterval(refresh, 30000);
+    return () => clearInterval(id);
+  }, [stream.id, stream.status, supabase]);
 
   // Auto-hide controls in fullscreen
   useEffect(() => {
@@ -1077,8 +1118,16 @@ export function ViewerStreamInterface({
                 type="button"
                 variant="outline"
                 className="flex-1"
-                onClick={() => {
-                  setViewerName("Guest");
+                onClick={async () => {
+                  const guestName = "Guest";
+                  setViewerName(guestName);
+                  try {
+                    await supabase.from("viewers").insert({
+                      stream_id: stream.id,
+                      name: guestName,
+                      joined_at: new Date().toISOString(),
+                    });
+                  } catch {}
                   setHasJoined(true);
                   setShowNameDialog(false);
                 }}
@@ -1156,26 +1205,37 @@ export function ViewerStreamInterface({
       )}
 
       <div className="min-h-screen bg-background">
-        <header className="border-b border-border">
-          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2">
+        <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-3">
+            <Link href="/" className="flex items-center gap-2 shrink-0">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Radio className="w-4 h-4 text-primary-foreground" />
               </div>
-              <span className="font-bold text-foreground">
-                Isunday Stream Live
-              </span>
+              <span className="font-bold text-foreground hidden sm:block">Isunday Stream Live</span>
             </Link>
-            <div className="flex items-center gap-4">
+
+            <h2 className="text-sm font-medium text-foreground truncate flex-1 text-center hidden md:block">
+              {stream.title}
+            </h2>
+
+            <div className="flex items-center gap-2 shrink-0">
               {stream.status === "live" && (
-                <Badge className="bg-red-500 text-white animate-pulse">
-                  <Circle className="w-2 h-2 mr-1 fill-current" />
-                  LIVE
-                </Badge>
+                <>
+                  <Badge className="bg-red-500 text-white gap-1.5 px-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                    LIVE
+                  </Badge>
+                  {streamElapsed > 0 && (
+                    <span className="text-xs text-muted-foreground font-mono hidden sm:block tabular-nums">
+                      {formatElapsed(streamElapsed)}
+                    </span>
+                  )}
+                </>
               )}
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Users className="w-4 h-4" />
-                <span>{viewerCount} watching</span>
+              <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/20 text-red-500 px-2.5 py-1 rounded-full">
+                <Users className="w-3.5 h-3.5" />
+                <span className="text-sm font-bold tabular-nums">{viewerCount}</span>
+                <span className="text-xs hidden sm:inline text-red-400">watching</span>
               </div>
             </div>
           </div>
@@ -1212,30 +1272,33 @@ export function ViewerStreamInterface({
               </Card>
 
               {/* Stream Info */}
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h1 className="text-xl font-semibold text-foreground">
-                    {stream.title}
-                  </h1>
-                  <p className="text-sm text-muted-foreground">
-                    Hosted by {hostName}
-                  </p>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-lg font-semibold text-foreground truncate md:hidden">{stream.title}</h1>
+                  <div className="flex items-center gap-2 flex-wrap mt-1 md:mt-0">
+                    <p className="text-sm text-muted-foreground">Hosted by <span className="font-medium text-foreground">{hostName}</span></p>
+                    {stream.status === 'live' && streamElapsed > 0 && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="w-3 h-3" />
+                        {formatElapsed(streamElapsed)}
+                      </span>
+                    )}
+                    {stream.status === 'live' && (
+                      <span className="flex items-center gap-1 text-xs text-red-500 font-medium">
+                        <Users className="w-3 h-3" />
+                        {viewerCount} {viewerCount === 1 ? 'viewer' : 'viewers'}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={copyShareLink}>
-                  {copied ? (
-                    "Copied!"
-                  ) : (
-                    <>
-                      <Share2 className="w-4 h-4 mr-2" />
-                      Share
-                    </>
-                  )}
+                <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0">
+                  {copied ? "Copied!" : (<><Share2 className="w-4 h-4 mr-2" />Share</>)}
                 </Button>
               </div>
             </div>
 
             {/* Chat Panel */}
-            <Card className="lg:col-span-1 flex flex-col h-[500px] lg:h-[600px]">
+            <Card className="lg:col-span-1 flex flex-col h-[420px] sm:h-[500px] lg:h-[calc(100vh-11rem)] lg:sticky lg:top-20">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <MessageCircle className="w-4 h-4" />
@@ -1265,21 +1328,34 @@ export function ViewerStreamInterface({
                         No messages yet. Be the first to say something!
                       </p>
                     ) : (
-                      messages.map((msg) => (
-                        <div key={msg.id} className="flex flex-col gap-1">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-sm font-medium text-foreground">
-                              {msg.sender_name}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(msg.created_at).toLocaleTimeString()}
-                            </span>
+                      messages.map((msg) => {
+                        const isEmergency = msg.sender_name?.startsWith('SYSTEM -') || msg.message?.startsWith('EMERGENCY:');
+                        const isOwn = msg.sender_name === viewerName;
+                        return (
+                          <div key={msg.id} className={`flex flex-col gap-0.5 rounded-lg px-2 py-1.5 ${
+                            isEmergency ? 'bg-red-500/10 border border-red-500/20' :
+                            isOwn ? 'bg-primary/5 border border-primary/10' : 'hover:bg-muted/50'
+                          }`}>
+                            <div className="flex items-baseline gap-1.5 flex-wrap">
+                              <span className={`text-xs font-semibold ${
+                                isEmergency ? 'text-red-500' :
+                                isOwn ? 'text-primary' :
+                                getNameColor(msg.sender_name)
+                              }`}>
+                                {isEmergency ? '🚨 Alert' : isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <p className={`text-sm break-words leading-snug ${
+                              isEmergency ? 'text-red-400 font-medium' : 'text-foreground/80'
+                            }`}>
+                              {isEmergency ? msg.message.replace('EMERGENCY: ', '') : msg.message}
+                            </p>
                           </div>
-                          <p className="text-sm text-muted-foreground">
-                            {msg.message}
-                          </p>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                     <div ref={messagesEndRef} />
                   </div>
