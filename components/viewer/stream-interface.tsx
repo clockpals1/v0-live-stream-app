@@ -830,21 +830,18 @@ export function ViewerStreamInterface({
     return () => clearInterval(id);
   }, [stream.status, stream.started_at]);
 
-  // Periodic viewer count refresh — backup polling every 5s
+  // Periodic viewer count refresh — count directly from viewers table every 5s
   useEffect(() => {
     if (stream.status !== 'live') return;
     const refresh = async () => {
-      // Primary: read from streams.viewer_count (maintained by DB trigger)
-      const { data } = await supabase
-        .from('streams')
-        .select('viewer_count')
-        .eq('id', stream.id)
-        .single();
-      if (data && typeof data.viewer_count === 'number') {
-        setViewerCount(data.viewer_count);
-      }
+      const { count } = await supabase
+        .from('viewers')
+        .select('*', { count: 'exact', head: true })
+        .eq('stream_id', stream.id)
+        .is('left_at', null);
+      if (count !== null) setViewerCount(count);
     };
-    refresh(); // run immediately on mount
+    refresh(); // run immediately
     const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
   }, [stream.id, stream.status, supabase]);
