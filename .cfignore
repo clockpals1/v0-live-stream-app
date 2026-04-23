@@ -1,10 +1,6 @@
-# Prevent Cloudflare from detecting OpenNext
-wrangler.toml
-wrangler.jsonc
-open-next.config.ts
-.dev.vars
-.next/open-next
-.open-next
-
-# Force static deployment
+# Ignore build artifacts and local files from Cloudflare uploads
 node_modules
+.next/
+.open-next/
+.dev.vars
+.env*.local

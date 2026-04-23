@@ -1,12 +1,7 @@
 name: Deploy to Vercel
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:  # Manual trigger only — disabled for Cloudflare deployment
 
 jobs:
   deploy:

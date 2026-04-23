@@ -15,3 +15,7 @@ node_modules
 .next/
 .DS_Store
 .vercel
+
+# Cloudflare / OpenNext build output
+.open-next/
+.dev.vars
