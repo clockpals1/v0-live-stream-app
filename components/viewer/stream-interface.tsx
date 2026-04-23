@@ -42,6 +42,7 @@ import {
   Pause,
   ArrowLeft,
   HelpCircle,
+  PictureInPicture2,
 } from "lucide-react";
 
 interface Stream {
@@ -91,10 +92,14 @@ export function ViewerStreamInterface({
   const [emergencySent, setEmergencySent] = useState(false);
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [streamElapsed, setStreamElapsed] = useState(0);
+  const [isPiP, setIsPiP] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
@@ -566,6 +571,26 @@ export function ViewerStreamInterface({
     return `${Math.floor(duration / 3600)}h ${Math.floor((duration % 3600) / 60)}m`;
   };
 
+  const togglePiP = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (typeof (video as any).webkitSetPresentationMode === 'function') {
+        // iOS Safari
+        const current = (video as any).webkitPresentationMode;
+        (video as any).webkitSetPresentationMode(
+          current === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
+        );
+      } else if (video.requestPictureInPicture) {
+        await video.requestPictureInPicture();
+      }
+    } catch (err) {
+      console.log('[Viewer] PiP error:', err);
+    }
+  };
+
   const toggleFullscreen = async () => {
     if (!isFullscreen) {
       const video = videoRef.current;
@@ -730,6 +755,65 @@ export function ViewerStreamInterface({
       }
     }
   }, [videoQuality, isDataSaver, remoteStream]);
+
+  // Detect PiP support on mount
+  useEffect(() => {
+    const video = videoRef.current;
+    const supported =
+      !!document.pictureInPictureEnabled ||
+      (video && typeof (video as any).webkitSetPresentationMode === 'function');
+    setPipSupported(!!supported);
+  }, []);
+
+  // Sync PiP state from native events
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onEnter = () => setIsPiP(true);
+    const onLeave = () => setIsPiP(false);
+    video.addEventListener('enterpictureinpicture', onEnter);
+    video.addEventListener('leavepictureinpicture', onLeave);
+    return () => {
+      video.removeEventListener('enterpictureinpicture', onEnter);
+      video.removeEventListener('leavepictureinpicture', onLeave);
+    };
+  }, []);
+
+  // Wake Lock — keep screen on while stream is live
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch { /* not supported or denied */ }
+    };
+    const releaseWakeLock = () => {
+      wakeLockRef.current?.release();
+      wakeLockRef.current = null;
+    };
+
+    if (stream.status === 'live') {
+      requestWakeLock();
+    }
+
+    // Re-acquire after page becomes visible again (browsers release it on hide)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && stream.status === 'live') {
+        requestWakeLock();
+        // Resume video if browser paused it in background
+        if (videoRef.current?.paused) {
+          videoRef.current.play().catch(() => {});
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      releaseWakeLock();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [stream.status]);
 
   // Live duration timer
   useEffect(() => {
@@ -993,6 +1077,21 @@ export function ViewerStreamInterface({
                 )}
               </Button>
               
+              {/* Picture-in-Picture button */}
+              {pipSupported && remoteStream && (
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className={`rounded-full text-white ${
+                    isPiP ? 'bg-blue-500/80 hover:bg-blue-600' : 'bg-black/50 hover:bg-black/70'
+                  }`}
+                  onClick={togglePiP}
+                  title={isPiP ? 'Exit picture-in-picture' : 'Pop out — watch while browsing'}
+                >
+                  <PictureInPicture2 className="w-5 h-5" />
+                </Button>
+              )}
+
               {/* Emergency contact button */}
               <Button
                 variant="secondary"
@@ -1005,6 +1104,17 @@ export function ViewerStreamInterface({
               </Button>
             </div>
             
+            {/* PiP active banner — shown when popped out */}
+            {isPiP && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/80 pointer-events-none">
+                <div className="text-center">
+                  <PictureInPicture2 className="w-10 h-10 text-blue-400 mx-auto mb-3" />
+                  <p className="text-white font-medium">Watching in picture-in-picture</p>
+                  <p className="text-gray-400 text-sm mt-1">Stream continues playing in the overlay</p>
+                </div>
+              </div>
+            )}
+
             {/* Status indicators */}
             <div className={`absolute top-4 right-4 flex items-center gap-2 transition-opacity duration-300 ${
               showControls || !isFullscreen ? 'opacity-100' : 'opacity-0'
