@@ -105,6 +105,7 @@ export function ViewerStreamInterface({
 
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+  const chatChannelRef = useRef<any>(null);
 
   const handleStreamEnd = useCallback(() => {
     setStream((prev) => ({ ...prev, status: "ended" }));
@@ -342,39 +343,30 @@ export function ViewerStreamInterface({
     };
   }, [stream.id, supabase]);
 
-  // Subscribe to chat messages
+  // Real-time chat via Broadcast (same channel as host — no publication config needed)
   useEffect(() => {
-    console.log('[Viewer] Setting up chat subscription for stream:', stream.id);
-    
+    console.log('[Viewer] Setting up chat broadcast subscription for stream:', stream.id);
+
     const channel = supabase
-      .channel(`chat-${stream.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "chat_messages",
-          filter: `stream_id=eq.${stream.id}`,
-        },
-        (payload: any) => {
-          console.log('[Viewer] New chat message received:', payload.new);
-          setMessages((prev) => [...prev, payload.new as ChatMessage]);
-        }
-      )
+      .channel(`chat-room-${stream.id}`, {
+        config: { broadcast: { self: true } },
+      })
+      .on("broadcast", { event: "chat-message" }, ({ payload }) => {
+        console.log('[Viewer] New chat message received via broadcast:', payload);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === payload.id)) return prev;
+          return [...prev, payload as ChatMessage];
+        });
+      })
       .subscribe((status) => {
         console.log('[Viewer] Chat subscription status:', status);
-        
         if (status === 'SUBSCRIBED') {
-          console.log('[Viewer] Chat channel subscribed successfully');
-          // Load existing messages after subscription
+          console.log('[Viewer] Chat channel subscribed, loading existing messages...');
           loadExistingMessages();
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[Viewer] Chat channel error, retrying...');
-          setTimeout(() => {
-            // Retry setup
-          }, 2000);
         }
       });
+
+    chatChannelRef.current = channel;
 
     const loadExistingMessages = async () => {
       try {
@@ -384,7 +376,6 @@ export function ViewerStreamInterface({
           .select("*")
           .eq("stream_id", stream.id)
           .order("created_at", { ascending: true });
-
         if (error) {
           console.error('[Viewer] Error loading existing messages:', error);
         } else {
@@ -399,6 +390,7 @@ export function ViewerStreamInterface({
     return () => {
       console.log('[Viewer] Cleaning up chat channel');
       supabase.removeChannel(channel);
+      chatChannelRef.current = null;
     };
   }, [stream.id]);
 
@@ -467,14 +459,20 @@ export function ViewerStreamInterface({
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !hasJoined) return;
-
-    await supabase.from("chat_messages").insert({
-      stream_id: stream.id,
-      sender_name: viewerName,
-      message: newMessage.trim(),
-    });
-
-    setNewMessage("");
+    const msgText = newMessage.trim();
+    setNewMessage(""); // clear immediately for responsive feel
+    const { data } = await supabase
+      .from("chat_messages")
+      .insert({ stream_id: stream.id, sender_name: viewerName, message: msgText })
+      .select()
+      .single();
+    if (data && chatChannelRef.current) {
+      chatChannelRef.current.send({
+        type: "broadcast",
+        event: "chat-message",
+        payload: data,
+      });
+    }
   };
 
   const sendEmergencyMessage = async (e: React.FormEvent) => {

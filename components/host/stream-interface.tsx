@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useHostStream } from "@/lib/webrtc/use-host-stream";
 import { useCohostReceiver } from "@/lib/webrtc/use-cohost-receiver";
+import { playNotificationSound, vibrateDevice } from "@/lib/utils/notification";
 import { MAX_VIEWERS } from "@/lib/webrtc/config";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -92,12 +93,15 @@ export function HostStreamInterface({
   const isStreamOwner = host.id === initialStream.host_id;
 
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+  const activeTabRef = useRef("chat");
+  const chatChannelRef = useRef<any>(null);
 
   const {
     mediaStream,
@@ -190,26 +194,31 @@ export function HostStreamInterface({
     }
   }, [mediaStream]);
 
-  // Subscribe to chat messages
+  // Real-time chat via Broadcast (reliable; no Supabase publication config needed)
   useEffect(() => {
+    const hostName = host.display_name || "Host";
     const channel = supabase
-      .channel(`chat-${stream.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "chat_messages",
-          filter: `stream_id=eq.${stream.id}`,
-        },
-        (payload: any) => {
-          console.log('[Host] New chat message received:', payload.new);
-          setMessages((prev) => [...prev, payload.new as ChatMessage]);
+      .channel(`chat-room-${stream.id}`, {
+        config: { broadcast: { self: true } },
+      })
+      .on("broadcast", { event: "chat-message" }, ({ payload }) => {
+        const msg = payload as ChatMessage;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+        // Notify host only for others' messages when chat tab is not active
+        if (msg.sender_name !== hostName && activeTabRef.current !== "chat") {
+          setUnreadCount((c) => c + 1);
+          playNotificationSound();
+          vibrateDevice();
         }
-      )
+      })
       .subscribe();
 
-    // Load existing messages
+    chatChannelRef.current = channel;
+
+    // Load existing messages on mount
     supabase
       .from("chat_messages")
       .select("*")
@@ -221,8 +230,9 @@ export function HostStreamInterface({
 
     return () => {
       supabase.removeChannel(channel);
+      chatChannelRef.current = null;
     };
-  }, [stream.id]);
+  }, [stream.id, host.display_name]);
 
   const refreshChat = async () => {
     setIsRefreshingChat(true);
@@ -320,14 +330,20 @@ export function HostStreamInterface({
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
-
-    await supabase.from("chat_messages").insert({
-      stream_id: stream.id,
-      sender_name: host.display_name || "Host",
-      message: newMessage.trim(),
-    });
-
-    setNewMessage("");
+    const msgText = newMessage.trim();
+    setNewMessage(""); // clear immediately for responsive feel
+    const { data } = await supabase
+      .from("chat_messages")
+      .insert({ stream_id: stream.id, sender_name: host.display_name || "Host", message: msgText })
+      .select()
+      .single();
+    if (data && chatChannelRef.current) {
+      chatChannelRef.current.send({
+        type: "broadcast",
+        event: "chat-message",
+        payload: data,
+      });
+    }
   };
 
   const handleEndStream = async () => {
@@ -660,15 +676,26 @@ export function HostStreamInterface({
 
           {/* Right Sidebar: Chat + Director Panel */}
           <Card className="lg:col-span-1 flex flex-col h-[600px] overflow-hidden">
-            <Tabs defaultValue="chat" className="flex flex-col h-full">
+            <Tabs
+              defaultValue="chat"
+              className="flex flex-col h-full"
+              onValueChange={(v) => {
+                activeTabRef.current = v;
+                if (v === "chat") setUnreadCount(0);
+              }}
+            >
               <div className="px-3 pt-3 pb-0 border-b border-border">
                 <TabsList className="w-full">
                   <TabsTrigger value="chat" className="flex-1 text-xs gap-1">
                     <MessageCircle className="w-3.5 h-3.5" />
                     Chat
-                    {messages.length > 0 && (
+                    {unreadCount > 0 ? (
+                      <span className="ml-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    ) : messages.length > 0 ? (
                       <span className="text-muted-foreground">({messages.length})</span>
-                    )}
+                    ) : null}
                   </TabsTrigger>
                   {isStreamOwner && (
                     <TabsTrigger value="cameras" className="flex-1 text-xs gap-1">
