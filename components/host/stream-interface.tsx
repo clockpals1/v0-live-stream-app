@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useHostStream } from "@/lib/webrtc/use-host-stream";
+import { useCohostReceiver } from "@/lib/webrtc/use-cohost-receiver";
 import { MAX_VIEWERS } from "@/lib/webrtc/config";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -124,6 +125,21 @@ export function HostStreamInterface({
     roomCode: stream.room_code,
   });
 
+  // Fallback receiver: connects to the active co-host when the warm pool hasn't
+  // pre-connected yet (race condition where admin switches before warm-up finishes).
+  const coHostFallbackStream = useCohostReceiver(
+    isStreamOwner ? activeParticipantId : null
+  );
+
+  // Relay fallback stream when warm pool missed and receiver connects
+  useEffect(() => {
+    if (!isStreamOwner) return;
+    if (activeParticipantId && coHostFallbackStream) {
+      relayStream(coHostFallbackStream);
+    } else if (!activeParticipantId) {
+      relayStream(null);
+    }
+  }, [coHostFallbackStream, activeParticipantId, isStreamOwner, relayStream]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -672,7 +688,15 @@ export function HostStreamInterface({
                     activeParticipantId={activeParticipantId}
                     onSwitch={(id, warmStream) => {
                       setActiveParticipantId(id);
-                      relayStream(warmStream); // instant — stream is already flowing
+                      if (warmStream) {
+                        // Warm pool had it ready — instant relay
+                        relayStream(warmStream);
+                      } else if (!id) {
+                        // Switching back to main camera
+                        relayStream(null);
+                      }
+                      // If id set but no warmStream: useCohostReceiver fallback
+                      // connects and the useEffect above relays when ready
                     }}
                   />
                 </TabsContent>

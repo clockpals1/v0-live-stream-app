@@ -30,6 +30,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [viewerCount, setViewerCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -39,10 +40,13 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
 
   // Update participant status in DB
   const updateStatus = useCallback(async (status: "ready" | "live" | "offline") => {
-    await supabase
+    const { error: dbError } = await supabase
       .from("stream_participants")
       .update({ status, ...(status === "live" ? { joined_at: new Date().toISOString() } : {}) })
       .eq("id", participantId);
+    if (dbError) {
+      console.error(`[cohost] updateStatus(${status}) failed:`, dbError.message, dbError.code);
+    }
   }, [participantId, supabase]);
 
   // Initialize camera
@@ -54,6 +58,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       mediaStreamRef.current = stream;
+      setMediaStream(stream);
       await updateStatus("ready");
       return stream;
     } catch (err) {
@@ -235,6 +240,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
       } else {
         mediaStreamRef.current = newStream;
       }
+      setMediaStream(mediaStreamRef.current);
       return mediaStreamRef.current;
     } catch (err) {
       setError("Could not switch camera.");
@@ -271,7 +277,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   }, [updateStatus]);
 
   return {
-    mediaStream: mediaStreamRef.current,
+    mediaStream,
     initializeMedia,
     isStreaming,
     videoEnabled,
