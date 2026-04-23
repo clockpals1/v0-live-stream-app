@@ -7,7 +7,14 @@ import { Radio, ArrowLeft, ShieldCheck } from "lucide-react";
 
 export default async function AdminPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    redirect("/auth/login");
+  }
 
   if (!user) redirect("/auth/login");
 
