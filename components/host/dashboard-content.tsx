@@ -37,6 +37,7 @@ import {
   X,
   CalendarClock,
   MapPin,
+  ShieldCheck,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -70,6 +71,7 @@ interface Host {
   user_id: string;
   email: string;
   display_name: string | null;
+  is_admin?: boolean;
 }
 
 interface DashboardContentProps {
@@ -396,6 +398,16 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             <span className="font-bold text-foreground">Isunday Stream Live</span>
           </Link>
           <div className="flex items-center gap-4">
+            {/* Admin Panel Link — only for admins */}
+            {host.is_admin && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/admin">
+                  <ShieldCheck className="w-4 h-4 mr-2 text-primary" />
+                  <span className="hidden sm:inline">Host Management</span>
+                  <span className="sm:hidden">Admin</span>
+                </Link>
+              </Button>
+            )}
             {/* Emergency Notification Button */}
             <Button
               variant="ghost"
@@ -411,7 +423,7 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                 </Badge>
               )}
             </Button>
-            <span className="text-sm text-muted-foreground">
+            <span className="text-sm text-muted-foreground hidden sm:inline">
               {host.display_name || user.email}
             </span>
             <Button variant="ghost" size="sm" onClick={handleSignOut}>
