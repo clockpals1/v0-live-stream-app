@@ -1478,7 +1478,7 @@ export function ViewerStreamInterface({
             </div>
 
             {/* Chat Panel */}
-            <Card className="lg:col-span-1 flex flex-col h-[420px] sm:h-[500px] lg:h-[calc(100vh-11rem)] lg:sticky lg:top-20">
+            <Card className="lg:col-span-1 flex flex-col h-[380px] sm:h-[480px] lg:h-[calc(100vh-11rem)] lg:sticky lg:top-20">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <MessageCircle className="w-4 h-4" />
@@ -1500,9 +1500,9 @@ export function ViewerStreamInterface({
                   )}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="flex-1 flex flex-col p-0">
-                <ScrollArea className="flex-1 px-4">
-                  <div className="flex flex-col gap-3 py-2">
+              <CardContent className="flex-1 min-h-0 flex flex-col p-0">
+                <ScrollArea className="flex-1 min-h-0 px-4">
+                  <div className="flex flex-col gap-2 py-2 w-full">
                     {messages.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-8">
                         No messages yet. Be the first to say something!
@@ -1512,23 +1512,23 @@ export function ViewerStreamInterface({
                         const isEmergency = msg.sender_name?.startsWith('SYSTEM -') || msg.message?.startsWith('EMERGENCY:');
                         const isOwn = msg.sender_name === viewerName;
                         return (
-                          <div key={msg.id} className={`flex flex-col gap-0.5 rounded-lg px-2 py-1.5 ${
+                          <div key={msg.id} className={`w-full overflow-hidden flex flex-col gap-0.5 rounded-lg px-2 py-1.5 ${
                             isEmergency ? 'bg-red-500/10 border border-red-500/20' :
-                            isOwn ? 'bg-primary/5 border border-primary/10' : 'hover:bg-muted/50'
+                            isOwn ? 'bg-primary/5 border border-primary/10' : 'bg-muted/40'
                           }`}>
                             <div className="flex items-center gap-1.5 min-w-0">
-                              <span className={`text-xs font-semibold truncate max-w-[130px] flex-shrink ${
+                              <span className={`text-xs font-semibold truncate max-w-[120px] shrink ${
                                 isEmergency ? 'text-red-500' :
                                 isOwn ? 'text-primary' :
                                 getNameColor(msg.sender_name)
                               }`}>
-                                {isEmergency ? '🚨 Alert' : isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
+                                {isEmergency ? '\uD83D\uDEA8 Alert' : isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
                               </span>
-                              <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                              <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
                                 {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
-                            <p className={`text-sm break-words leading-snug ${
+                            <p className={`text-sm [overflow-wrap:anywhere] leading-snug ${
                               isEmergency ? 'text-red-400 font-medium' : 'text-foreground/80'
                             }`}>
                               {isEmergency ? msg.message.replace('EMERGENCY: ', '') : msg.message}
@@ -1542,7 +1542,7 @@ export function ViewerStreamInterface({
                 </ScrollArea>
                 <form
                   onSubmit={sendMessage}
-                  className="p-4 border-t border-border"
+                  className="shrink-0 p-4 border-t border-border"
                 >
                   {hasJoined && viewerName !== "Guest" ? (
                     <div className="flex items-center gap-2">

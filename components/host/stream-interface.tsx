@@ -737,16 +737,16 @@ export function HostStreamInterface({
               )}
 
               {/* Chat Tab */}
-              <TabsContent value="chat" className="flex-1 flex flex-col mt-0 overflow-hidden data-[state=active]:flex">
-                <div className="flex items-center justify-between px-4 py-2">
+              <TabsContent value="chat" className="flex-1 min-h-0 flex flex-col mt-0 overflow-hidden data-[state=active]:flex">
+                <div className="shrink-0 flex items-center justify-between px-4 py-2">
                   <span className="text-xs text-muted-foreground">{messages.length} message{messages.length !== 1 ? 's' : ''}</span>
                   <Button variant="ghost" size="sm" onClick={refreshChat} disabled={isRefreshingChat} className="h-6 w-6 p-0">
                     <RefreshCw className={`w-3 h-3 ${isRefreshingChat ? 'animate-spin' : ''}`} />
                   </Button>
                 </div>
-            <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
-              <ScrollArea className="flex-1 px-4">
-                <div className="flex flex-col gap-3 py-2">
+            <CardContent className="flex-1 min-h-0 flex flex-col p-0 overflow-hidden">
+              <ScrollArea className="flex-1 min-h-0 px-4">
+                <div className="flex flex-col gap-3 py-2 w-full">
                   {messages.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-8">
                       No messages yet
@@ -755,20 +755,20 @@ export function HostStreamInterface({
                     messages.map((msg) => {
                       const isOwn = msg.sender_name === (host.display_name || "Host");
                       return (
-                        <div key={msg.id} className={`flex flex-col gap-0.5 rounded-lg px-2.5 py-2 ${
+                        <div key={msg.id} className={`w-full overflow-hidden flex flex-col gap-0.5 rounded-lg px-2.5 py-2 ${
                           isOwn ? 'bg-primary/5 border border-primary/10' : 'bg-muted/50'
                         }`}>
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className={`text-xs font-semibold truncate max-w-[130px] flex-shrink ${
+                            <span className={`text-xs font-semibold truncate max-w-[130px] shrink ${
                               isOwn ? 'text-primary' : getNameColor(msg.sender_name)
                             }`}>
                               {isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
                             </span>
-                            <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
                               {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
-                          <p className="text-sm text-foreground/80 break-words leading-snug">
+                          <p className="text-sm text-foreground/80 [overflow-wrap:anywhere] leading-snug">
                             {msg.message}
                           </p>
                         </div>
@@ -778,7 +778,7 @@ export function HostStreamInterface({
                   <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
-              <form onSubmit={sendMessage} className="p-4 border-t border-border">
+              <form onSubmit={sendMessage} className="shrink-0 p-4 border-t border-border">
                 <div className="flex items-center gap-2">
                   <Input
                     placeholder="Send a message..."

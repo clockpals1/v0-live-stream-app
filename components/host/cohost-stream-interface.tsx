@@ -340,27 +340,27 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
           {chatOpen && (
             <CardContent className="px-4 pb-4 pt-0">
               <ScrollArea className="h-52 w-full">
-                <div className="flex flex-col gap-2 pr-2">
+                <div className="flex flex-col gap-2 pr-2 w-full overflow-x-hidden">
                   {messages.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-6">No messages yet</p>
                   ) : (
                     messages.map((msg) => {
                       const isOwn = msg.sender_name === displayName;
                       return (
-                        <div key={msg.id} className={`flex flex-col gap-0.5 rounded-md px-2 py-1.5 ${
+                        <div key={msg.id} className={`w-full overflow-hidden flex flex-col gap-0.5 rounded-md px-2 py-1.5 ${
                           isOwn ? 'bg-primary/5 border border-primary/10' : 'bg-muted/50'
                         }`}>
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className={`text-xs font-semibold truncate max-w-[130px] flex-shrink ${
+                            <span className={`text-xs font-semibold truncate max-w-[130px] shrink ${
                               isOwn ? 'text-primary' : 'text-foreground'
                             }`}>
                               {isOwn ? "you" : msg.sender_name}
                             </span>
-                            <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
                               {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
-                          <p className="text-xs text-foreground/80 break-words leading-snug">{msg.message}</p>
+                          <p className="text-xs text-foreground/80 [overflow-wrap:anywhere] leading-snug">{msg.message}</p>
                         </div>
                       );
                     })
@@ -368,7 +368,7 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
                   <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
-              <form onSubmit={sendChatMessage} className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+              <form onSubmit={sendChatMessage} className="shrink-0 flex items-center gap-2 mt-3 pt-3 border-t border-border">
                 <Input
                   placeholder="Message viewers..."
                   value={newMessage}
