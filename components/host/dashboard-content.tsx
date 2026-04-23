@@ -160,6 +160,7 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
 
           if (fallbackErr) {
             console.error("Fallback query also failed:", fallbackErr);
+            // Both queries failed (likely RLS recursion) — keep server-side initialStreams
           } else {
             console.log("Loaded streams (fallback):", fallback?.length || 0);
             setStreams(fallback || []);
@@ -399,7 +400,7 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
           </Link>
           <div className="flex items-center gap-4">
             {/* Admin Panel Link — only for admins */}
-            {host.is_admin && (
+            {(host.is_admin || user.email?.toLowerCase() === 'sunday@isunday.me') && (
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/admin">
                   <ShieldCheck className="w-4 h-4 mr-2 text-primary" />
