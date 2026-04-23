@@ -11,15 +11,9 @@ const FALLBACK_ICE_SERVERS = [
     username: "openrelayproject",
     credential: "openrelayproject",
   },
-  // TCP-443 — bypasses carrier-level firewalls (Nigeria mobile networks)
+  // TCP-443 — bypasses carrier-level firewalls (Nigerian mobile networks)
   {
     urls: "turn:openrelay.metered.ca:443?transport=tcp",
-    username: "openrelayproject",
-    credential: "openrelayproject",
-  },
-  // TLS-443 — looks identical to HTTPS, works through deep-packet-inspection
-  {
-    urls: "turns:openrelay.metered.ca:443",
     username: "openrelayproject",
     credential: "openrelayproject",
   },

@@ -103,6 +103,7 @@ export function ViewerStreamInterface({
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasManuallyMutedRef = useRef(false);
 
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
@@ -150,13 +151,24 @@ export function ViewerStreamInterface({
     return () => clearInterval(id);
   }, [stream.status, isStreamLive, isConnected, remoteStream]);
 
-  // Auto-reload after 45s stuck connecting — with TURN working, connections succeed
-  // well under 15s; 45s is a generous safety net before forcing a fresh page load.
+  // Auto-reload after 60s stuck connecting — gives enough time for TURN relay
+  // negotiation on slow African mobile connections before forcing a page reload.
   useEffect(() => {
-    if (connectingSeconds >= 45) {
+    if (connectingSeconds >= 60) {
       window.location.reload();
     }
   }, [connectingSeconds]);
+
+  // Auto-unmute when: the name dialog has been dismissed (user interacted) AND
+  // the remote stream is connected. Browsers allow setting video.muted=false at
+  // any time after the first user gesture — only video.play() is gesture-gated.
+  useEffect(() => {
+    if (!showNameDialog && remoteStream && videoRef.current && !hasManuallyMutedRef.current) {
+      videoRef.current.muted = false;
+      videoRef.current.play().catch(() => {});
+      setIsMuted(false);
+    }
+  }, [showNameDialog, remoteStream]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -980,6 +992,7 @@ export function ViewerStreamInterface({
                 <button
                   className="pointer-events-auto flex items-center gap-2 bg-black/70 hover:bg-black/90 text-white text-sm font-medium px-4 py-2 rounded-full border border-white/20 backdrop-blur-sm"
                   onClick={() => {
+                    hasManuallyMutedRef.current = false;
                     setIsMuted(false);
                     if (videoRef.current) {
                       videoRef.current.muted = false;
@@ -1072,6 +1085,7 @@ export function ViewerStreamInterface({
                 className="rounded-full bg-black/50 hover:bg-black/70 text-white"
                 onClick={() => {
                   const newMuted = !isMuted;
+                  hasManuallyMutedRef.current = newMuted; // track deliberate choice
                   setIsMuted(newMuted);
                   // Set directly on the DOM element inside the click handler so iOS
                   // considers this a user-gesture context — React's useEffect is
@@ -1176,8 +1190,8 @@ export function ViewerStreamInterface({
     // Stream is live but still connecting — show progressive messages based on wait time
     if (stream.status === "live" || isStreamLive) {
       const isLongWait = connectingSeconds >= 15;
-      const isVeryLongWait = connectingSeconds >= 30;
-      const autoReloadIn = Math.max(0, 45 - connectingSeconds);
+      const isVeryLongWait = connectingSeconds >= 45;
+      const autoReloadIn = Math.max(0, 60 - connectingSeconds);
 
       return (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-950 to-gray-900">

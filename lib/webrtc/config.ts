@@ -31,7 +31,7 @@ export const ICE_SERVERS: RTCConfiguration = {
       credential: "openrelayproject",
     },
   ],
-  iceCandidatePoolSize: 10,
+  iceCandidatePoolSize: 2,
 };
 
 // Signaling message types
@@ -60,9 +60,9 @@ export interface SignalMessage {
 // Media constraints for the host
 export const HOST_MEDIA_CONSTRAINTS: MediaStreamConstraints = {
   video: {
-    width: { ideal: 1280, max: 1920 },
-    height: { ideal: 720, max: 1080 },
-    frameRate: { ideal: 30, max: 30 },
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 24 },
     facingMode: "environment",
   },
   audio: {

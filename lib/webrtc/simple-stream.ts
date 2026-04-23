@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { getIceServers } from "./get-ice-servers";
+import { warmIceServers, getIceConfig } from "./get-ice-servers";
 
 interface UseSimpleStreamProps {
   streamId: string;
@@ -90,8 +90,7 @@ export function useSimpleStream({
             peerConnectionRef.current = null;
           }
           
-          const iceConfig = await getIceServers();
-          const pc = new RTCPeerConnection(iceConfig);
+          const pc = new RTCPeerConnection(getIceConfig());
           peerConnectionRef.current = pc;
           
           pc.ontrack = (event) => {
@@ -280,6 +279,11 @@ export function useSimpleStream({
         broadcast: { self: false },
       },
     });
+
+    // Start fetching dynamic TURN credentials in the background so they are
+    // ready before the first offer arrives. Non-blocking — uses static fallback
+    // if the fetch hasn't resolved by the time the first peer connection is created.
+    warmIceServers();
 
     channel
       .on("broadcast", { event: "signal" }, ({ payload }: { payload: any }) => {

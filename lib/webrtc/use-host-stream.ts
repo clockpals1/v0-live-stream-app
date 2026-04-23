@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { ICE_SERVERS, SignalMessage, HOST_MEDIA_CONSTRAINTS, MAX_VIEWERS } from "./config";
-import { getIceServers } from "./get-ice-servers";
+import { warmIceServers, getIceConfig } from "./get-ice-servers";
 
 interface ViewerConnection {
   id: string;
@@ -87,8 +87,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         return null;
       }
 
-      const iceConfig = await getIceServers();
-      const pc = new RTCPeerConnection(iceConfig);
+      const pc = new RTCPeerConnection(getIceConfig());
 
       // Add tracks — use relay (co-host) stream if active, else own camera
       const sourceStream = activeRelayStreamRef.current ?? mediaStreamRef.current;
@@ -556,6 +555,12 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
       supabase.removeChannel(channel);
     };
   }, [roomCode, handleSignal]);
+
+  // Pre-warm ICE servers on mount so credentials are ready before the first
+  // viewer joins. warmIceServers() is a no-op if cache is still fresh.
+  useEffect(() => {
+    warmIceServers();
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
