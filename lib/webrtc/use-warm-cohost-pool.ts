@@ -62,15 +62,27 @@ export function useWarmCohostPool(participantIds: string[]): Map<string, MediaSt
           const c = connectionsRef.current.get(id);
           if (!c) return;
 
+          // Co-host stopped — remove stream so admin relay clears
+          if (payload.type === "stream-end") {
+            c.pc?.close(); c.pc = null;
+            setStreamMap((prev) => { const m = new Map(prev); m.delete(id); return m; });
+            return;
+          }
+
           if (payload.type === "offer") {
             c.pc?.close();
             const pc = new RTCPeerConnection(ICE_SERVERS);
             c.pc = pc;
 
+            // New MediaStream reference on every ontrack so React always
+            // re-renders with the full set of tracks (video + audio).
             pc.ontrack = (e) => {
-              if (e.streams[0]) {
-                setStreamMap((prev) => new Map(prev).set(id, e.streams[0]));
-              }
+              setStreamMap((prev) => {
+                const existing = prev.get(id);
+                const tracks = existing ? [...existing.getTracks()] : [];
+                if (!tracks.some((t) => t.id === e.track.id)) tracks.push(e.track);
+                return new Map(prev).set(id, new MediaStream(tracks));
+              });
             };
 
             pc.onicecandidate = (e) => {

@@ -216,7 +216,7 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
+      <main className="flex-1 flex flex-col items-center justify-start p-4 pb-6 gap-4">
         {/* Camera Preview */}
         <div className="relative w-full max-w-lg aspect-video bg-black rounded-xl overflow-hidden shadow-lg">
           <video

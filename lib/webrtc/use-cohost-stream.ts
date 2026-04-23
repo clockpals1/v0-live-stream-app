@@ -38,6 +38,10 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+  // Viewer-join requests that arrived before camera was ready — processed after init
+  const pendingJoinsRef = useRef<{ from: string; viewerName: string }[]>([]);
+  // Prevents accepting new viewer connections while co-host is stopped
+  const acceptingRef = useRef(false);
 
   // Update participant status in DB
   const updateStatus = useCallback(async (status: "ready" | "live" | "offline") => {
@@ -87,6 +91,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
       setIsCameraLost(false);
       setError(null);
       await updateStatus("ready");
+
       return stream;
     } catch (err) {
       setError("Failed to access camera/microphone. Please check permissions.");
@@ -151,6 +156,20 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
 
     switch (message.type) {
       case "viewer-join": {
+        // If camera isn't ready yet, queue the join — initializeMedia will process it
+        if (!mediaStreamRef.current) {
+          pendingJoinsRef.current.push({ from: message.from, viewerName: message.viewerName || "Viewer" });
+          return;
+        }
+        // Not accepting connections while stopped (prevents zombie PCs after stopStream)
+        if (!acceptingRef.current) return;
+        // Close any existing (stale/zombie) PC for this viewer before creating a new one
+        const existing = viewersRef.current.get(message.from);
+        if (existing) {
+          existing.peerConnection.close();
+          viewersRef.current.delete(message.from);
+          setViewerCount(viewersRef.current.size);
+        }
         const pc = await createPeerConnection(message.from, message.viewerName || "Viewer");
         if (!pc) return;
         try {
@@ -193,6 +212,25 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
     const hasLiveTracks = mediaStreamRef.current?.getTracks().some((t) => t.readyState === "live") ?? false;
     if (!mediaStreamRef.current || !hasLiveTracks) await initializeMedia();
 
+    acceptingRef.current = true; // start accepting viewer connections
+
+    // Process viewer-join requests that queued while camera was initialising
+    if (pendingJoinsRef.current.length > 0) {
+      const pending = pendingJoinsRef.current.splice(0);
+      for (const { from, viewerName } of pending) {
+        const pc = await createPeerConnection(from, viewerName);
+        if (!pc) continue;
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          channelRef.current?.send({
+            type: "broadcast", event: "signal",
+            payload: { type: "offer", from: "host", to: from, payload: pc.localDescription?.toJSON() } as SignalMessage,
+          });
+        } catch (err) { console.error("[cohost] pending offer error:", err); }
+      }
+    }
+
     channelRef.current?.send({
       type: "broadcast", event: "signal",
       payload: { type: "stream-start", from: "host" } as SignalMessage,
@@ -201,10 +239,13 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
     await updateStatus("live");
     setIsStreaming(true);
     setError(null);
-  }, [initializeMedia, updateStatus]);
+  }, [initializeMedia, updateStatus, createPeerConnection]);
 
   // Stop broadcasting
   const stopStream = useCallback(async () => {
+    acceptingRef.current = false; // stop accepting new viewer connections
+    pendingJoinsRef.current = []; // discard any queued joins
+
     viewersRef.current.forEach((v) => v.peerConnection.close());
     viewersRef.current.clear();
     setViewerCount(0);

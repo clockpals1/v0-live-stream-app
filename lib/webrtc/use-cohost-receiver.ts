@@ -17,12 +17,14 @@ import { ICE_SERVERS } from "./config";
 export function useCohostReceiver(participantId: string | null): MediaStream | null {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
-  const pcRef    = useRef<RTCPeerConnection | null>(null);
-  const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+  const pcRef       = useRef<RTCPeerConnection | null>(null);
+  const channelRef  = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+  const retryRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const supabaseRef = useRef(createClient());
-  const receiverId = useRef(`director-${Math.random().toString(36).substr(2, 9)}`);
+  const receiverId  = useRef(`director-${Math.random().toString(36).substr(2, 9)}`);
 
   const cleanup = useCallback(() => {
+    if (retryRef.current) { clearInterval(retryRef.current); retryRef.current = null; }
     if (channelRef.current) {
       try {
         channelRef.current.send({
@@ -59,6 +61,13 @@ export function useCohostReceiver(participantId: string | null): MediaStream | n
       .on("broadcast", { event: "signal" }, async ({ payload }: { payload: any }) => {
         if (payload.to && payload.to !== myId) return;
 
+        // Co-host stopped broadcasting — disconnect cleanly
+        if (payload.type === "stream-end") {
+          if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+          setRemoteStream(null);
+          return;
+        }
+
         if (payload.type === "offer") {
           if (pcRef.current) {
             pcRef.current.close();
@@ -66,8 +75,16 @@ export function useCohostReceiver(participantId: string | null): MediaStream | n
           const pc = new RTCPeerConnection(ICE_SERVERS);
           pcRef.current = pc;
 
+          // Accumulate tracks with a NEW MediaStream reference each time so React
+          // always re-renders and relayStream() receives a stream with ALL tracks
+          // (video + audio). Using e.streams[0] fails because it's the same object
+          // reference for both ontrack events — React bails out on the second call.
           pc.ontrack = (e) => {
-            if (e.streams[0]) setRemoteStream(e.streams[0]);
+            setRemoteStream((prev) => {
+              const tracks = prev ? [...prev.getTracks()] : [];
+              if (!tracks.some((t) => t.id === e.track.id)) tracks.push(e.track);
+              return new MediaStream(tracks);
+            });
           };
 
           pc.onicecandidate = (e) => {
@@ -113,29 +130,19 @@ export function useCohostReceiver(participantId: string | null): MediaStream | n
         }
       })
       .subscribe(() => {
-        setTimeout(() => {
-          channel.send({
-            type: "broadcast",
-            event: "signal",
-            payload: {
-              type: "viewer-join",
-              from: myId,
-              to: "host",
-              viewerName: "Director",
-            },
-          });
-        }, 600);
+        const joinMsg = {
+          type: "broadcast" as const,
+          event: "signal",
+          payload: { type: "viewer-join", from: myId, to: "host", viewerName: "Director" },
+        };
+        setTimeout(() => channel.send(joinMsg), 600);
 
-        const retryInterval = setInterval(() => {
+        retryRef.current = setInterval(() => {
           const pc = pcRef.current;
-          if (!pc || pc.connectionState !== "connected") {
-            channel.send({
-              type: "broadcast",
-              event: "signal",
-              payload: { type: "viewer-join", from: myId, to: "host", viewerName: "Director" },
-            });
+          if (pc?.connectionState === "connected") {
+            clearInterval(retryRef.current!); retryRef.current = null;
           } else {
-            clearInterval(retryInterval);
+            channel.send(joinMsg);
           }
         }, 4000);
       });
