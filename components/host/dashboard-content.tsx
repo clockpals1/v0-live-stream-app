@@ -237,6 +237,41 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
 
     loadEmergencyMessages();
   }, [host]);
+  // Real-time: refresh co-host participant list on any participant row change
+  useEffect(() => {
+    if (!host) return;
+    const refresh = async () => {
+      const { data } = await supabase
+        .from("stream_participants")
+        .select("id, slot_label, status, stream:streams(id, title, room_code, status)")
+        .eq("host_id", host.id)
+        .neq("status", "offline");
+      if (data) {
+        const filtered = (data as any[]).filter((p) => p.stream && p.stream.status !== "ended");
+        setCohostParticipants(filtered as CohostParticipant[]);
+      }
+    };
+    const ch = supabase
+      .channel(`cohost-rt-${host.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "stream_participants" }, refresh)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [host]);
+
+  // Real-time: update own stream cards when stream status changes (e.g. goes live)
+  useEffect(() => {
+    if (!host) return;
+    const ch = supabase
+      .channel(`own-streams-rt-${host.id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "streams" }, (payload: any) => {
+        setStreams((prev) =>
+          prev.map((s) => s.id === payload.new.id ? { ...s, ...payload.new } : s)
+        );
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [host]);
+
   const [deletingStream, setDeletingStream] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
@@ -542,6 +577,81 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
           {/* Streams List */}
           <div className="lg:col-span-2 flex flex-col gap-6">
 
+            {/* ── Live Now ── combined live streams (owned + co-hosting) */}
+            {(streams.some(s => s.status === "live") || cohostParticipants.some(p => p.stream.status === "live")) && (
+              <div>
+                <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                  <Radio className="w-5 h-5 text-red-500" />
+                  Live Now
+                </h2>
+                <div className="grid gap-3">
+                  {/* Streams the host OWNS that are live */}
+                  {streams.filter(s => s.status === "live").map((s) => (
+                    <Card key={s.id} className="border-red-300 bg-red-50/40 dark:bg-red-950/20">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
+                              <h3 className="font-semibold text-foreground truncate">{s.title}</h3>
+                              <Badge className="bg-red-500 text-white text-xs shrink-0">● LIVE</Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className="text-xs font-medium text-green-600">Hosting</span>
+                              <span className="flex items-center gap-1">
+                                <Users className="w-3.5 h-3.5" />
+                                {s.viewer_count} viewers
+                              </span>
+                              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{s.room_code}</span>
+                            </div>
+                          </div>
+                          <Button asChild size="sm" className="bg-red-600 hover:bg-red-700 text-white shrink-0">
+                            <Link href={`/host/stream/${s.room_code}`}>
+                              <Radio className="w-4 h-4 mr-1" />
+                              Manage
+                            </Link>
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {/* Streams the host is CO-HOSTING that are live */}
+                  {cohostParticipants.filter(p => p.stream.status === "live").map((p) => (
+                    <Card key={p.id} className="border-purple-300 bg-purple-50/40 dark:bg-purple-950/20">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
+                              <h3 className="font-semibold text-foreground truncate">{p.stream.title}</h3>
+                              <Badge className="bg-red-500 text-white text-xs shrink-0">● LIVE</Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className="text-xs font-medium text-purple-600">Co-Host · {p.slot_label}</span>
+                              <span className={`text-xs font-medium ${
+                                p.status === "live" ? "text-red-500" :
+                                p.status === "ready" ? "text-blue-500" : "text-yellow-600"
+                              }`}>
+                                {p.status === "live" ? "Broadcasting" : p.status === "ready" ? "Camera Ready" : "Invited"}
+                              </span>
+                              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{p.stream.room_code}</span>
+                            </div>
+                          </div>
+                          <Button asChild size="sm" className="bg-purple-600 hover:bg-purple-700 text-white shrink-0">
+                            <Link href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}>
+                              <Video className="w-4 h-4 mr-1" />
+                              {p.status === "live" ? "Manage" : "Go Live"}
+                            </Link>
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Upcoming Scheduled Streams */}
             {streams.filter(s => s.status === "scheduled").length > 0 && (
               <div>
@@ -604,15 +714,15 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             )}
 
             <div>
-              {/* Co-Hosting Streams */}
-            {cohostParticipants.length > 0 && (
+              {/* Co-Hosting Streams — invited/ready (non-live shown here; live appear in Live Now above) */}
+            {cohostParticipants.filter(p => p.stream.status !== "live").length > 0 && (
               <div className="mb-6">
                 <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
                   <Users className="w-5 h-5 text-purple-500" />
                   Streams You&apos;re Co-Hosting
                 </h2>
                 <div className="grid gap-3">
-                  {cohostParticipants.map((p) => (
+                  {cohostParticipants.filter(p => p.stream.status !== "live").map((p) => (
                     <Card key={p.id} className="border-purple-200 bg-purple-50/50 dark:bg-purple-950/20">
                       <CardContent className="p-4">
                         <div className="flex items-center justify-between gap-4">
