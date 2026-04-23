@@ -151,25 +151,30 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
     }
   };
 
-  // Switch active camera (admin action → updates DB → viewers react automatically)
+  // Switch active camera — calls API with admin client so RLS is never an issue
   const handleSwitch = async (participantId: string | null) => {
     setIsSwitching(true);
-    // Switch active camera — update DB, viewers react via Realtime
-    const { error } = await supabase
-      .from("streams")
-      .update({ active_participant_id: participantId })
-      .eq("id", streamId);
-
-    if (error) {
-      toast.error("Failed to switch camera");
-    } else {
-      onSwitch(participantId);
-      const label = participantId
-        ? (participants.find((p) => p.id === participantId)?.slot_label || "Co-host")
-        : "Main Camera";
-      toast.success(`Switched to ${label}`);
+    try {
+      const res = await fetch(`/api/streams/participants/switch/${streamId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantId }),
+      });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
+        toast.error(error || "Failed to switch camera");
+      } else {
+        onSwitch(participantId);
+        const label = participantId
+          ? (participants.find((p) => p.id === participantId)?.slot_label || "Co-host")
+          : "Main Camera";
+        toast.success(`Switched to ${label}`);
+      }
+    } catch {
+      toast.error("Network error — could not switch camera");
+    } finally {
+      setIsSwitching(false);
     }
-    setIsSwitching(false);
   };
 
   // Generate co-host broadcast link
@@ -352,10 +357,14 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
           })}
 
           {participants.length === 0 && (
-            <div className="py-6 text-center text-xs text-muted-foreground">
+            <div className="py-6 text-center text-xs text-muted-foreground space-y-1">
               <Users className="w-6 h-6 mx-auto mb-2 opacity-40" />
-              No co-hosts added yet.
-              <br />Click &quot;+ Add Co-Host&quot; to invite a second camera.
+              <p className="font-medium text-foreground/70">No co-hosts added yet</p>
+              <p>Click &quot;+ Add Co-Host&quot; above to invite a second camera.</p>
+              <p className="text-[11px] pt-1">
+                Co-hosts must first be registered in{" "}
+                <a href="/admin" target="_blank" className="underline text-primary">Admin → Host Management</a>.
+              </p>
             </div>
           )}
         </div>
