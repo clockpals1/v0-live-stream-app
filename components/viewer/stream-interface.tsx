@@ -365,7 +365,7 @@ export function ViewerStreamInterface({
       .channel(`chat-room-${stream.id}`, {
         config: { broadcast: { self: true } },
       })
-      .on("broadcast", { event: "chat-message" }, ({ payload }) => {
+      .on("broadcast", { event: "chat-message" }, ({ payload }: any) => {
         console.log('[Viewer] New chat message received via broadcast:', payload);
         setMessages((prev) => {
           if (prev.some((m) => m.id === payload.id)) return prev;
@@ -373,7 +373,7 @@ export function ViewerStreamInterface({
         });
         vibrateDevice([60]); // subtle buzz for every new chat message
       })
-      .subscribe((status) => {
+      .subscribe((status: string) => {
         console.log('[Viewer] Chat subscription status:', status);
         if (status === 'SUBSCRIBED') {
           console.log('[Viewer] Chat channel subscribed, loading existing messages...');
@@ -1051,12 +1051,12 @@ export function ViewerStreamInterface({
             
             {/* Enhanced video controls */}
             <div 
-              className={`absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 transition-opacity duration-300 ${
+              className={`absolute bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-1.5 sm:gap-2 transition-opacity duration-300 ${
                 showControls || !isFullscreen ? 'opacity-100' : 'opacity-0'
               }`}
             >
-              {/* Quality selector */}
-              <div className="flex items-center bg-black/50 rounded-full px-3 py-2 gap-2">
+              {/* Quality selector — hidden on small screens to keep controls minimal */}
+              <div className="hidden sm:flex items-center bg-black/50 rounded-full px-3 py-2 gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1124,7 +1124,7 @@ export function ViewerStreamInterface({
                 <Button
                   variant="secondary"
                   size="icon"
-                  className={`rounded-full text-white ${
+                  className={`hidden sm:inline-flex rounded-full text-white ${
                     isPiP ? 'bg-blue-500/80 hover:bg-blue-600' : 'bg-black/50 hover:bg-black/70'
                   }`}
                   onClick={togglePiP}
@@ -1157,23 +1157,16 @@ export function ViewerStreamInterface({
               </div>
             )}
 
-            {/* Status indicators */}
-            <div className={`absolute top-4 right-4 flex items-center gap-2 transition-opacity duration-300 ${
-              showControls || !isFullscreen ? 'opacity-100' : 'opacity-0'
-            }`}>
-              {isDataSaver && (
-                <Badge className="bg-orange-500 text-white text-xs">
-                  <DataSaver className="w-3 h-3 mr-1" />
+            {/* Status indicators — Data Saver only, at top-left so it doesn't clash with connection badge */}
+            {isDataSaver && (
+              <div className={`absolute top-2 sm:top-3 left-2 sm:left-3 transition-opacity duration-300 ${
+                showControls || !isFullscreen ? 'opacity-100' : 'opacity-0'
+              }`}>
+                <Badge className="bg-orange-500/90 text-white text-[10px] sm:text-xs py-0.5 px-2">
                   Data Saver
                 </Badge>
-              )}
-              {isMobile && (
-                <Badge variant="outline" className="text-xs">
-                  <Smartphone className="w-3 h-3 mr-1" />
-                  Mobile
-                </Badge>
-              )}
-            </div>
+              </div>
+            )}
             
             {/* Click to show controls in fullscreen */}
             {isFullscreen && (
@@ -1420,7 +1413,7 @@ export function ViewerStreamInterface({
 
       <div className="min-h-screen bg-background">
         <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <div className="container mx-auto px-4 py-2 sm:py-3 flex items-center justify-between gap-3">
             <Link href="/" className="flex items-center gap-2 shrink-0">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Radio className="w-4 h-4 text-primary-foreground" />
@@ -1455,13 +1448,12 @@ export function ViewerStreamInterface({
           </div>
         </header>
 
-        <main className="container mx-auto px-4 py-6">
-          <div className="grid lg:grid-cols-3 gap-6">
+        <main className="sm:container sm:mx-auto sm:px-4 sm:py-4 lg:py-6">
+          <div className="grid lg:grid-cols-3 gap-0 lg:gap-6">
             {/* Video Area */}
-            <div className="lg:col-span-2 flex flex-col gap-4">
-              <Card className="overflow-hidden">
-                <CardContent className="p-0">
-                  <div ref={videoContainerRef} className={`relative bg-black ${isFullscreen ? 'fixed inset-0 z-50 w-screen h-screen' : 'aspect-video'}`}>
+            <div className="lg:col-span-2 flex flex-col gap-0 lg:gap-4">
+              <div className="overflow-hidden sm:rounded-xl sm:border sm:border-border sm:shadow-sm">
+                  <div ref={videoContainerRef} className={`relative bg-black ${isFullscreen ? 'fixed inset-0 z-50 w-screen h-screen' : 'aspect-video w-full'}`}>
                     {getVideoContent()}
                     {/* isunday brand watermark */}
                     {isStreamLive && isConnected && remoteStream && !isPiP && (
@@ -1477,34 +1469,19 @@ export function ViewerStreamInterface({
                       </div>
                     )}
 
-                    {/* Unmute prompt — shown when video is playing but muted */}
-                    {isMuted && isConnected && remoteStream && (
-                      <div
-                        className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none"
-                      >
-                        <button
-                          className="pointer-events-auto bg-black/70 hover:bg-black/90 text-white text-sm px-4 py-2 rounded-full flex items-center gap-2 border border-white/20"
-                          onClick={() => setIsMuted(false)}
-                        >
-                          <VolumeX className="w-4 h-4" />
-                          Click to unmute
-                        </button>
-                      </div>
-                    )}
                     {/* Connection status */}
-                    <div className="absolute top-4 right-4">
+                    <div className="absolute top-2 sm:top-3 right-2 sm:right-3">
                       {getConnectionStatusBadge()}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+              </div>
 
               {/* Stream Info */}
-              <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-0 sm:py-0 border-b sm:border-b-0 border-border">
                 <div className="flex-1 min-w-0">
-                  <h1 className="text-lg font-semibold text-foreground truncate md:hidden">{stream.title}</h1>
-                  <div className="flex items-center gap-2 flex-wrap mt-1 md:mt-0">
-                    <p className="text-sm text-muted-foreground">Hosted by <span className="font-medium text-foreground">{hostName}</span></p>
+                  <h1 className="text-sm sm:text-lg font-semibold text-foreground truncate md:hidden leading-tight">{stream.title}</h1>
+                  <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                    <p className="text-xs sm:text-sm text-muted-foreground">Hosted by <span className="font-medium text-foreground">{hostName}</span></p>
                     {stream.status === 'live' && streamElapsed > 0 && (
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Clock className="w-3 h-3" />
@@ -1519,41 +1496,47 @@ export function ViewerStreamInterface({
                     )}
                   </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={copyShareLink} className="shrink-0">
-                  {copied ? "Copied!" : (<><Share2 className="w-4 h-4 mr-2" />Share</>)}
+                <Button variant="ghost" size="sm" onClick={copyShareLink} className="shrink-0 h-8 px-2.5 gap-1.5 text-xs sm:text-sm">
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>{copied ? "Copied!" : "Share"}</span>
                 </Button>
               </div>
             </div>
 
             {/* Chat Panel */}
-            <Card className="lg:col-span-1 flex flex-col h-[380px] sm:h-[480px] lg:h-[calc(100vh-11rem)] lg:sticky lg:top-20">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <MessageCircle className="w-4 h-4" />
+            <Card className="lg:col-span-1 flex flex-col h-[44vh] sm:h-[480px] lg:h-[calc(100vh-11rem)] lg:sticky lg:top-20 rounded-none sm:rounded-xl border-x-0 sm:border shadow-none sm:shadow-sm border-t">
+              <CardHeader className="pb-2 pt-3 sm:pt-4 px-3 sm:px-6">
+                <CardTitle className="flex items-center gap-1.5 sm:gap-2 text-sm sm:text-base">
+                  <MessageCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   Live Chat
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={refreshChat}
-                    disabled={isRefreshingChat}
-                    className="ml-auto h-8 w-8 p-0"
-                    title="Refresh chat messages"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${isRefreshingChat ? 'animate-spin' : ''}`} />
-                  </Button>
-                  {hasJoined && viewerName !== "Guest" && (
-                    <Badge variant="secondary" className="text-xs">
-                      {viewerName}
-                    </Badge>
+                  {messages.length > 0 && (
+                    <span className="text-[11px] font-normal text-muted-foreground">({messages.length})</span>
                   )}
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {hasJoined && viewerName !== "Guest" && (
+                      <Badge variant="secondary" className="text-[10px] sm:text-xs h-5 sm:h-6 px-1.5 sm:px-2">
+                        {viewerName}
+                      </Badge>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={refreshChat}
+                      disabled={isRefreshingChat}
+                      className="h-7 w-7 p-0"
+                      title="Refresh chat messages"
+                    >
+                      <RefreshCw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isRefreshingChat ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex-1 min-h-0 flex flex-col p-0">
-                <ScrollArea className="flex-1 min-h-0 px-4">
-                  <div className="flex flex-col gap-2 py-2 w-full">
+                <ScrollArea className="flex-1 min-h-0 px-3 sm:px-4">
+                  <div className="flex flex-col gap-1.5 sm:gap-2 py-1.5 sm:py-2 w-full">
                     {messages.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-8">
-                        No messages yet. Be the first to say something!
+                      <p className="text-xs sm:text-sm text-muted-foreground text-center py-5 sm:py-8">
+                        No messages yet. Be the first!
                       </p>
                     ) : (
                       messages.map((msg) => {
@@ -1590,7 +1573,7 @@ export function ViewerStreamInterface({
                 </ScrollArea>
                 <form
                   onSubmit={sendMessage}
-                  className="shrink-0 p-4 border-t border-border"
+                  className="shrink-0 p-2.5 sm:p-4 border-t border-border"
                 >
                   {hasJoined && viewerName !== "Guest" ? (
                     <div className="flex items-center gap-2">
