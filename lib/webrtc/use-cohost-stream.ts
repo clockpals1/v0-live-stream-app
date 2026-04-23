@@ -31,6 +31,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   const [viewerCount, setViewerCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [isCameraLost, setIsCameraLost] = useState(false);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -49,16 +50,42 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
     }
   }, [participantId, supabase]);
 
-  // Initialize camera
+  // Initialize camera (also used to reconnect after a drop)
   const initializeMedia = useCallback(async (facingMode: "user" | "environment" = "environment") => {
     try {
+      // Release any existing tracks first — required on iOS to avoid camera conflicts
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+
       const constraints: MediaStreamConstraints = {
         ...HOST_MEDIA_CONSTRAINTS,
         video: { ...(HOST_MEDIA_CONSTRAINTS.video as MediaTrackConstraints), facingMode },
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Detect if the browser silently kills the camera (suspend, permission revoke, etc.)
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+        setIsCameraLost(true);
+        setMediaStream(null);
+        mediaStreamRef.current = null;
+      });
+
+      // If there are live viewer connections, replace their tracks seamlessly (reconnect path)
+      if (viewersRef.current.size > 0) {
+        const newVideo = stream.getVideoTracks()[0];
+        const newAudio = stream.getAudioTracks()[0];
+        viewersRef.current.forEach((v) => {
+          v.peerConnection.getSenders().forEach((sender) => {
+            if (sender.track?.kind === "video" && newVideo) sender.replaceTrack(newVideo).catch(console.error);
+            if (sender.track?.kind === "audio" && newAudio) sender.replaceTrack(newAudio).catch(console.error);
+          });
+        });
+      }
+
       mediaStreamRef.current = stream;
       setMediaStream(stream);
+      setIsCameraLost(false);
+      setError(null);
       await updateStatus("ready");
       return stream;
     } catch (err) {
@@ -162,7 +189,9 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
 
   // Start broadcasting
   const startStream = useCallback(async () => {
-    if (!mediaStreamRef.current) await initializeMedia();
+    // Re-init if stream is absent OR if all tracks have silently ended (e.g. after network drop)
+    const hasLiveTracks = mediaStreamRef.current?.getTracks().some((t) => t.readyState === "live") ?? false;
+    if (!mediaStreamRef.current || !hasLiveTracks) await initializeMedia();
 
     channelRef.current?.send({
       type: "broadcast", event: "signal",
@@ -220,29 +249,32 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   // Switch camera (front/rear)
   const switchCamera = useCallback(async (facingMode: "user" | "environment") => {
     try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
+      // Preserve audio tracks before stopping video (iOS requires old camera released first)
+      const oldAudioTracks = mediaStreamRef.current?.getAudioTracks() ?? [];
+      mediaStreamRef.current?.getVideoTracks().forEach((t) => t.stop());
+
+      // Request the new camera AFTER releasing the old one (iOS compatibility)
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
-      const newTrack = newStream.getVideoTracks()[0];
-      if (!newTrack) return null;
+      const newVideoTrack = newVideoStream.getVideoTracks()[0];
+      if (!newVideoTrack) return null;
 
+      // Replace video track in all active viewer / admin-receiver peer connections
       viewersRef.current.forEach((v) => {
         const sender = v.peerConnection.getSenders().find((s) => s.track?.kind === "video");
-        if (sender) sender.replaceTrack(newTrack).catch(console.error);
+        if (sender) sender.replaceTrack(newVideoTrack).catch(console.error);
       });
 
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getVideoTracks().forEach((t) => {
-          t.stop(); mediaStreamRef.current!.removeTrack(t);
-        });
-        mediaStreamRef.current.addTrack(newTrack);
-      } else {
-        mediaStreamRef.current = newStream;
-      }
-      setMediaStream(mediaStreamRef.current);
-      return mediaStreamRef.current;
+      // Build a brand-new MediaStream so React detects the reference change and
+      // re-renders — the old srcObject mutation approach is unreliable on some browsers.
+      const newStream = new MediaStream([newVideoTrack, ...oldAudioTracks]);
+      mediaStreamRef.current = newStream;
+      setMediaStream(newStream);  // new reference → triggers re-render + useEffect srcObject update
+      return newStream;
     } catch (err) {
+      console.error("[cohost] switchCamera error:", err);
       setError("Could not switch camera.");
       return null;
     }
@@ -279,6 +311,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   return {
     mediaStream,
     initializeMedia,
+    isCameraLost,
     isStreaming,
     videoEnabled,
     audioEnabled,

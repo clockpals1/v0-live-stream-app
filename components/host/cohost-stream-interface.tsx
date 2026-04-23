@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useCohostStream } from "@/lib/webrtc/use-cohost-stream";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ import {
   Square,
   SwitchCamera,
   Wifi,
+  WifiOff,
+  RefreshCw,
 } from "lucide-react";
 
 interface Participant {
@@ -49,6 +51,7 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
   const {
     mediaStream,
     initializeMedia,
+    isCameraLost,
     isStreaming,
     videoEnabled,
     audioEnabled,
@@ -78,18 +81,35 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
     init();
   }, [initializeMedia]);
 
-  // Keep video element in sync
+  // Keep video element in sync whenever stream reference changes
   useEffect(() => {
     if (videoRef.current && mediaStream) videoRef.current.srcObject = mediaStream;
   }, [mediaStream]);
+
+  // When camera is lost, reflect that in local initialized state
+  useEffect(() => {
+    if (isCameraLost) setMediaInitialized(false);
+  }, [isCameraLost]);
+
+  // Re-initialize camera (used for both camera-lost recovery and reconnect)
+  const reconnectCamera = useCallback(async () => {
+    try {
+      const s = await initializeMedia(cameraFacingMode);
+      if (s && videoRef.current) videoRef.current.srcObject = s;
+      setMediaInitialized(true);
+    } catch {
+      // error state handled in hook
+    }
+  }, [initializeMedia, cameraFacingMode]);
 
   const rotateCamera = async () => {
     if (isSwitching) return;
     setIsSwitching(true);
     const next = cameraFacingMode === "environment" ? "user" : "environment";
     setCameraFacingMode(next);
-    const newStream = await switchCamera(next);
-    if (newStream && videoRef.current) videoRef.current.srcObject = newStream;
+    // switchCamera now returns a brand-new MediaStream ref so the useEffect above
+    // handles srcObject update automatically via the mediaStream dep
+    await switchCamera(next);
     setIsSwitching(false);
   };
 
@@ -132,9 +152,18 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
             playsInline
             className="w-full h-full object-cover"
           />
-          {!mediaInitialized && (
+          {!mediaInitialized && !isCameraLost && (
             <div className="absolute inset-0 flex items-center justify-center text-white/60 text-sm">
               Starting camera…
+            </div>
+          )}
+          {isCameraLost && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 gap-3">
+              <WifiOff className="w-8 h-8 text-red-400" />
+              <p className="text-white text-sm font-medium">Camera disconnected</p>
+              <Button size="sm" onClick={reconnectCamera} className="gap-2">
+                <RefreshCw className="w-4 h-4" /> Reconnect Camera
+              </Button>
             </div>
           )}
           {isStreaming && (
@@ -187,15 +216,20 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
                 </Button>
               )}
 
-              <Button variant="outline" size="icon" onClick={toggleVideo} title="Toggle camera">
+              <Button variant="outline" size="icon" onClick={toggleVideo} disabled={!mediaInitialized} title="Toggle camera">
                 {videoEnabled ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
               </Button>
-              <Button variant="outline" size="icon" onClick={toggleAudio} title="Toggle mic">
+              <Button variant="outline" size="icon" onClick={toggleAudio} disabled={!mediaInitialized} title="Toggle mic">
                 {audioEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
               </Button>
-              <Button variant="outline" size="icon" onClick={rotateCamera} disabled={isSwitching} title="Flip camera">
+              <Button variant="outline" size="icon" onClick={rotateCamera} disabled={isSwitching || !mediaInitialized} title="Flip camera">
                 <SwitchCamera className={`w-4 h-4 ${isSwitching ? "animate-spin" : ""}`} />
               </Button>
+              {isCameraLost && (
+                <Button variant="outline" size="sm" onClick={reconnectCamera} className="gap-1 text-xs">
+                  <RefreshCw className="w-3 h-3" /> Reconnect
+                </Button>
+              )}
             </div>
 
             {isStreaming && (
