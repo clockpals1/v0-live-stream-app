@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useWarmCohostPool } from "@/lib/webrtc/use-warm-cohost-pool";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +50,8 @@ interface DirectorPanelProps {
   streamId: string;
   roomCode: string;
   activeParticipantId: string | null;
-  onSwitch: (participantId: string | null) => void; // null = switch back to main host
+  /** participantId=null means switch back to main host camera */
+  onSwitch: (participantId: string | null, warmStream: MediaStream | null) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -74,6 +76,14 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
   const [slotLabel, setSlotLabel] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+
+  // Pre-warm receiver connections for all ready/live co-hosts so that
+  // replaceTrack() fires with a zero-lag already-flowing MediaStream.
+  const warmIds = useMemo(
+    () => participants.filter((p) => p.status === "ready" || p.status === "live").map((p) => p.id),
+    [participants]
+  );
+  const warmPool = useWarmCohostPool(warmIds);
 
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
@@ -145,14 +155,18 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
     if (res.ok) {
       toast.success("Co-host removed");
       setParticipants((prev) => prev.filter((p) => p.id !== participantId));
-      if (activeParticipantId === participantId) onSwitch(null);
+      if (activeParticipantId === participantId) onSwitch(null, null);
     } else {
       toast.error("Failed to remove co-host");
     }
   };
 
-  // Switch active camera — calls API with admin client so RLS is never an issue
+  // Switch active camera — relay fires immediately using the pre-warmed stream.
   const handleSwitch = async (participantId: string | null) => {
+    // Fire relay instantly so viewers see the switch before the API round-trip.
+    const warmStream = participantId ? (warmPool.get(participantId) ?? null) : null;
+    onSwitch(participantId, warmStream);
+
     setIsSwitching(true);
     try {
       const res = await fetch(`/api/streams/participants/switch/${streamId}`, {
@@ -164,7 +178,6 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
         const { error } = await res.json().catch(() => ({ error: "Unknown error" }));
         toast.error(error || "Failed to switch camera");
       } else {
-        onSwitch(participantId);
         const label = participantId
           ? (participants.find((p) => p.id === participantId)?.slot_label || "Co-host")
           : "Main Camera";
