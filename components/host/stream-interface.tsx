@@ -29,7 +29,7 @@ import {
   AlertCircle,
   Wifi,
   WifiOff,
-  RotateCw,
+  SwitchCamera,
   RefreshCw,
   Smartphone,
   Settings,
@@ -75,7 +75,8 @@ export function HostStreamInterface({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [mediaInitialized, setMediaInitialized] = useState(false);
-  const [cameraFacingMode, setCameraFacingMode] = useState<'user' | 'environment'>('user');
+  const [cameraFacingMode, setCameraFacingMode] = useState<'user' | 'environment'>('environment');
+  const [isSwitching, setIsSwitching] = useState(false);
   const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -134,7 +135,7 @@ export function HostStreamInterface({
   useEffect(() => {
     const init = async () => {
       try {
-        const stream = await initializeMedia();
+        const stream = await initializeMedia('environment');
         if (videoRef.current && stream) {
           videoRef.current.srcObject = stream;
         }
@@ -245,11 +246,17 @@ export function HostStreamInterface({
   };
 
   const rotateCamera = async () => {
+    if (isSwitching) return;
+    setIsSwitching(true);
     const newFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
     setCameraFacingMode(newFacingMode);
-    const newStream = await switchCamera(newFacingMode);
-    if (newStream && videoRef.current) {
-      videoRef.current.srcObject = newStream;
+    try {
+      const newStream = await switchCamera(newFacingMode);
+      if (newStream && videoRef.current) {
+        videoRef.current.srcObject = newStream;
+      }
+    } finally {
+      setIsSwitching(false);
     }
   };
 
@@ -367,24 +374,20 @@ export function HostStreamInterface({
             <Card className="overflow-hidden">
               <CardContent className="p-0">
                 <div className="relative aspect-video bg-black">
-                  {/* Status indicators */}
-                  <div className="absolute top-4 right-4 flex items-center gap-2">
+                  {/* Top-left: camera mode + mobile indicator */}
+                  <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
+                    <Badge className={`text-xs border font-medium ${
+                      cameraFacingMode === 'environment'
+                        ? 'bg-blue-500/80 text-white border-blue-400'
+                        : 'bg-black/50 text-white border-white/20'
+                    }`}>
+                      <Camera className="w-3 h-3 mr-1" />
+                      {cameraFacingMode === 'environment' ? 'Rear Camera' : 'Front Camera'}
+                    </Badge>
                     {isMobile && (
                       <Badge variant="outline" className="text-xs bg-black/50 text-white border-white/20">
                         <Smartphone className="w-3 h-3 mr-1" />
                         Mobile
-                      </Badge>
-                    )}
-                    {isDataSaver && (
-                      <Badge className="bg-orange-500 text-white text-xs">
-                        <DataSaver className="w-3 h-3 mr-1" />
-                        Data Saver
-                      </Badge>
-                    )}
-                    {cameraFacingMode === 'environment' && (
-                      <Badge variant="outline" className="text-xs bg-black/50 text-white border-white/20">
-                        <Camera className="w-3 h-3 mr-1" />
-                        Rear Camera
                       </Badge>
                     )}
                   </div>
@@ -402,90 +405,113 @@ export function HostStreamInterface({
                       <VideoOff className="w-16 h-16 text-muted-foreground" />
                     </div>
                   )}
-                  <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2">
-                    {/* Camera rotation — works on mobile front/rear, available even while live */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className={`rounded-full bg-black/50 hover:bg-black/70 text-white border-white/20 ${
-                        cameraFacingMode === 'environment' ? 'ring-2 ring-blue-400' : ''
-                      }`}
-                      onClick={rotateCamera}
-                      disabled={!mediaInitialized}
-                      title={cameraFacingMode === 'user' ? 'Switch to rear camera' : 'Switch to front camera'}
-                    >
-                      <RotateCw className="w-5 h-5" />
-                    </Button>
-                    
-                    {/* Quality controls */}
-                    <div className="flex items-center bg-black/50 rounded-full px-3 py-2 gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-white hover:bg-white/20 p-1"
-                        onClick={() => setIsDataSaver(!isDataSaver)}
-                        disabled={isStreaming}
-                      >
-                        <DataSaver className={`w-4 h-4 ${isDataSaver ? 'text-orange-400' : ''}`} />
-                      </Button>
-                      
-                      <select
-                        value={videoQuality}
-                        onChange={(e) => setVideoQuality(e.target.value as any)}
-                        className="bg-transparent text-white text-sm border-none outline-none cursor-pointer"
-                        disabled={isStreaming}
-                      >
-                        <option value="auto" className="bg-gray-800">Auto</option>
-                        <option value="high" className="bg-gray-800">1080p</option>
-                        <option value="medium" className="bg-gray-800">720p</option>
-                        <option value="low" className="bg-gray-800">480p</option>
-                      </select>
+                  {/* Bottom controls bar */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent pt-8 pb-4 px-4">
+                    <div className="flex items-end justify-center gap-4">
+
+                      {/* Camera flip — prominent, labeled */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <button
+                          onClick={rotateCamera}
+                          disabled={!mediaInitialized || isSwitching}
+                          className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
+                            isSwitching
+                              ? 'bg-white/20 border-white/30 cursor-wait'
+                              : cameraFacingMode === 'environment'
+                                ? 'bg-blue-500/90 border-blue-300 hover:bg-blue-600/90'
+                                : 'bg-white/20 border-white/40 hover:bg-white/30'
+                          } disabled:opacity-50`}
+                        >
+                          {isSwitching
+                            ? <RefreshCw className="w-6 h-6 text-white animate-spin" />
+                            : <SwitchCamera className="w-6 h-6 text-white" />
+                          }
+                        </button>
+                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
+                          {isSwitching ? 'Switching...' : cameraFacingMode === 'environment' ? 'Rear' : 'Front'}
+                        </span>
+                      </div>
+
+                      {/* Video toggle */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <button
+                          onClick={toggleVideo}
+                          disabled={!mediaInitialized}
+                          className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
+                            videoEnabled
+                              ? 'bg-white/20 border-white/40 hover:bg-white/30'
+                              : 'bg-red-500/90 border-red-300 hover:bg-red-600/90'
+                          } disabled:opacity-50`}
+                        >
+                          {videoEnabled ? <Video className="w-6 h-6 text-white" /> : <VideoOff className="w-6 h-6 text-white" />}
+                        </button>
+                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
+                          {videoEnabled ? 'Camera' : 'Off'}
+                        </span>
+                      </div>
+
+                      {/* Audio toggle */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <button
+                          onClick={toggleAudio}
+                          disabled={!mediaInitialized}
+                          className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
+                            audioEnabled
+                              ? 'bg-white/20 border-white/40 hover:bg-white/30'
+                              : 'bg-red-500/90 border-red-300 hover:bg-red-600/90'
+                          } disabled:opacity-50`}
+                        >
+                          {audioEnabled ? <Mic className="w-6 h-6 text-white" /> : <MicOff className="w-6 h-6 text-white" />}
+                        </button>
+                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
+                          {audioEnabled ? 'Mic' : 'Muted'}
+                        </span>
+                      </div>
+
+                      {/* Quality selector */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <div className="h-14 flex items-center bg-black/60 rounded-full px-3 gap-1.5 border border-white/20">
+                          <button
+                            onClick={() => setIsDataSaver(!isDataSaver)}
+                            disabled={isStreaming}
+                            className="disabled:opacity-50"
+                          >
+                            <DataSaver className={`w-4 h-4 ${isDataSaver ? 'text-orange-400' : 'text-white'}`} />
+                          </button>
+                          <select
+                            value={videoQuality}
+                            onChange={(e) => setVideoQuality(e.target.value as any)}
+                            className="bg-transparent text-white text-xs border-none outline-none cursor-pointer disabled:opacity-50"
+                            disabled={isStreaming}
+                          >
+                            <option value="auto" className="bg-gray-800">Auto</option>
+                            <option value="high" className="bg-gray-800">1080p</option>
+                            <option value="medium" className="bg-gray-800">720p</option>
+                            <option value="low" className="bg-gray-800">480p</option>
+                          </select>
+                        </div>
+                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>Quality</span>
+                      </div>
+
                     </div>
-                    
-                    {/* Video/Audio controls */}
-                    <Button
-                      variant={videoEnabled ? "secondary" : "destructive"}
-                      size="icon"
-                      className="rounded-full"
-                      onClick={toggleVideo}
-                      disabled={!mediaInitialized}
-                    >
-                      {videoEnabled ? (
-                        <Video className="w-5 h-5" />
-                      ) : (
-                        <VideoOff className="w-5 h-5" />
-                      )}
-                    </Button>
-                    <Button
-                      variant={audioEnabled ? "secondary" : "destructive"}
-                      size="icon"
-                      className="rounded-full"
-                      onClick={toggleAudio}
-                      disabled={!mediaInitialized}
-                    >
-                      {audioEnabled ? (
-                        <Mic className="w-5 h-5" />
-                      ) : (
-                        <MicOff className="w-5 h-5" />
-                      )}
-                    </Button>
                   </div>
-                  {/* Connection status indicator */}
-                  <div className="absolute top-4 right-4">
+
+                  {/* Top-right: connection status */}
+                  <div className="absolute top-3 right-3 z-10">
                     {isStreaming ? (
-                      <Badge variant="secondary" className="gap-1">
-                        <Wifi className="w-3 h-3" />
-                        Broadcasting
+                      <Badge className="bg-red-500 text-white gap-1 border-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                        LIVE
                       </Badge>
                     ) : mediaInitialized ? (
-                      <Badge variant="outline" className="gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-green-500" />
+                      <Badge variant="outline" className="gap-1 bg-black/50 text-white border-white/20">
+                        <CheckCircle2 className="w-3 h-3 text-green-400" />
                         Ready
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="gap-1">
-                        <WifiOff className="w-3 h-3" />
-                        Initializing...
+                      <Badge variant="outline" className="gap-1 bg-black/50 text-white border-white/20">
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Starting...
                       </Badge>
                     )}
                   </div>

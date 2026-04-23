@@ -36,9 +36,16 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
   const supabase = supabaseRef.current;
 
   // Initialize media stream
-  const initializeMedia = useCallback(async () => {
+  const initializeMedia = useCallback(async (facingMode: 'user' | 'environment' = 'environment') => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(HOST_MEDIA_CONSTRAINTS);
+      const constraints: MediaStreamConstraints = {
+        ...HOST_MEDIA_CONSTRAINTS,
+        video: {
+          ...(HOST_MEDIA_CONSTRAINTS.video as MediaTrackConstraints),
+          facingMode,
+        },
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       mediaStreamRef.current = stream;
       return stream;
     } catch (err) {
