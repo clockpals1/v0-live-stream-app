@@ -390,6 +390,44 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     }
   }, []);
 
+  // Switch camera (front/rear) — replaces track in all active peer connections
+  const switchCamera = useCallback(async (facingMode: 'user' | 'environment') => {
+    try {
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: false,
+      });
+
+      const newVideoTrack = newVideoStream.getVideoTracks()[0];
+      if (!newVideoTrack) return null;
+
+      // Replace track in all active peer connections — no renegotiation needed
+      const replaces: Promise<void>[] = [];
+      viewersRef.current.forEach((viewer) => {
+        const sender = viewer.peerConnection.getSenders().find((s) => s.track?.kind === 'video');
+        if (sender) replaces.push(sender.replaceTrack(newVideoTrack));
+      });
+      await Promise.allSettled(replaces);
+
+      // Update mediaStreamRef: stop old video track, swap in new one
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getVideoTracks().forEach((t) => {
+          t.stop();
+          mediaStreamRef.current!.removeTrack(t);
+        });
+        mediaStreamRef.current.addTrack(newVideoTrack);
+      } else {
+        mediaStreamRef.current = newVideoStream;
+      }
+
+      return mediaStreamRef.current;
+    } catch (err) {
+      console.error('[v0] Error switching camera:', err);
+      setError('Could not switch camera. Please check camera permissions.');
+      return null;
+    }
+  }, []);
+
   // Download recording
   const downloadRecording = useCallback(() => {
     if (recordedChunks.length === 0) return;
@@ -458,6 +496,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     resumeStream,
     toggleVideo,
     toggleAudio,
+    switchCamera,
     downloadRecording,
   };
 }

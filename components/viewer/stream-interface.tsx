@@ -1359,6 +1359,20 @@ export function ViewerStreamInterface({
                 <CardContent className="p-0">
                   <div ref={videoContainerRef} className={`relative bg-black ${isFullscreen ? 'fixed inset-0 z-50 w-screen h-screen' : 'aspect-video'}`}>
                     {getVideoContent()}
+                    {/* isunday brand watermark */}
+                    {isStreamLive && isConnected && remoteStream && !isPiP && (
+                      <div className="absolute bottom-14 left-3 pointer-events-none select-none z-10">
+                        <div className="flex items-center gap-1.5 bg-black/25 backdrop-blur-sm rounded-full px-2.5 py-1 border border-white/10 opacity-60">
+                          <div className="w-4 h-4 bg-gradient-to-br from-violet-500 to-purple-700 rounded-full flex items-center justify-center shrink-0">
+                            <Radio className="w-2 h-2 text-white" />
+                          </div>
+                          <span className="text-white text-[10px] font-bold tracking-[0.15em] uppercase" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
+                            isunday
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Unmute prompt — shown when video is playing but muted */}
                     {isMuted && isConnected && remoteStream && (
                       <div

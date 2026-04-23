@@ -106,6 +106,7 @@ export function HostStreamInterface({
     resumeStream,
     toggleVideo,
     toggleAudio,
+    switchCamera,
     downloadRecording,
   } = useHostStream({
     streamId: stream.id,
@@ -244,40 +245,11 @@ export function HostStreamInterface({
   };
 
   const rotateCamera = async () => {
-    if (!isMobile) return;
-    
     const newFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
     setCameraFacingMode(newFacingMode);
-    
-    try {
-      // Stop current stream
-      if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-      }
-      
-      // Get media constraints for new camera
-      const constraints = {
-        video: {
-          facingMode: newFacingMode,
-          width: isDataSaver ? { ideal: 640 } : videoQuality === 'low' ? { ideal: 480 } : videoQuality === 'medium' ? { ideal: 720 } : videoQuality === 'high' ? { ideal: 1080 } : { ideal: 720 },
-          height: isDataSaver ? { ideal: 360 } : videoQuality === 'low' ? { ideal: 360 } : videoQuality === 'medium' ? { ideal: 480 } : videoQuality === 'high' ? { ideal: 720 } : { ideal: 480 },
-          frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 }
-        },
-        audio: true
-      };
-      
-      // Get new stream with rotated camera
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      
-      // Update the host stream hook with new media
-      await initializeMedia();
-      
-    } catch (err) {
-      console.error('Failed to rotate camera:', err);
+    const newStream = await switchCamera(newFacingMode);
+    if (newStream && videoRef.current) {
+      videoRef.current.srcObject = newStream;
     }
   };
 
@@ -431,18 +403,19 @@ export function HostStreamInterface({
                     </div>
                   )}
                   <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2">
-                    {/* Camera rotation for mobile */}
-                    {isMobile && (
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="rounded-full bg-black/50 hover:bg-black/70 text-white border-white/20"
-                        onClick={rotateCamera}
-                        disabled={!mediaInitialized || isStreaming}
-                      >
-                        <RotateCw className="w-5 h-5" />
-                      </Button>
-                    )}
+                    {/* Camera rotation — works on mobile front/rear, available even while live */}
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={`rounded-full bg-black/50 hover:bg-black/70 text-white border-white/20 ${
+                        cameraFacingMode === 'environment' ? 'ring-2 ring-blue-400' : ''
+                      }`}
+                      onClick={rotateCamera}
+                      disabled={!mediaInitialized}
+                      title={cameraFacingMode === 'user' ? 'Switch to rear camera' : 'Switch to front camera'}
+                    >
+                      <RotateCw className="w-5 h-5" />
+                    </Button>
                     
                     {/* Quality controls */}
                     <div className="flex items-center bg-black/50 rounded-full px-3 py-2 gap-2">
