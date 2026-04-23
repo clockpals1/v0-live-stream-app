@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { ICE_SERVERS, SignalMessage, HOST_MEDIA_CONSTRAINTS, MAX_VIEWERS } from "./config";
+import { getIceServers } from "./get-ice-servers";
 
 interface ViewerConnection {
   id: string;
@@ -86,7 +87,8 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         return null;
       }
 
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const iceConfig = await getIceServers();
+      const pc = new RTCPeerConnection(iceConfig);
 
       // Add tracks — use relay (co-host) stream if active, else own camera
       const sourceStream = activeRelayStreamRef.current ?? mediaStreamRef.current;

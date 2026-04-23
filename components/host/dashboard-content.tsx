@@ -776,9 +776,18 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                   </p>
                 </CardContent>
               </Card>
+            ) : streams.filter(s => s.status !== "scheduled" && s.status !== "live").length === 0 ? (
+              <Card>
+                <CardContent className="py-8 text-center">
+                  <Radio className="w-8 h-8 text-red-400 mx-auto mb-3 animate-pulse" />
+                  <p className="text-muted-foreground text-sm">
+                    All your streams are currently live — see <span className="font-medium text-red-500">Live Now</span> above.
+                  </p>
+                </CardContent>
+              </Card>
             ) : (
               <div className="grid gap-4">
-                {streams.filter(s => s.status !== "scheduled").map((stream) => (
+                {streams.filter(s => s.status !== "scheduled" && s.status !== "live").map((stream) => (
                   <Card key={stream.id} className="group hover:shadow-md transition-shadow duration-200">
                     <CardContent className="p-6">
                       <div className="flex items-start justify-between gap-4">

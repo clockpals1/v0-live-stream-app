@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
-import { ICE_SERVERS } from "./config";
+import { getIceServers } from "./get-ice-servers";
 
 interface UseSimpleStreamProps {
   streamId: string;
@@ -90,7 +90,8 @@ export function useSimpleStream({
             peerConnectionRef.current = null;
           }
           
-          const pc = new RTCPeerConnection(ICE_SERVERS);
+          const iceConfig = await getIceServers();
+          const pc = new RTCPeerConnection(iceConfig);
           peerConnectionRef.current = pc;
           
           pc.ontrack = (event) => {
