@@ -346,6 +346,13 @@ export function HostStreamInterface({
     }
   };
 
+  const getNameColor = (name: string) => {
+    const colors = ['text-blue-400', 'text-emerald-400', 'text-purple-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-yellow-400', 'text-rose-400', 'text-indigo-400', 'text-teal-400'];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  };
+
   const handleEndStream = async () => {
     await stopStream();
     setStream((prev) => ({ ...prev, status: "ended" }));
@@ -745,21 +752,28 @@ export function HostStreamInterface({
                       No messages yet
                     </p>
                   ) : (
-                    messages.map((msg) => (
-                      <div key={msg.id} className="flex flex-col gap-1">
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-sm font-medium text-foreground">
-                            {msg.sender_name}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(msg.created_at).toLocaleTimeString()}
-                          </span>
+                    messages.map((msg) => {
+                      const isOwn = msg.sender_name === (host.display_name || "Host");
+                      return (
+                        <div key={msg.id} className={`flex flex-col gap-0.5 rounded-lg px-2.5 py-2 ${
+                          isOwn ? 'bg-primary/5 border border-primary/10' : 'bg-muted/50'
+                        }`}>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={`text-xs font-semibold truncate max-w-[130px] flex-shrink ${
+                              isOwn ? 'text-primary' : getNameColor(msg.sender_name)
+                            }`}>
+                              {isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
+                            </span>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-sm text-foreground/80 break-words leading-snug">
+                            {msg.message}
+                          </p>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          {msg.message}
-                        </p>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                   <div ref={messagesEndRef} />
                 </div>

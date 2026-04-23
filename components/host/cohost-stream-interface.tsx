@@ -2,10 +2,14 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
 import { useCohostStream } from "@/lib/webrtc/use-cohost-stream";
+import { playNotificationSound, vibrateDevice } from "@/lib/utils/notification";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Radio,
   Video,
@@ -20,6 +24,8 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
+  MessageCircle,
+  Send,
 } from "lucide-react";
 
 interface Participant {
@@ -36,6 +42,13 @@ interface Stream {
   status: string;
 }
 
+interface ChatMessage {
+  id: string;
+  sender_name: string;
+  message: string;
+  created_at: string;
+}
+
 interface CohostStreamInterfaceProps {
   participant: Participant;
   stream: Stream;
@@ -47,6 +60,15 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
   const [mediaInitialized, setMediaInitialized] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("environment");
   const [isSwitching, setIsSwitching] = useState(false);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [chatOpen, setChatOpen] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
+  const chatChannelRef = useRef<any>(null);
 
   const {
     mediaStream,
@@ -101,6 +123,58 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
       // error state handled in hook
     }
   }, [initializeMedia, cameraFacingMode]);
+
+  // Chat: subscribe to Broadcast channel shared with host and viewers
+  useEffect(() => {
+    const channel = supabase
+      .channel(`chat-room-${stream.id}`, { config: { broadcast: { self: true } } })
+      .on("broadcast", { event: "chat-message" }, ({ payload }) => {
+        const msg = payload as ChatMessage;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+        if (msg.sender_name !== displayName) {
+          setUnreadCount((c) => c + 1);
+          playNotificationSound();
+          vibrateDevice();
+        }
+      })
+      .subscribe();
+    chatChannelRef.current = channel;
+    supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("stream_id", stream.id)
+      .order("created_at", { ascending: true })
+      .then(({ data }: { data: ChatMessage[] | null }) => {
+        if (data) setMessages(data);
+      });
+    return () => {
+      supabase.removeChannel(channel);
+      chatChannelRef.current = null;
+    };
+  }, [stream.id, displayName]);
+
+  // Auto-scroll when new messages arrive and chat is open
+  useEffect(() => {
+    if (chatOpen) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, chatOpen]);
+
+  const sendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+    const msgText = newMessage.trim();
+    setNewMessage("");
+    const { data } = await supabase
+      .from("chat_messages")
+      .insert({ stream_id: stream.id, sender_name: displayName, message: msgText })
+      .select()
+      .single();
+    if (data && chatChannelRef.current) {
+      chatChannelRef.current.send({ type: "broadcast", event: "chat-message", payload: data });
+    }
+  };
 
   const rotateCamera = async () => {
     if (isSwitching) return;
@@ -239,6 +313,74 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
               </div>
             )}
           </CardContent>
+        </Card>
+        {/* Chat Panel */}
+        <Card className="w-full max-w-lg">
+          <CardHeader className="pb-2 pt-3 px-4">
+            <button
+              type="button"
+              onClick={() => { setChatOpen((o) => !o); setUnreadCount(0); }}
+              className="flex items-center justify-between w-full"
+            >
+              <CardTitle className="text-sm flex items-center gap-2">
+                <MessageCircle className="w-4 h-4" />
+                Live Chat
+                {unreadCount > 0 && (
+                  <span className="ml-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+                {unreadCount === 0 && messages.length > 0 && (
+                  <span className="text-xs text-muted-foreground font-normal">({messages.length})</span>
+                )}
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">{chatOpen ? "▲ Hide" : "▼ Show"}</span>
+            </button>
+          </CardHeader>
+          {chatOpen && (
+            <CardContent className="px-4 pb-4 pt-0">
+              <ScrollArea className="h-52 w-full">
+                <div className="flex flex-col gap-2 pr-2">
+                  {messages.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-6">No messages yet</p>
+                  ) : (
+                    messages.map((msg) => {
+                      const isOwn = msg.sender_name === displayName;
+                      return (
+                        <div key={msg.id} className={`flex flex-col gap-0.5 rounded-md px-2 py-1.5 ${
+                          isOwn ? 'bg-primary/5 border border-primary/10' : 'bg-muted/50'
+                        }`}>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={`text-xs font-semibold truncate max-w-[130px] flex-shrink ${
+                              isOwn ? 'text-primary' : 'text-foreground'
+                            }`}>
+                              {isOwn ? "you" : msg.sender_name}
+                            </span>
+                            <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-foreground/80 break-words leading-snug">{msg.message}</p>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+              </ScrollArea>
+              <form onSubmit={sendChatMessage} className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+                <Input
+                  placeholder="Message viewers..."
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  className="h-8 text-sm"
+                />
+                <Button type="submit" size="icon" className="h-8 w-8 flex-shrink-0">
+                  <Send className="w-3.5 h-3.5" />
+                </Button>
+              </form>
+            </CardContent>
+          )}
         </Card>
       </main>
     </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { vibrateDevice } from "@/lib/utils/notification";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -357,6 +358,7 @@ export function ViewerStreamInterface({
           if (prev.some((m) => m.id === payload.id)) return prev;
           return [...prev, payload as ChatMessage];
         });
+        vibrateDevice([60]); // subtle buzz for every new chat message
       })
       .subscribe((status) => {
         console.log('[Viewer] Chat subscription status:', status);
@@ -1514,15 +1516,15 @@ export function ViewerStreamInterface({
                             isEmergency ? 'bg-red-500/10 border border-red-500/20' :
                             isOwn ? 'bg-primary/5 border border-primary/10' : 'hover:bg-muted/50'
                           }`}>
-                            <div className="flex items-baseline gap-1.5 flex-wrap">
-                              <span className={`text-xs font-semibold ${
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className={`text-xs font-semibold truncate max-w-[130px] flex-shrink ${
                                 isEmergency ? 'text-red-500' :
                                 isOwn ? 'text-primary' :
                                 getNameColor(msg.sender_name)
                               }`}>
                                 {isEmergency ? '🚨 Alert' : isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
                               </span>
-                              <span className="text-xs text-muted-foreground">
+                              <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
                                 {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </div>
