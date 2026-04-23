@@ -399,32 +399,28 @@ export function ViewerStreamInterface({
     };
   }, [stream.id]);
 
-  // Presence-based viewer count — no DB insert required, real-time, auto-handles disconnects
+  // Presence-based viewer count — starts immediately on page load, no DB insert needed
+  // Runs regardless of hasJoined: PC users who dismiss the dialog were never being counted
   useEffect(() => {
-    if (!hasJoined) return;
-
     const ch = supabase
       .channel(`presence-${stream.id}`, { config: { presence: { key: presenceIdRef.current } } })
       .on('presence', { event: 'sync' }, () => {
-        const count = Object.keys(ch.presenceState()).length;
-        setViewerCount(count);
+        setViewerCount(Object.keys(ch.presenceState()).length);
       })
       .on('presence', { event: 'join' }, () => {
-        const count = Object.keys(ch.presenceState()).length;
-        setViewerCount(count);
+        setViewerCount(Object.keys(ch.presenceState()).length);
       })
       .on('presence', { event: 'leave' }, () => {
-        const count = Object.keys(ch.presenceState()).length;
-        setViewerCount(count);
+        setViewerCount(Object.keys(ch.presenceState()).length);
       })
       .subscribe(async (status: string) => {
         if (status === 'SUBSCRIBED') {
-          await ch.track({ name: viewerName || 'Viewer', joined_at: Date.now() });
+          await ch.track({ id: presenceIdRef.current, joined_at: Date.now() });
         }
       });
 
     return () => { supabase.removeChannel(ch); };
-  }, [stream.id, hasJoined, viewerName, supabase]);
+  }, [stream.id, supabase]);
 
   // Auto-scroll chat
   useEffect(() => {
