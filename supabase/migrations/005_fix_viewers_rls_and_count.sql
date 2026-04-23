@@ -3,6 +3,10 @@
 -- Separate policies are clearer and more reliable
 
 DROP POLICY IF EXISTS "Anyone can manage viewers for visible streams" ON viewers;
+DROP POLICY IF EXISTS "Anyone can view viewers" ON viewers;
+DROP POLICY IF EXISTS "Anyone can insert as viewer" ON viewers;
+DROP POLICY IF EXISTS "Anyone can update viewer record" ON viewers;
+DROP POLICY IF EXISTS "Anyone can delete viewer record" ON viewers;
 
 -- SELECT: anyone can see viewers for live/waiting streams
 CREATE POLICY "Anyone can view viewers" ON viewers
