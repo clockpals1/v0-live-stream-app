@@ -285,16 +285,18 @@ export function useSimpleStream({
             setError(null);
             // Initial join after 1s
             setTimeout(joinStream, 1000);
-            // Retry every 5s until we receive an offer (peerConnection gets created)
+            // Retry every 4s until we have a fully CONNECTED peer connection.
+            // Using connectionState check so a closed/stale old PC doesn't stop retries.
             const retryInterval = setInterval(() => {
-              if (!peerConnectionRef.current) {
-                console.log("[simple] No offer received yet, retrying viewer-join");
+              const pc = peerConnectionRef.current;
+              const fullyConnected = pc && pc.connectionState === "connected";
+              if (!fullyConnected) {
+                console.log("[simple] No connected peer yet, retrying viewer-join");
                 joinStream();
               } else {
                 clearInterval(retryInterval);
               }
-            }, 5000);
-            // Store so cleanup can clear it
+            }, 4000);
             reconnectTimeoutRef.current = retryInterval as any;
           } else if (stream?.status === "ended") {
             setError("This stream has ended");
@@ -310,7 +312,16 @@ export function useSimpleStream({
     return () => {
       if (reconnectTimeoutRef.current) {
         clearInterval(reconnectTimeoutRef.current as any);
+        reconnectTimeoutRef.current = null;
       }
+      // Close old peer connection so the retry loop correctly retries when switching channels.
+      // Without this, peerConnectionRef.current would be non-null (old host) and retries stop.
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      setIsConnected(false);
+      setRemoteStream(null);
       leaveStream();
       supabase.removeChannel(channel);
     };
