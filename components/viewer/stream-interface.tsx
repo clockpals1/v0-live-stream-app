@@ -150,9 +150,10 @@ export function ViewerStreamInterface({
     return () => clearInterval(id);
   }, [stream.status, isStreamLive, isConnected, remoteStream]);
 
-  // Auto-reload after 90s stuck connecting — host likely refreshed and re-joined
+  // Auto-reload after 45s stuck connecting — with TURN working, connections succeed
+  // well under 15s; 45s is a generous safety net before forcing a fresh page load.
   useEffect(() => {
-    if (connectingSeconds >= 90) {
+    if (connectingSeconds >= 45) {
       window.location.reload();
     }
   }, [connectingSeconds]);
@@ -1175,8 +1176,8 @@ export function ViewerStreamInterface({
     // Stream is live but still connecting — show progressive messages based on wait time
     if (stream.status === "live" || isStreamLive) {
       const isLongWait = connectingSeconds >= 15;
-      const isVeryLongWait = connectingSeconds >= 40;
-      const autoReloadIn = Math.max(0, 90 - connectingSeconds);
+      const isVeryLongWait = connectingSeconds >= 30;
+      const autoReloadIn = Math.max(0, 45 - connectingSeconds);
 
       return (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-950 to-gray-900">

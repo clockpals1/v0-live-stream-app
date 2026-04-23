@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import { ICE_SERVERS } from "./config";
 
 interface UseSimpleStreamProps {
   streamId: string;
@@ -38,14 +39,6 @@ export function useSimpleStream({
   const joinStreamRef = useRef<() => void>(() => {});
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
-
-  // Simplified ICE servers with public STUN only
-  const SIMPLE_ICE_SERVERS: RTCConfiguration = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-    ]
-  };
 
   // Join stream (declared FIRST to avoid TDZ in closures below)
   const joinStream = useCallback(() => {
@@ -97,7 +90,7 @@ export function useSimpleStream({
             peerConnectionRef.current = null;
           }
           
-          const pc = new RTCPeerConnection(SIMPLE_ICE_SERVERS);
+          const pc = new RTCPeerConnection(ICE_SERVERS);
           peerConnectionRef.current = pc;
           
           pc.ontrack = (event) => {
@@ -174,6 +167,16 @@ export function useSimpleStream({
                   payload: event.candidate,
                 },
               });
+            }
+          };
+
+          // ICE failure — immediately trigger a fresh viewer-join so the host
+          // creates a new peer connection without waiting for the 4s retry loop.
+          pc.oniceconnectionstatechange = () => {
+            console.log("[simple] ICE connection state:", pc.iceConnectionState);
+            if (pc.iceConnectionState === "failed") {
+              console.log("[simple] ICE failed — triggering immediate rejoin");
+              joinStreamRef.current();
             }
           };
           
@@ -263,11 +266,9 @@ export function useSimpleStream({
   const attemptAlternativeConnection = useCallback(() => {
     console.log("[simple] Trying alternative connection method");
     setError("Attempting alternative connection...");
-    
-    // Try to reconnect with a new viewer ID
     viewerIdRef.current = Math.random().toString(36).substr(2, 9);
     setTimeout(() => {
-      joinStream();
+      joinStreamRef.current();
     }, 1000);
   }, []);
 

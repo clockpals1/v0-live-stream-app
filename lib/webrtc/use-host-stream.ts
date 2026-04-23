@@ -37,23 +37,44 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
-  // Initialize media stream
+  // Initialize media stream — tries ideal constraints first, falls back to
+  // progressively simpler ones for low-end / older mobile browsers.
   const initializeMedia = useCallback(async (facingMode: 'user' | 'environment' = 'environment') => {
-    try {
-      const constraints: MediaStreamConstraints = {
-        ...HOST_MEDIA_CONSTRAINTS,
+    const attempts: MediaStreamConstraints[] = [
+      {
         video: {
-          ...(HOST_MEDIA_CONSTRAINTS.video as MediaTrackConstraints),
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24 },
           facingMode,
         },
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      mediaStreamRef.current = stream;
-      return stream;
-    } catch (err) {
-      console.error("[v0] Error getting user media:", err);
-      setError("Failed to access camera/microphone. Please check permissions.");
-      throw err;
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      },
+      // Fallback 1: lower resolution, minimal audio constraints
+      {
+        video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: true,
+      },
+      // Fallback 2: bare minimum — any camera, any mic
+      { video: true, audio: true },
+    ];
+    for (let i = 0; i < attempts.length; i++) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(attempts[i]);
+        console.log(`[v0] Media initialized with constraint level ${i}`);
+        mediaStreamRef.current = stream;
+        return stream;
+      } catch (err) {
+        console.warn(`[v0] getUserMedia attempt ${i} failed:`, err);
+        if (i === attempts.length - 1) {
+          setError("Camera/microphone access failed. Please allow permissions and reload.");
+          throw err;
+        }
+      }
     }
   }, []);
 
@@ -165,8 +186,15 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
       switch (message.type) {
         case "viewer-join": {
           console.log("[v0] Viewer joining:", message.from, message.viewerName);
-          
-          if (viewersRef.current.size >= MAX_VIEWERS) {
+
+          // If this viewer already has a connection (retry/reconnect), close the
+          // stale PC first to avoid accumulating dozens of orphaned connections.
+          const stale = viewersRef.current.get(message.from);
+          if (stale) {
+            console.log("[v0] Closing stale connection for viewer:", message.from);
+            stale.peerConnection.close();
+            viewersRef.current.delete(message.from);
+          } else if (viewersRef.current.size >= MAX_VIEWERS) {
             console.log("[v0] Max viewers reached");
             return;
           }
@@ -251,9 +279,21 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
       // Start recording
       if (mediaStreamRef.current) {
         try {
-          const mediaRecorder = new MediaRecorder(mediaStreamRef.current, {
-            mimeType: "video/webm;codecs=vp9,opus",
-          });
+          // Pick the best supported mimeType — VP9 is not available on all browsers
+          const mimeTypes = [
+            "video/webm;codecs=vp9,opus",
+            "video/webm;codecs=vp8,opus",
+            "video/webm;codecs=h264,opus",
+            "video/webm",
+            "video/mp4",
+          ];
+          const mimeType = mimeTypes.find((t) => {
+            try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
+          }) ?? "";
+          const mediaRecorder = new MediaRecorder(
+            mediaStreamRef.current,
+            mimeType ? { mimeType } : {}
+          );
 
           mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
