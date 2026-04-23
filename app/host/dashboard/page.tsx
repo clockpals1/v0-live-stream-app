@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { DashboardContent } from "@/components/host/dashboard-content";
 
 export default async function HostDashboardPage() {
@@ -11,32 +10,24 @@ export default async function HostDashboardPage() {
     redirect("/auth/login");
   }
 
-  // Use admin client (service role) if available — bypasses RLS
-  // Falls back to regular client if SERVICE_ROLE_KEY not set in this environment
-  let db: Awaited<ReturnType<typeof createAdminClient>> | Awaited<ReturnType<typeof createClient>>;
-  try {
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("no service role key");
-    db = createAdminClient();
-  } catch {
-    db = supabase;
-  }
-
-  const { data: host } = await db
+  // Check if user is a registered host (RLS policy: auth.uid() = user_id)
+  const { data: host } = await supabase
     .from("hosts")
     .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
 
+  // Get streams where this host is owner OR assigned broadcaster
   let streams = null;
   if (host) {
-    const { data: fullData, error: fullErr } = await db
+    const { data: fullData, error: fullErr } = await supabase
       .from("streams")
       .select("*")
       .or(`host_id.eq.${host.id},assigned_host_id.eq.${host.id}`)
       .order("created_at", { ascending: false });
 
     if (fullErr) {
-      const { data: fallbackData } = await db
+      const { data: fallbackData } = await supabase
         .from("streams")
         .select("*")
         .eq("host_id", host.id)
