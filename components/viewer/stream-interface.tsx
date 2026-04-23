@@ -74,7 +74,8 @@ export function ViewerStreamInterface({
   const [stream, setStream] = useState(initialStream);
   const [viewerName, setViewerName] = useState("");
   const [hasJoined, setHasJoined] = useState(false);
-  const [viewerCount, setViewerCount] = useState(Math.max(initialStream.viewer_count || 0, 0));
+  const [viewerCount, setViewerCount] = useState(0);
+  const presenceIdRef = useRef(`vwr-${Math.random().toString(36).substr(2, 9)}`);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [copied, setCopied] = useState(false);
@@ -325,9 +326,9 @@ export function ViewerStreamInterface({
         (payload: any) => {
           const updated = payload.new as Stream;
           setStream(updated);
-          // DB trigger keeps viewer_count accurate — sync it here
-          if (typeof updated.viewer_count === 'number') {
-            setViewerCount(updated.viewer_count);
+          // DB trigger keeps viewer_count — only use if higher than presence count
+          if (typeof updated.viewer_count === 'number' && updated.viewer_count > 0) {
+            setViewerCount(prev => Math.max(prev, updated.viewer_count));
           }
         }
       )
@@ -398,67 +399,32 @@ export function ViewerStreamInterface({
     };
   }, [stream.id]);
 
-  // Subscribe to viewer count
+  // Presence-based viewer count — no DB insert required, real-time, auto-handles disconnects
   useEffect(() => {
-    console.log('[Viewer] Setting up viewer count subscription for stream:', stream.id);
+    if (!hasJoined) return;
 
-    const loadViewerCount = async () => {
-      try {
-        console.log('[Viewer] Loading viewer count...');
-        const { count, error } = await supabase
-          .from("viewers")
-          .select("*", { count: "exact", head: true })
-          .eq("stream_id", stream.id)
-          .is("left_at", null);
-
-        if (error) {
-          console.error('[Viewer] Error loading viewer count:', error);
-        } else {
-          console.log('[Viewer] Viewer count loaded:', count);
-          setViewerCount(count || 0);
-        }
-      } catch (error) {
-        console.error('[Viewer] Exception loading viewer count:', error);
-      }
-    };
-
-    // Load initial viewer count
-    loadViewerCount();
-    
-    const channel = supabase
-      .channel(`viewers-watch-${stream.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "viewers",
-          filter: `stream_id=eq.${stream.id}`,
-        },
-        (payload) => {
-          console.log('[Viewer] Viewer table changed:', payload);
-          // Reload viewer count on any change
-          loadViewerCount();
-        }
-      )
-      .subscribe((status) => {
-        console.log('[Viewer] Viewer count subscription status:', status);
-        
+    const ch = supabase
+      .channel(`presence-${stream.id}`, { config: { presence: { key: presenceIdRef.current } } })
+      .on('presence', { event: 'sync' }, () => {
+        const count = Object.keys(ch.presenceState()).length;
+        setViewerCount(count);
+      })
+      .on('presence', { event: 'join' }, () => {
+        const count = Object.keys(ch.presenceState()).length;
+        setViewerCount(count);
+      })
+      .on('presence', { event: 'leave' }, () => {
+        const count = Object.keys(ch.presenceState()).length;
+        setViewerCount(count);
+      })
+      .subscribe(async (status: string) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Viewer] Viewer count channel subscribed successfully');
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('[Viewer] Viewer count channel error, retrying...');
-          setTimeout(() => {
-            loadViewerCount();
-          }, 2000);
+          await ch.track({ name: viewerName || 'Viewer', joined_at: Date.now() });
         }
       });
 
-    return () => {
-      console.log('[Viewer] Cleaning up viewer count channel');
-      supabase.removeChannel(channel);
-    };
-  }, [stream.id]);
+    return () => { supabase.removeChannel(ch); };
+  }, [stream.id, hasJoined, viewerName, supabase]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -850,19 +816,21 @@ export function ViewerStreamInterface({
     return () => clearInterval(id);
   }, [stream.status, stream.started_at]);
 
-  // Periodic viewer count refresh — count directly from viewers table every 5s
+  // Fallback: sync viewer_count from DB trigger via streams table every 10s
+  // Only updates if presence count is still 0 (presence is primary source)
   useEffect(() => {
     if (stream.status !== 'live') return;
     const refresh = async () => {
-      const { count } = await supabase
-        .from('viewers')
-        .select('*', { count: 'exact', head: true })
-        .eq('stream_id', stream.id)
-        .is('left_at', null);
-      if (count !== null) setViewerCount(count);
+      const { data } = await supabase
+        .from('streams')
+        .select('viewer_count')
+        .eq('id', stream.id)
+        .single();
+      if (data && typeof data.viewer_count === 'number' && data.viewer_count > 0) {
+        setViewerCount(prev => Math.max(prev, data.viewer_count));
+      }
     };
-    refresh(); // run immediately
-    const id = setInterval(refresh, 5000);
+    const id = setInterval(refresh, 10000);
     return () => clearInterval(id);
   }, [stream.id, stream.status, supabase]);
 
