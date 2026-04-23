@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useHostStream } from "@/lib/webrtc/use-host-stream";
+import { useCohostReceiver } from "@/lib/webrtc/use-cohost-receiver";
 import { MAX_VIEWERS } from "@/lib/webrtc/config";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -117,11 +118,25 @@ export function HostStreamInterface({
     toggleVideo,
     toggleAudio,
     switchCamera,
+    relayStream,
     downloadRecording,
   } = useHostStream({
     streamId: stream.id,
     roomCode: stream.room_code,
   });
+
+  // Receive co-host stream (admin's browser connects silently as a viewer)
+  const coHostRemoteStream = useCohostReceiver(isStreamOwner ? activeParticipantId : null);
+
+  // When co-host stream arrives (or participantId changes), relay it to viewers
+  useEffect(() => {
+    if (!isStreamOwner) return;
+    if (activeParticipantId && coHostRemoteStream) {
+      relayStream(coHostRemoteStream);
+    } else if (!activeParticipantId) {
+      relayStream(null);
+    }
+  }, [coHostRemoteStream, activeParticipantId, isStreamOwner, relayStream]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -668,7 +683,7 @@ export function HostStreamInterface({
                     streamId={stream.id}
                     roomCode={stream.room_code}
                     activeParticipantId={activeParticipantId}
-                    onSwitch={(id) => setActiveParticipantId(id)}
+                    onSwitch={setActiveParticipantId}
                   />
                 </TabsContent>
               )}

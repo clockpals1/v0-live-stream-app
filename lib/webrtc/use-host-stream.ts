@@ -29,6 +29,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
   const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const activeRelayStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -65,10 +66,11 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
 
-      // Add local tracks to the connection
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => {
-          pc.addTrack(track, mediaStreamRef.current!);
+      // Add tracks — use relay (co-host) stream if active, else own camera
+      const sourceStream = activeRelayStreamRef.current ?? mediaStreamRef.current;
+      if (sourceStream) {
+        sourceStream.getTracks().forEach((track) => {
+          pc.addTrack(track, sourceStream);
         });
       }
 
@@ -435,6 +437,26 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     }
   }, []);
 
+  // Relay a remote stream to all existing viewer connections via replaceTrack().
+  // Pass null to restore the admin's own camera on all connections.
+  const relayStream = useCallback((remoteStream: MediaStream | null) => {
+    const ownStream = mediaStreamRef.current;
+    viewersRef.current.forEach((viewer) => {
+      viewer.peerConnection.getSenders().forEach((sender) => {
+        if (!sender.track) return;
+        const kind = sender.track.kind as "video" | "audio";
+        const newTrack =
+          remoteStream?.getTracks().find((t) => t.kind === kind) ??
+          ownStream?.getTracks().find((t) => t.kind === kind) ??
+          null;
+        if (newTrack && newTrack !== sender.track) {
+          sender.replaceTrack(newTrack).catch(console.error);
+        }
+      });
+    });
+    activeRelayStreamRef.current = remoteStream;
+  }, []);
+
   // Download recording
   const downloadRecording = useCallback(() => {
     if (recordedChunks.length === 0) return;
@@ -504,6 +526,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     toggleVideo,
     toggleAudio,
     switchCamera,
+    relayStream,
     downloadRecording,
   };
 }
