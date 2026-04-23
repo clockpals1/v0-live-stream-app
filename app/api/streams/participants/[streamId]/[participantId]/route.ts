@@ -6,15 +6,21 @@ interface Params {
   params: Promise<{ streamId: string; participantId: string }>;
 }
 
-// PATCH /api/streams/[streamId]/participants/[participantId] — update label or status
+// PATCH /api/streams/participants/[streamId]/[participantId] — update label or status
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { streamId, participantId } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  let adminClient;
+  try {
+    adminClient = createAdminClient();
+  } catch {
+    adminClient = supabase;
+  }
+
   const body = await req.json();
-  const adminClient = createAdminClient();
 
   const { data, error } = await adminClient
     .from("stream_participants")
@@ -28,14 +34,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   return NextResponse.json({ participant: data });
 }
 
-// DELETE /api/streams/[streamId]/participants/[participantId] — remove co-host from stream
+// DELETE /api/streams/participants/[streamId]/[participantId] — remove co-host
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const { streamId, participantId } = await params;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const adminClient = createAdminClient();
+  let adminClient;
+  try {
+    adminClient = createAdminClient();
+  } catch {
+    adminClient = supabase;
+  }
 
   // If this participant was the active one, clear active_participant_id first
   await adminClient

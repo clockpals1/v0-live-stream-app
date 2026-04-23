@@ -6,7 +6,7 @@ interface Params {
   params: Promise<{ streamId: string }>;
 }
 
-// GET /api/streams/[streamId]/participants — list all co-hosts for this stream
+// GET /api/streams/participants/[streamId] — list all co-hosts for this stream
 export async function GET(_req: NextRequest, { params }: Params) {
   const { streamId } = await params;
   const supabase = await createClient();
@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   return NextResponse.json({ participants: data });
 }
 
-// POST /api/streams/[streamId]/participants — add a co-host to this stream
+// POST /api/streams/participants/[streamId] — add a co-host to this stream
 export async function POST(req: NextRequest, { params }: Params) {
   const { streamId } = await params;
   const supabase = await createClient();
@@ -47,7 +47,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { host_id, slot_label } = body as { host_id: string; slot_label?: string };
   if (!host_id) return NextResponse.json({ error: "host_id is required" }, { status: 400 });
 
-  const adminClient = createAdminClient();
+  let adminClient;
+  try {
+    adminClient = createAdminClient();
+  } catch {
+    adminClient = supabase;
+  }
 
   const { data: participant, error } = await adminClient
     .from("stream_participants")

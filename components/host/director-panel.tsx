@@ -80,7 +80,7 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
 
   // Load participants
   const loadParticipants = async () => {
-    const res = await fetch(`/api/streams/${streamId}/participants`);
+    const res = await fetch(`/api/streams/participants/${streamId}`);
     if (res.ok) {
       const { participants: data } = await res.json();
       setParticipants(data || []);
@@ -119,7 +119,7 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
     if (!selectedHostId) return;
     setIsAdding(true);
     try {
-      const res = await fetch(`/api/streams/${streamId}/participants`, {
+      const res = await fetch(`/api/streams/participants/${streamId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ host_id: selectedHostId, slot_label: slotLabel || "Camera" }),
@@ -141,7 +141,7 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
 
   // Remove a co-host
   const handleRemove = async (participantId: string) => {
-    const res = await fetch(`/api/streams/${streamId}/participants/${participantId}`, { method: "DELETE" });
+    const res = await fetch(`/api/streams/participants/${streamId}/${participantId}`, { method: "DELETE" });
     if (res.ok) {
       toast.success("Co-host removed");
       setParticipants((prev) => prev.filter((p) => p.id !== participantId));
@@ -154,6 +154,7 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
   // Switch active camera (admin action → updates DB → viewers react automatically)
   const handleSwitch = async (participantId: string | null) => {
     setIsSwitching(true);
+    // Switch active camera — update DB, viewers react via Realtime
     const { error } = await supabase
       .from("streams")
       .update({ active_participant_id: participantId })
