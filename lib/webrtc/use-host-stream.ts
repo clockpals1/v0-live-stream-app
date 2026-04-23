@@ -10,6 +10,7 @@ interface ViewerConnection {
   name: string;
   peerConnection: RTCPeerConnection;
   connected: boolean;
+  audioSender?: RTCRtpSender;
 }
 
 interface UseHostStreamProps {
@@ -68,10 +69,18 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
       // Add tracks — use relay (co-host) stream if active, else own camera
       const sourceStream = activeRelayStreamRef.current ?? mediaStreamRef.current;
+      let audioSenderRef: RTCRtpSender | undefined;
       if (sourceStream) {
         sourceStream.getTracks().forEach((track) => {
-          pc.addTrack(track, sourceStream);
+          const s = pc.addTrack(track, sourceStream);
+          if (track.kind === "audio") audioSenderRef = s;
         });
+      }
+      // Guarantee an audio transceiver always exists so replaceTrack() can relay
+      // co-host audio even when the admin's own stream captured no microphone.
+      if (!audioSenderRef) {
+        const at = pc.addTransceiver("audio", { direction: "sendonly" });
+        audioSenderRef = at.sender;
       }
 
       // Handle ICE candidates
@@ -120,6 +129,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         name: viewerName,
         peerConnection: pc,
         connected: false,
+        audioSender: audioSenderRef,
       };
 
       viewersRef.current.set(viewerId, viewerConnection);
@@ -443,13 +453,17 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     const ownStream = mediaStreamRef.current;
     viewersRef.current.forEach((viewer) => {
       viewer.peerConnection.getSenders().forEach((sender) => {
-        if (!sender.track) return;
-        const kind = sender.track.kind as "video" | "audio";
+        // Resolve kind: use track.kind when available, else fall back to the
+        // stored audioSender reference (covers guaranteed null-track transceivers).
+        const kind: "video" | "audio" | undefined =
+          (sender.track?.kind as "video" | "audio" | undefined) ??
+          (viewer.audioSender === sender ? "audio" : undefined);
+        if (!kind) return;
         const newTrack =
           remoteStream?.getTracks().find((t) => t.kind === kind) ??
           ownStream?.getTracks().find((t) => t.kind === kind) ??
           null;
-        if (newTrack && newTrack !== sender.track) {
+        if (newTrack !== sender.track) {
           sender.replaceTrack(newTrack).catch(console.error);
         }
       });

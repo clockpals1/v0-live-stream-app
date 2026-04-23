@@ -175,6 +175,21 @@ export function DirectorPanel({ streamId, roomCode, activeParticipantId, onSwitc
     }
   };
 
+  // Re-relay when the active participant's warm-pool stream gains its audio track.
+  // The pool delivers video and audio as separate ontrack events; the initial
+  // handleSwitch call may fire before audio arrives. This effect catches up.
+  useEffect(() => {
+    if (!activeParticipantId) return;
+    const stream = warmPool.get(activeParticipantId) ?? null;
+    if (!stream) return;
+    const hasVideo = stream.getVideoTracks().length > 0;
+    const hasAudio = stream.getAudioTracks().length > 0;
+    if (hasVideo && hasAudio) {
+      onSwitch(activeParticipantId, stream);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warmPool, activeParticipantId]);
+
   // Switch active camera — relay fires immediately using the pre-warmed stream.
   const handleSwitch = async (participantId: string | null) => {
     // Fire relay instantly so viewers see the switch before the API round-trip.
