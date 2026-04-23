@@ -53,6 +53,7 @@ interface Stream {
   viewer_count: number;
   started_at: string | null;
   ended_at: string | null;
+  active_participant_id?: string | null;
 }
 
 interface ChatMessage {
@@ -97,6 +98,12 @@ export function ViewerStreamInterface({
   const [isPiP, setIsPiP] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  // Multi-host camera switching
+  const [activeParticipantId, setActiveParticipantId] = useState<string | null>(
+    initialStream.active_participant_id ?? null
+  );
+  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const prevParticipantRef = useRef<string | null>(initialStream.active_participant_id ?? null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -109,10 +116,16 @@ export function ViewerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
   }, []);
 
+  // Derive active signaling channel — null means main host's default channel
+  const activeSignalingChannel = activeParticipantId
+    ? `stream-signal-cohost-${activeParticipantId}`
+    : undefined;
+
   // Always use the simple stream hook — join WebRTC immediately on mount
   const streamHook = useSimpleStream({
     streamId: stream.id,
     roomCode: stream.room_code,
+    signalingChannel: activeSignalingChannel,
     viewerName: viewerName || "Viewer",
     onStreamEnd: handleStreamEnd,
   });
@@ -329,6 +342,14 @@ export function ViewerStreamInterface({
           // DB trigger keeps viewer_count — only use if higher than presence count
           if (typeof updated.viewer_count === 'number' && updated.viewer_count > 0) {
             setViewerCount(prev => Math.max(prev, updated.viewer_count));
+          }
+          // Detect camera switch by admin
+          const newParticipantId = (updated as any).active_participant_id ?? null;
+          if (newParticipantId !== prevParticipantRef.current) {
+            prevParticipantRef.current = newParticipantId;
+            setActiveParticipantId(newParticipantId);
+            setIsSwitchingCamera(true);
+            setTimeout(() => setIsSwitchingCamera(false), 4000);
           }
         }
       )
@@ -967,6 +988,19 @@ export function ViewerStreamInterface({
               </div>
             </div>
             
+            {/* Camera switching overlay — shown when admin switches active co-host */}
+            {isSwitchingCamera && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70 pointer-events-none z-20 transition-opacity duration-300">
+                <div className="text-center">
+                  <div className="w-14 h-14 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-3 border-2 border-primary animate-pulse">
+                    <Loader2 className="w-7 h-7 text-primary animate-spin" />
+                  </div>
+                  <p className="text-white text-base font-semibold">Switching camera…</p>
+                  <p className="text-gray-400 text-xs mt-1">Connecting to new feed</p>
+                </div>
+              </div>
+            )}
+
             {/* Pause notification overlay */}
             {isStreamPaused && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70 pointer-events-none transition-opacity duration-300">

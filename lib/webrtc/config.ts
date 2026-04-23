@@ -45,7 +45,9 @@ export type SignalType =
   | "stream-end"
   | "stream-pause"
   | "stream-resume"
-  | "track-toggle";
+  | "track-toggle"
+  | "cohost-status"   // co-host broadcasts ready/live/offline on their isolated channel
+  | "camera-switch";  // reserved for future direct-signal switching (currently DB-driven)
 
 export interface SignalMessage {
   type: SignalType;

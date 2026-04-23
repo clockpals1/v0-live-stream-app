@@ -11,6 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DirectorPanel } from "@/components/host/director-panel";
 import {
   Radio,
   Video,
@@ -46,12 +48,15 @@ interface Stream {
   status: "waiting" | "live" | "ended";
   viewer_count: number;
   recording_url: string | null;
+  host_id: string;
+  active_participant_id?: string | null;
 }
 
 interface Host {
   id: string;
   display_name: string | null;
   email: string;
+  is_admin?: boolean;
 }
 
 interface ChatMessage {
@@ -80,6 +85,10 @@ export function HostStreamInterface({
   const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [activeParticipantId, setActiveParticipantId] = useState<string | null>(
+    (initialStream as any).active_participant_id ?? null
+  );
+  const isStreamOwner = host.id === initialStream.host_id;
 
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
 
@@ -224,7 +233,11 @@ export function HostStreamInterface({
           filter: `id=eq.${stream.id}`,
         },
         (payload: any) => {
-          setStream(payload.new as Stream);
+          const updated = payload.new as Stream;
+          setStream(updated);
+          if ('active_participant_id' in updated) {
+            setActiveParticipantId(updated.active_participant_id ?? null);
+          }
         }
       )
       .subscribe();
@@ -627,28 +640,48 @@ export function HostStreamInterface({
             )}
           </div>
 
-          {/* Chat Panel */}
-          <Card className="lg:col-span-1 flex flex-col h-[600px]">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <MessageCircle className="w-4 h-4" />
-                Live Chat
-                <span className="ml-auto text-xs text-muted-foreground font-normal">
-                  {messages.length} msg{messages.length !== 1 ? 's' : ''}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={refreshChat}
-                  disabled={isRefreshingChat}
-                  className="h-7 w-7 p-0"
-                  title="Refresh chat"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingChat ? 'animate-spin' : ''}`} />
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-1 flex flex-col p-0">
+          {/* Right Sidebar: Chat + Director Panel */}
+          <Card className="lg:col-span-1 flex flex-col h-[600px] overflow-hidden">
+            <Tabs defaultValue="chat" className="flex flex-col h-full">
+              <div className="px-3 pt-3 pb-0 border-b border-border">
+                <TabsList className="w-full">
+                  <TabsTrigger value="chat" className="flex-1 text-xs gap-1">
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    Chat
+                    {messages.length > 0 && (
+                      <span className="text-muted-foreground">({messages.length})</span>
+                    )}
+                  </TabsTrigger>
+                  {isStreamOwner && (
+                    <TabsTrigger value="cameras" className="flex-1 text-xs gap-1">
+                      <Camera className="w-3.5 h-3.5" />
+                      Cameras
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+              </div>
+
+              {/* Cameras Tab — Director Panel */}
+              {isStreamOwner && (
+                <TabsContent value="cameras" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col">
+                  <DirectorPanel
+                    streamId={stream.id}
+                    roomCode={stream.room_code}
+                    activeParticipantId={activeParticipantId}
+                    onSwitch={(id) => setActiveParticipantId(id)}
+                  />
+                </TabsContent>
+              )}
+
+              {/* Chat Tab */}
+              <TabsContent value="chat" className="flex-1 flex flex-col mt-0 overflow-hidden data-[state=active]:flex">
+                <div className="flex items-center justify-between px-4 py-2">
+                  <span className="text-xs text-muted-foreground">{messages.length} message{messages.length !== 1 ? 's' : ''}</span>
+                  <Button variant="ghost" size="sm" onClick={refreshChat} disabled={isRefreshingChat} className="h-6 w-6 p-0">
+                    <RefreshCw className={`w-3 h-3 ${isRefreshingChat ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
+            <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
               <ScrollArea className="flex-1 px-4">
                 <div className="flex flex-col gap-3 py-2">
                   {messages.length === 0 ? (
@@ -688,6 +721,8 @@ export function HostStreamInterface({
                 </div>
               </form>
             </CardContent>
+              </TabsContent>
+            </Tabs>
           </Card>
         </div>
       </main>

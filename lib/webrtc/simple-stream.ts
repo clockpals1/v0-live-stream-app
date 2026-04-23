@@ -7,6 +7,7 @@ import { RealtimeChannel } from "@supabase/supabase-js";
 interface UseSimpleStreamProps {
   streamId: string;
   roomCode: string;
+  signalingChannel?: string; // overrides default stream-signal-{roomCode} channel
   viewerName: string;
   onStreamEnd?: () => void;
 }
@@ -14,9 +15,12 @@ interface UseSimpleStreamProps {
 export function useSimpleStream({
   streamId,
   roomCode,
+  signalingChannel,
   viewerName,
   onStreamEnd,
 }: UseSimpleStreamProps) {
+  // Compute the active channel — co-host switch overrides the default
+  const activeChannel = signalingChannel || `stream-signal-${roomCode}`;
   const [isConnected, setIsConnected] = useState(false);
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -254,9 +258,9 @@ export function useSimpleStream({
     }, 1000);
   }, []);
 
-  // Set up signaling channel
+  // Set up signaling channel — re-runs whenever activeChannel changes (camera switch)
   useEffect(() => {
-    const channel = supabase.channel(`stream-signal-${roomCode}`, {
+    const channel = supabase.channel(activeChannel, {
       config: {
         broadcast: { self: false },
       },
@@ -310,7 +314,8 @@ export function useSimpleStream({
       leaveStream();
       supabase.removeChannel(channel);
     };
-  }, [roomCode, streamId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChannel, streamId]);
 
   return {
     viewerId: viewerIdRef.current,
