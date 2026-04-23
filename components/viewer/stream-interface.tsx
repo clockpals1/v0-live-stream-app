@@ -92,6 +92,7 @@ export function ViewerStreamInterface({
   const [emergencySent, setEmergencySent] = useState(false);
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [streamElapsed, setStreamElapsed] = useState(0);
+  const [connectingSeconds, setConnectingSeconds] = useState(0);
   const [isPiP, setIsPiP] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -132,6 +133,25 @@ export function ViewerStreamInterface({
       setRetryCount(prev => prev + 1);
     }
   }, [error]);
+
+  // Track how long viewer has been stuck connecting — drives progressive UX messages
+  useEffect(() => {
+    const isStuckConnecting =
+      (stream.status === 'live' || isStreamLive) && !isConnected && !remoteStream;
+    if (!isStuckConnecting) {
+      setConnectingSeconds(0);
+      return;
+    }
+    const id = setInterval(() => setConnectingSeconds(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [stream.status, isStreamLive, isConnected, remoteStream]);
+
+  // Auto-reload after 90s stuck connecting — host likely refreshed and re-joined
+  useEffect(() => {
+    if (connectingSeconds >= 90) {
+      window.location.reload();
+    }
+  }, [connectingSeconds]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -1151,56 +1171,118 @@ export function ViewerStreamInterface({
       );
     }
 
-    // Stream is live but still connecting
+    // Stream is live but still connecting — show progressive messages based on wait time
     if (stream.status === "live" || isStreamLive) {
+      const isLongWait = connectingSeconds >= 15;
+      const isVeryLongWait = connectingSeconds >= 40;
+      const autoReloadIn = Math.max(0, 90 - connectingSeconds);
+
       return (
-        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
-          <div className="text-center">
-            <div className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              {isConnected ? (
-                <Radio className="w-12 h-12 text-primary animate-pulse" />
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-950 to-gray-900">
+          <div className="text-center max-w-sm mx-auto px-6">
+
+            {/* Icon — changes based on wait time */}
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5 border-2 ${
+              isVeryLongWait
+                ? 'bg-amber-500/20 border-amber-500'
+                : 'bg-blue-500/20 border-blue-500'
+            }`}>
+              {isVeryLongWait ? (
+                <Radio className="w-10 h-10 text-amber-400 animate-pulse" />
               ) : (
-                <Loader2 className="w-12 h-12 text-primary animate-spin" />
+                <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
               )}
             </div>
-            <h2 className="text-2xl font-bold text-foreground mb-2">
-              {isConnected ? "Stream is Live!" : "Connecting to Stream..."}
+
+            {/* Title — progressive */}
+            <h2 className="text-xl font-bold text-white mb-2">
+              {isVeryLongWait
+                ? 'Host is reconnecting...'
+                : isLongWait
+                  ? 'Still connecting...'
+                  : 'Joining the stream...'}
             </h2>
-            <p className="text-muted-foreground">
-              {isConnected
-                ? `${hostName} is broadcasting`
-                : "Please wait while we connect you"}
+
+            {/* Subtitle — progressive */}
+            <p className="text-gray-400 text-sm mb-4">
+              {isVeryLongWait
+                ? `${hostName} may have refreshed their page. We\'ll reconnect automatically.`
+                : isLongWait
+                  ? `Taking a bit longer than usual. ${hostName} might be loading.`
+                  : 'Please wait while we connect you to the stream.'}
             </p>
+
+            {/* Progress dots / wait indicator */}
+            {!isVeryLongWait && (
+              <div className="flex items-center justify-center gap-1.5 mb-4">
+                {[0,1,2].map(i => (
+                  <span key={i} className={`w-2 h-2 rounded-full bg-blue-400 animate-bounce`}
+                    style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+            )}
+
+            {/* Auto-reload countdown when very long */}
+            {isVeryLongWait && (
+              <div className="mb-4 text-xs text-gray-500">
+                Auto-refreshing in {autoReloadIn}s...
+              </div>
+            )}
+
+            {/* Error message */}
             {error && (
-              <div className="mt-4 space-y-2">
-                <p className="text-sm text-destructive">{error}</p>
+              <p className="text-xs text-red-400 mb-3">{error}</p>
+            )}
+
+            {/* Action buttons — appear after 15s */}
+            {isLongWait && (
+              <div className="flex flex-col gap-2">
                 <Button
-                  variant="outline"
                   size="sm"
-                  onClick={handleRetry}
-                  className="gap-2"
+                  className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={() => window.location.reload()}
                 >
                   <RefreshCw className="w-4 h-4" />
-                  Try {useFallback ? "Standard" : "Fallback"} Connection
+                  Refresh now
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-2 text-gray-400 hover:text-white"
+                  onClick={handleRetry}
+                >
+                  Try different connection
                 </Button>
               </div>
+            )}
+
+            {/* Wait counter */}
+            {connectingSeconds > 5 && (
+              <p className="text-xs text-gray-600 mt-3">Waiting {connectingSeconds}s...</p>
             )}
           </div>
         </div>
       );
     }
 
-    // Waiting for host
+    // Waiting for host (stream not yet live)
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-muted">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-foreground mb-2">
-            Waiting for Host
-          </h2>
-          <p className="text-muted-foreground">
-            {hostName} will start the stream soon
+      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-950 to-gray-900">
+        <div className="text-center px-6">
+          <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-5 border-2 border-primary/50">
+            <Radio className="w-10 h-10 text-primary/70 animate-pulse" />
+          </div>
+          <h2 className="text-xl font-bold text-white mb-2">Waiting for Host</h2>
+          <p className="text-gray-400 text-sm">
+            <span className="font-medium text-white">{hostName}</span> hasn't started the stream yet.
           </p>
+          <p className="text-gray-500 text-xs mt-2">This page will update automatically when they go live.</p>
+          <div className="flex items-center justify-center gap-1.5 mt-5">
+            {[0,1,2].map(i => (
+              <span key={i} className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"
+                style={{ animationDelay: `${i * 0.2}s` }} />
+            ))}
+          </div>
         </div>
       </div>
     );
