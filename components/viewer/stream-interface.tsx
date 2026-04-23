@@ -74,7 +74,7 @@ export function ViewerStreamInterface({
   const [stream, setStream] = useState(initialStream);
   const [viewerName, setViewerName] = useState("");
   const [hasJoined, setHasJoined] = useState(false);
-  const [viewerCount, setViewerCount] = useState(initialStream.viewer_count);
+  const [viewerCount, setViewerCount] = useState(Math.max(initialStream.viewer_count || 0, 0));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [copied, setCopied] = useState(false);
@@ -303,7 +303,12 @@ export function ViewerStreamInterface({
           filter: `id=eq.${stream.id}`,
         },
         (payload: any) => {
-          setStream(payload.new as Stream);
+          const updated = payload.new as Stream;
+          setStream(updated);
+          // DB trigger keeps viewer_count accurate — sync it here
+          if (typeof updated.viewer_count === 'number') {
+            setViewerCount(updated.viewer_count);
+          }
         }
       )
       .subscribe();
@@ -825,18 +830,22 @@ export function ViewerStreamInterface({
     return () => clearInterval(id);
   }, [stream.status, stream.started_at]);
 
-  // Periodic viewer count refresh — backup if realtime misses events
+  // Periodic viewer count refresh — backup polling every 5s
   useEffect(() => {
     if (stream.status !== 'live') return;
     const refresh = async () => {
-      const { count } = await supabase
-        .from('viewers')
-        .select('*', { count: 'exact', head: true })
-        .eq('stream_id', stream.id)
-        .is('left_at', null);
-      if (count !== null) setViewerCount(count);
+      // Primary: read from streams.viewer_count (maintained by DB trigger)
+      const { data } = await supabase
+        .from('streams')
+        .select('viewer_count')
+        .eq('id', stream.id)
+        .single();
+      if (data && typeof data.viewer_count === 'number') {
+        setViewerCount(data.viewer_count);
+      }
     };
-    const id = setInterval(refresh, 30000);
+    refresh(); // run immediately on mount
+    const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
   }, [stream.id, stream.status, supabase]);
 
