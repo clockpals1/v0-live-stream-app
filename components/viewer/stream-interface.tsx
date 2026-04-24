@@ -443,11 +443,18 @@ export function ViewerStreamInterface({
 
     try {
       // Register viewer in database
-      await supabase.from("viewers").insert({
+      const { data, error } = await supabase.from("viewers").insert({
         stream_id: stream.id,
         name: viewerName.trim(),
         joined_at: new Date().toISOString(),
       });
+      
+      if (error) {
+        console.error('[Viewer] Database error inserting viewer:', error);
+        // Continue anyway - viewer can still watch
+      } else {
+        console.log('[Viewer] Successfully registered in database:', data);
+      }
       
       setHasJoined(true);
       setShowNameDialog(false);
@@ -460,7 +467,7 @@ export function ViewerStreamInterface({
         console.log('[Viewer] Incremented viewer count to:', currentCount + 1);
       }, 500);
     } catch (error) {
-      console.error('[Viewer] Error joining stream:', error);
+      console.error('[Viewer] Exception joining stream:', error);
       // Still allow local join even if database fails
       setHasJoined(true);
       setShowNameDialog(false);
@@ -711,6 +718,10 @@ export function ViewerStreamInterface({
         stream_id: stream.id,
         name: savedName,
         joined_at: new Date().toISOString(),
+      }).then(({ error }) => {
+        if (error) {
+          console.error('[Viewer] Error auto-registering saved viewer:', error);
+        }
       }).then(() => {
         setHasJoined(true);
         setShowNameDialog(false);
@@ -736,24 +747,11 @@ export function ViewerStreamInterface({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.id]);
 
-  // Apply video quality settings
-  useEffect(() => {
-    if (videoRef.current && remoteStream) {
-      const videoTrack = remoteStream.getVideoTracks()[0];
-      if (videoTrack) {
-        const constraints = {
-          width: isDataSaver ? { ideal: 640 } : videoQuality === 'low' ? { ideal: 480 } : videoQuality === 'medium' ? { ideal: 720 } : videoQuality === 'high' ? { ideal: 1080 } : { ideal: 720 },
-          height: isDataSaver ? { ideal: 360 } : videoQuality === 'low' ? { ideal: 360 } : videoQuality === 'medium' ? { ideal: 480 } : videoQuality === 'high' ? { ideal: 720 } : { ideal: 480 },
-          frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 }
-        };
-        
-        // Apply constraints to the video track
-        videoTrack.applyConstraints(constraints).catch(err => {
-          console.log('Could not apply video constraints:', err);
-        });
-      }
-    }
-  }, [videoQuality, isDataSaver, remoteStream]);
+  // Note: Video quality settings removed - viewers cannot apply constraints to remote tracks.
+  // Quality is controlled by the host's stream settings. Attempting to apply constraints
+  // to remote tracks causes OverconstrainedError and breaks video playback.
+  // The videoQuality and isDataSaver states can be used for UI purposes or future features,
+  // but should not modify the incoming remote stream.
 
   // Detect PiP support on mount
   useEffect(() => {
@@ -1325,12 +1323,17 @@ export function ViewerStreamInterface({
                   const guestName = "Guest";
                   setViewerName(guestName);
                   try {
-                    await supabase.from("viewers").insert({
+                    const { error } = await supabase.from("viewers").insert({
                       stream_id: stream.id,
                       name: guestName,
                       joined_at: new Date().toISOString(),
                     });
-                  } catch {}
+                    if (error) {
+                      console.error('[Viewer] Error inserting guest viewer:', error);
+                    }
+                  } catch (err) {
+                    console.error('[Viewer] Exception inserting guest viewer:', err);
+                  }
                   setHasJoined(true);
                   setShowNameDialog(false);
                 }}
