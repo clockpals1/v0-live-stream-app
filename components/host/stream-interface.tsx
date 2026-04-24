@@ -23,6 +23,7 @@ import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/s
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import { CAPS, resolveRole, type StreamAccessMode } from "@/lib/rbac";
 import { StreamOperatorsPanel } from "@/components/admin/stream-operators-panel";
+import { PrivateOpsChat } from "@/components/host/private-ops-chat";
 import {
   Radio,
   Video,
@@ -55,6 +56,7 @@ import {
   Tv,
   AlertTriangle,
   Trash2,
+  ShieldCheck,
 } from "lucide-react";
 
 interface Stream {
@@ -1488,6 +1490,16 @@ export function HostStreamInterface({
                       Cameras
                     </TabsTrigger>
                   )}
+                  {/* Ops channel — private chat between owner / admins /
+                      assigned Super Users for this stream only. Viewers never
+                      see this. Gated on canOperate so co-hosts / cohost
+                      fallback access modes don't see it either. */}
+                  {canOperate && (
+                    <TabsTrigger value="ops" className="flex-1 text-xs gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Ops
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
 
@@ -1520,6 +1532,20 @@ export function HostStreamInterface({
                       // If id set but no warmStream: useCohostReceiver fallback
                       // connects and the useEffect above relays when ready
                     }}
+                  />
+                </TabsContent>
+              )}
+
+              {/* Ops Tab — stream-scoped private chat for operators */}
+              {canOperate && (
+                <TabsContent
+                  value="ops"
+                  className="flex-1 min-h-0 flex flex-col mt-0 overflow-hidden data-[state=active]:flex"
+                >
+                  <PrivateOpsChat
+                    streamId={stream.id}
+                    currentHostId={host.id}
+                    canSend={canOperate}
                   />
                 </TabsContent>
               )}
