@@ -4,8 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * Stream-scoped private messages.
  *
- *   POST /api/streams/:streamId/private-messages
+ *   POST /api/stream-private-messages/:streamId
  *        body { message: string }
+ *
+ * NOTE on path: this endpoint is intentionally NOT nested under /api/streams/
+ * because that subtree already uses a sibling `[roomCode]` dynamic segment,
+ * and Next.js forbids two different slug names (`[roomCode]` and `[streamId]`)
+ * at the same folder depth. Using a separate top-level API tree keeps both
+ * endpoints working.
  *
  * Access control is enforced at the database level by the can_access_stream_pm
  * RLS helper (migration 016): only admin / owner / assigned operator / assigned

@@ -121,7 +121,7 @@ export function PrivateMessagesPanel({ streamId, host }: Props) {
 
       setSending(true);
       try {
-        const res = await fetch(`/api/streams/${streamId}/private-messages`, {
+        const res = await fetch(`/api/stream-private-messages/${streamId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text }),
