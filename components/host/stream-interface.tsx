@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectorPanel } from "@/components/host/director-panel";
 import { StreamOverlay } from "@/components/stream/stream-overlay";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
+import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import {
   Radio,
   Video,
@@ -1068,6 +1069,9 @@ export function HostStreamInterface({
                 </div>
               </CardContent>
             </Card>
+
+            {/* Slideshow — self-contained modular panel */}
+            <SlideshowPanel streamId={stream.id} chatChannelRef={chatChannelRef} />
 
             {/* Connected Viewers */}
             {viewers.length > 0 && (

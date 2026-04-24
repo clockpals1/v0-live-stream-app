@@ -7,6 +7,7 @@ import { vibrateDevice } from "@/lib/utils/notification";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream";
 import { StreamOverlay, type OverlayBackground } from "@/components/stream/stream-overlay";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
+import { StreamSlideshow } from "@/components/stream/stream-slideshow";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -117,6 +118,13 @@ export function ViewerStreamInterface({
     speed: TickerSpeed;
     style: TickerStyle;
   }>({ active: false, message: "", speed: "normal", style: "default" });
+
+  // ---- Host-controlled image slideshow (overlays the video when active) ----
+  const [slideshow, setSlideshow] = useState<{
+    active: boolean;
+    url: string;
+    caption: string;
+  }>({ active: false, url: "", caption: "" });
 
   // Track whether the user has completed the join gesture (name dialog submitted).
   // This is the key gate for triggering play() — iOS Safari only allows audio/video
@@ -330,6 +338,16 @@ export function ViewerStreamInterface({
       });
     });
 
+    // Host slideshow broadcasts — reuses the chat channel, no extra sub.
+    channel.on("broadcast", { event: "stream-slideshow" }, ({ payload }: any) => {
+      if (!payload) return;
+      setSlideshow({
+        active: !!payload.active,
+        url: typeof payload.url === "string" ? payload.url : "",
+        caption: typeof payload.caption === "string" ? payload.caption : "",
+      });
+    });
+
     // Host ticker broadcasts — same channel, same pattern as overlay.
     channel.on("broadcast", { event: "stream-ticker" }, ({ payload }: any) => {
       if (!payload) return;
@@ -413,7 +431,7 @@ export function ViewerStreamInterface({
       const { data } = await supabase
         .from("streams")
         .select(
-          "overlay_active, overlay_message, overlay_background, ticker_active, ticker_message, ticker_speed, ticker_style"
+          "overlay_active, overlay_message, overlay_background, ticker_active, ticker_message, ticker_speed, ticker_style, slideshow_active, slideshow_current_url, slideshow_current_caption"
         )
         .eq("id", stream.id)
         .single();
@@ -432,6 +450,11 @@ export function ViewerStreamInterface({
           message: d.ticker_message ?? "",
           speed: sp === "slow" || sp === "fast" ? sp : "normal",
           style: st === "urgent" || st === "info" ? st : "default",
+        });
+        setSlideshow({
+          active: !!d.slideshow_active,
+          url: d.slideshow_current_url ?? "",
+          caption: d.slideshow_current_caption ?? "",
         });
       }
     })();
@@ -1240,6 +1263,13 @@ export function ViewerStreamInterface({
                     }}
                   />
                   {getVideoContent()}
+                  {/* Host-controlled image slideshow — z-20, above video, below
+                      StreamOverlay (which is a stronger full takeover). */}
+                  <StreamSlideshow
+                    active={slideshow.active}
+                    imageUrl={slideshow.url}
+                    caption={slideshow.caption}
+                  />
                   {/* Host-controlled overlay — rendered on top of video, below controls badge */}
                   <StreamOverlay
                     active={overlay.active}
