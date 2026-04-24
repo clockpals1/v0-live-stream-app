@@ -19,6 +19,10 @@ import { DirectorPanel } from "@/components/host/director-panel";
 import { StreamOverlay } from "@/components/stream/stream-overlay";
 import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
 import { OverlayMusic } from "@/components/host/overlay-music";
+import { OperatorStreamInterface } from "@/components/host/operator-stream-interface";
+import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
+import type { StreamAccess } from "@/lib/rbac";
+import { resolveRole } from "@/lib/rbac";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import {
@@ -92,12 +96,35 @@ interface StreamParticipant {
 interface HostStreamInterfaceProps {
   stream: Stream;
   host: Host;
+  accessMode?: StreamAccess;
 }
 
-export function HostStreamInterface({
+export function HostStreamInterface(props: HostStreamInterfaceProps) {
+  // Dispatch before any hook call so the two render paths have totally
+  // independent hook trees. This matters because OwnerStreamInterface
+  // instantiates useHostStream (listens for viewer-join and creates PCs) —
+  // an operator or cohost rendering the same hook on a different browser
+  // would also respond to viewer-join and fight the real host.
+  const accessMode = props.accessMode ?? "owner";
+  if (accessMode === "operator" || accessMode === "cohost") {
+    return (
+      <OperatorStreamInterface
+        stream={props.stream}
+        host={props.host}
+        accessMode={accessMode}
+      />
+    );
+  }
+  return <OwnerStreamInterface stream={props.stream} host={props.host} />;
+}
+
+function OwnerStreamInterface({
   stream: initialStream,
   host,
-}: HostStreamInterfaceProps) {
+}: {
+  stream: Stream;
+  host: Host;
+}) {
   const [stream, setStream] = useState(initialStream);
   const [copied, setCopied] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -303,7 +330,7 @@ export function HostStreamInterface({
           vibrateDevice();
         }
       })
-      .subscribe((status) => {
+      .subscribe((status: string) => {
         if (status === "SUBSCRIBED") loadMessages();
       });
 
@@ -700,6 +727,7 @@ export function HostStreamInterface({
   };
 
   const connectedViewers = viewers.filter((v) => v.connected).length;
+  const isAdmin = resolveRole(host) === "admin";
 
   return (
     <div className="min-h-screen bg-background">
@@ -722,6 +750,12 @@ export function HostStreamInterface({
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {isAdmin && (
+              <StreamOperatorsDialog
+                streamId={stream.id}
+                streamTitle={stream.title}
+              />
+            )}
             {isStreaming && !isPaused && (
               <Badge className="bg-red-500 text-white animate-pulse">
                 <Circle className="w-2 h-2 mr-1 fill-current" />

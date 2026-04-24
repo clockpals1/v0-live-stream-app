@@ -46,14 +46,14 @@ export async function POST(req: NextRequest) {
   }
 
   // Default to 'host' when the caller does not specify a role.
-  // Only 'host' and 'cohost' can be created through this endpoint — to make
-  // someone an admin, use the PATCH endpoint after creation so the
-  // self-demote / last-admin guards run consistently.
+  // 'host', 'cohost', and 'super_user' can be created directly. 'admin' is
+  // NOT allowed through this endpoint — use PATCH after creation so the
+  // last-admin / self-demote guards run consistently.
   let newRole: Role = "host";
   if (typeof role !== "undefined") {
     if (!isRole(role) || role === "admin") {
       return NextResponse.json(
-        { error: "role must be 'host' or 'cohost' when creating a user." },
+        { error: "role must be 'host', 'cohost', or 'super_user' when creating a user." },
         { status: 400 }
       );
     }

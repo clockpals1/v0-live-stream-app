@@ -102,6 +102,11 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
   const [emergencyMessages, setEmergencyMessages] = useState<EmergencyMessage[]>([]);
   const [showEmergencyPanel, setShowEmergencyPanel] = useState(false);
   const [cohostParticipants, setCohostParticipants] = useState<CohostParticipant[]>([]);
+  // Streams this user manages as a Super User (stream_operators row + joined stream)
+  const [operatorStreams, setOperatorStreams] = useState<Array<{
+    id: string;
+    stream: { id: string; title: string; room_code: string; status: string };
+  }>>([]);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
@@ -121,6 +126,36 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
     };
     load();
   }, [host]);
+
+  // Load streams this host is assigned to as a Super-User operator
+  useEffect(() => {
+    if (!host) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("stream_operators")
+          .select("id, stream:streams(id, title, room_code, status)")
+          .eq("host_id", host.id);
+        if (cancelled) return;
+        if (error) {
+          // 42P01: table missing (migration 016 not applied). Just show empty.
+          if (error.code !== "42P01") console.warn("[dashboard] operator streams load failed:", error.message);
+          setOperatorStreams([]);
+          return;
+        }
+        const filtered = ((data as any[]) ?? []).filter(
+          (r) => r.stream && r.stream.status !== "ended",
+        );
+        setOperatorStreams(filtered);
+      } catch (err) {
+        if (!cancelled) setOperatorStreams([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [host, supabase]);
 
   // Subscribe to emergency messages
   useEffect(() => {
@@ -485,11 +520,14 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                   ? "bg-primary/10 text-primary border-primary/20"
                   : role === "cohost"
                   ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                  : role === "super_user"
+                  ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
                   : ""
               }`}
             >
               {role === "admin" && <ShieldCheck className="w-3 h-3" />}
               {role === "cohost" && <Users className="w-3 h-3" />}
+              {role === "super_user" && <ShieldCheck className="w-3 h-3" />}
               {ROLE_LABELS[role]}
             </Badge>
 
@@ -555,6 +593,40 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                     </Link>
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Super User banner — shows streams this user manages as an operator */}
+        {operatorStreams.length > 0 && (
+          <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-2 border-amber-500/30 rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 bg-amber-500 rounded-full">
+                <ShieldCheck className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  You manage {operatorStreams.length} stream{operatorStreams.length !== 1 ? "s" : ""} as a Super User
+                  {operatorStreams.some((p) => p.stream.status === "live") && (
+                    <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
+                  )}
+                </h3>
+                <div className="flex flex-wrap gap-2 mt-1.5">
+                  {operatorStreams.map((op) => (
+                    <Link
+                      key={op.id}
+                      href={`/host/stream/${op.stream.room_code}`}
+                      className="text-xs text-amber-700 hover:text-amber-800 underline"
+                    >
+                      {op.stream.title}
+                      {op.stream.status === "live" && <span className="ml-1 text-red-500">●</span>}
+                    </Link>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Operators can manage overlays, ticker, co-hosts, and send private messages. Only the stream owner can go live.
+                </p>
               </div>
             </div>
           </div>
