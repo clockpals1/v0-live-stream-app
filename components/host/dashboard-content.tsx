@@ -174,6 +174,33 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
 
     const loadStreams = async () => {
       try {
+        // Super Users are NOT broadcasters and do NOT own streams; they only
+        // see streams they have been explicitly assigned to operate. Resolve
+        // their assignments via stream_operators and join back to streams.
+        const currentRole = resolveRole(host);
+        if (currentRole === "superuser") {
+          const { data: ops, error: opsErr } = await supabase
+            .from("stream_operators")
+            .select("stream_id, streams(*)")
+            .eq("host_id", host.id);
+          if (opsErr) {
+            console.warn("Superuser assignments query failed:", opsErr.message);
+            setStreams([]);
+          } else {
+            const assigned = ((ops ?? []) as Array<{ streams: Stream | null }>)
+              .map((o) => o.streams)
+              .filter((s): s is Stream => !!s)
+              .sort(
+                (a, b) =>
+                  new Date(b.created_at).getTime() -
+                  new Date(a.created_at).getTime()
+              );
+            console.log("Loaded assigned streams (superuser):", assigned.length);
+            setStreams(assigned);
+          }
+          return;
+        }
+
         // Try full query including assigned streams (requires migration 003)
         const { data, error } = await supabase
           .from("streams")
@@ -485,11 +512,14 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                   ? "bg-primary/10 text-primary border-primary/20"
                   : role === "cohost"
                   ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                  : role === "superuser"
+                  ? "bg-indigo-500/10 text-indigo-600 border-indigo-500/20"
                   : ""
               }`}
             >
               {role === "admin" && <ShieldCheck className="w-3 h-3" />}
               {role === "cohost" && <Users className="w-3 h-3" />}
+              {role === "superuser" && <ShieldCheck className="w-3 h-3" />}
               {ROLE_LABELS[role]}
             </Badge>
 
@@ -633,6 +663,21 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
               </Tabs>
             </CardContent>
           </Card>
+          ) : role === "superuser" ? (
+            <Card className="lg:col-span-1 border-indigo-200 bg-indigo-50/40 dark:bg-indigo-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-indigo-500" />
+                  Super User Access
+                </CardTitle>
+                <CardDescription>
+                  You have the <strong>{ROLE_LABELS.superuser}</strong> role. You can
+                  operate only the streams an admin has assigned you to — below you
+                  see just those streams. You can manage overlays, music, ticker,
+                  slideshow and co-hosts, but you cannot broadcast or start a stream.
+                </CardDescription>
+              </CardHeader>
+            </Card>
           ) : (
             <Card className="lg:col-span-1 border-purple-200 bg-purple-50/40 dark:bg-purple-950/20">
               <CardHeader className="pb-3">

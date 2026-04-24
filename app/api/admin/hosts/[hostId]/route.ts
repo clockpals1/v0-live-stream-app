@@ -39,7 +39,7 @@ export async function PATCH(
   if (typeof role !== "undefined") {
     if (!isRole(role)) {
       return NextResponse.json(
-        { error: "Invalid role. Must be one of: admin, host, cohost." },
+        { error: "Invalid role. Must be one of: admin, host, cohost, superuser." },
         { status: 400 }
       );
     }

@@ -279,6 +279,14 @@ export function AdminPanel({ currentUserId }: AdminPanelProps) {
                       </span>
                     </div>
                   </SelectItem>
+                  <SelectItem value="superuser">
+                    <div className="flex flex-col text-left">
+                      <span className="font-medium">{ROLE_LABELS.superuser}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {ROLE_DESCRIPTIONS.superuser}
+                      </span>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
@@ -378,12 +386,16 @@ export function AdminPanel({ currentUserId }: AdminPanelProps) {
                     ? "bg-primary/10 text-primary border-primary/20"
                     : role === "cohost"
                     ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                    : role === "superuser"
+                    ? "bg-indigo-500/10 text-indigo-600 border-indigo-500/20"
                     : "bg-muted text-foreground border-border";
 
                 const RoleIcon = role === "admin"
                   ? ShieldCheck
                   : role === "cohost"
                   ? Users
+                  : role === "superuser"
+                  ? ShieldCheck
                   : User;
 
                 return (
@@ -448,6 +460,7 @@ export function AdminPanel({ currentUserId }: AdminPanelProps) {
                             <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
                             <SelectItem value="host">{ROLE_LABELS.host}</SelectItem>
                             <SelectItem value="cohost">{ROLE_LABELS.cohost}</SelectItem>
+                            <SelectItem value="superuser">{ROLE_LABELS.superuser}</SelectItem>
                           </SelectContent>
                         </Select>
 

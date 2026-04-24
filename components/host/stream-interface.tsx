@@ -21,6 +21,8 @@ import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
 import { OverlayMusic } from "@/components/host/overlay-music";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
+import { CAPS, resolveRole, type StreamAccessMode } from "@/lib/rbac";
+import { StreamOperatorsPanel } from "@/components/admin/stream-operators-panel";
 import {
   Radio,
   Video,
@@ -94,11 +96,24 @@ interface StreamParticipant {
 interface HostStreamInterfaceProps {
   stream: Stream;
   host: Host;
+  /**
+   * Effective access mode resolved server-side by
+   * resolveStreamAccess() in @/lib/rbac. When omitted (older call sites)
+   * we fall back to the legacy owner/non-owner split for back-compat.
+   *
+   *   owner    — current user broadcasts this stream
+   *   admin    — platform admin on someone else's stream (full operator access)
+   *   operator — assigned super user (operator access, no broadcasting)
+   *   cohost   — assigned co-host (separate page handles this; here treated
+   *              conservatively as non-owner)
+   */
+  accessMode?: StreamAccessMode;
 }
 
 export function HostStreamInterface({
   stream: initialStream,
   host,
+  accessMode,
 }: HostStreamInterfaceProps) {
   const [stream, setStream] = useState(initialStream);
   const [copied, setCopied] = useState(false);
@@ -114,6 +129,30 @@ export function HostStreamInterface({
     (initialStream as any).active_participant_id ?? null
   );
   const isStreamOwner = host.id === initialStream.host_id;
+
+  // ─── Access-mode derived flags ────────────────────────────────────────────
+  // `accessMode` is resolved server-side in the stream page. For back-compat
+  // with any caller that doesn't pass it, fall back to the legacy owner/
+  // non-owner split so existing flows behave identically.
+  const effectiveAccess: StreamAccessMode =
+    accessMode ?? (isStreamOwner ? "owner" : "cohost");
+  const hostRole = resolveRole(host);
+  const isAdmin = hostRole === "admin";
+  // Who may operate the stream's control panels (overlay / ticker / music /
+  // slideshow / co-host switching / sharing)? Owner, platform admin, or a
+  // host who holds a stream_operators row for this stream (access=operator).
+  const canOperate =
+    effectiveAccess === "owner" ||
+    effectiveAccess === "admin" ||
+    effectiveAccess === "operator";
+  // Who may actually BROADCAST (Start/End/Pause/Resume/Go On-Air/Switch Cam)?
+  // Only the stream owner. Admins viewing someone else's stream operate but do
+  // not hijack the broadcast; operators (super users) cannot broadcast by
+  // construction. Gating broadcasting on owner keeps the media lifecycle
+  // (MediaRecorder, getUserMedia, on-air signalling) bound to exactly one
+  // device per stream — the original safety invariant.
+  const canBroadcastHere = effectiveAccess === "owner" && CAPS.canBroadcast(hostRole);
+  const isOperatorMode = effectiveAccess === "operator";
 
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -187,19 +226,25 @@ export function HostStreamInterface({
 
   // Fallback receiver: connects to the active co-host when the warm pool hasn't
   // pre-connected yet (race condition where admin switches before warm-up finishes).
+  //
+  // ONLY the broadcaster (the stream owner) subscribes to the co-host stream
+  // and then re-relays it to viewers. Operators (admins / super users) never
+  // receive or re-publish media on their device — they only update the DB,
+  // and the owner's page reacts to the realtime `active_participant_id`
+  // change and does the actual relay.
   const coHostFallbackStream = useCohostReceiver(
-    isStreamOwner ? activeParticipantId : null
+    canBroadcastHere ? activeParticipantId : null
   );
 
   // Relay fallback stream when warm pool missed and receiver connects
   useEffect(() => {
-    if (!isStreamOwner) return;
+    if (!canBroadcastHere) return;
     if (activeParticipantId && coHostFallbackStream) {
       relayStream(coHostFallbackStream);
     } else if (!activeParticipantId) {
       relayStream(null);
     }
-  }, [coHostFallbackStream, activeParticipantId, isStreamOwner, relayStream]);
+  }, [coHostFallbackStream, activeParticipantId, canBroadcastHere, relayStream]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -246,6 +291,14 @@ export function HostStreamInterface({
   // Instead we flag the page as "ready" immediately and let the host decide via
   // the Go-On-Air button. Legacy mode preserves the auto-init behavior.
   useEffect(() => {
+    // Operators (admins / super users viewing someone else's stream) must
+    // NEVER call initializeMedia() or startStream() — that would request
+    // their camera/mic and either publish it or collide with the owner's
+    // broadcast. We still mark the page as "ready" so the UI renders.
+    if (!canBroadcastHere) {
+      setMediaInitialized(true);
+      return;
+    }
     if (controlRoomMode) {
       setMediaInitialized(true);
       // Resume a previously-live stream without forcing the camera open.
@@ -271,7 +324,7 @@ export function HostStreamInterface({
       }
     };
     init();
-  }, [controlRoomMode, initializeMedia, stream.status, isStreaming, startStream]);
+  }, [canBroadcastHere, controlRoomMode, initializeMedia, stream.status, isStreaming, startStream]);
 
   // Drive the host's preview video element with whatever viewers are currently
   // seeing — same priority used on the server side (syncAllViewerTracks):
@@ -771,6 +824,36 @@ export function HostStreamInterface({
           </div>
         )}
 
+        {/* ─── Operator mode banner ──────────────────────────────────────
+            Shown to admins and assigned Super Users when they are NOT the
+            stream owner. Makes it visually obvious that their controls here
+            are operator-scope only — they do not broadcast from this page. */}
+        {(effectiveAccess === "admin" || effectiveAccess === "operator") && (
+          <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/40 rounded-lg flex items-start gap-3">
+            <Tv className="w-5 h-5 text-purple-600 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0 text-sm">
+              <div className="font-medium text-purple-900 dark:text-purple-200">
+                {effectiveAccess === "admin"
+                  ? "Admin Operator Mode"
+                  : "Super User Operator Mode"}
+              </div>
+              <div className="text-xs text-purple-800/80 dark:text-purple-300/80 mt-0.5">
+                You can manage overlays, music, ticker, slideshow and co-hosts
+                for this stream. You cannot broadcast from this screen — the
+                stream owner's device is the live source.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Admin-only panel to manage which Super Users are assigned as
+            operators on this specific stream. */}
+        {isAdmin && (
+          <div className="mb-4">
+            <StreamOperatorsPanel streamId={stream.id} />
+          </div>
+        )}
+
         {/* ─── Crash-recovery banner ──────────────────────────────────────
             Shown when IndexedDB still holds recording chunks from a prior
             tab/session that didn't reach stopStream() cleanly (refresh,
@@ -1012,9 +1095,13 @@ export function HostStreamInterface({
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {/* Broadcast lifecycle buttons are OWNER-ONLY. Admins and
+                    operators (Super Users) view these states but cannot
+                    mutate them from this screen — they would race the
+                    broadcaster's device. */}
                 {stream.status === "ended" ? (
                   <>
-                    {hasRecording && (
+                    {canBroadcastHere && hasRecording && (
                       <Button variant="outline" onClick={downloadRecording}>
                         <Download className="w-4 h-4 mr-2" />
                         Download Recording
@@ -1028,49 +1115,55 @@ export function HostStreamInterface({
                     </Button>
                   </>
                 ) : isStreaming ? (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Host-camera on/off-air toggle. Separate from the stream
-                        start/stop controls so the host can manage the stream
-                        without forcing their own camera to viewers. */}
-                    {controlRoomMode && (
-                      isHostOnAir ? (
-                        <Button
-                          variant="outline"
-                          onClick={goOffAir}
-                          title="Stop publishing your camera to viewers"
-                        >
-                          <VideoOff className="w-4 h-4 mr-2" />
-                          Stop My Camera
+                  canBroadcastHere ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Host-camera on/off-air toggle. Separate from the stream
+                          start/stop controls so the host can manage the stream
+                          without forcing their own camera to viewers. */}
+                      {controlRoomMode && (
+                        isHostOnAir ? (
+                          <Button
+                            variant="outline"
+                            onClick={goOffAir}
+                            title="Stop publishing your camera to viewers"
+                          >
+                            <VideoOff className="w-4 h-4 mr-2" />
+                            Stop My Camera
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="default"
+                            onClick={goOnAir}
+                            className="bg-green-600 hover:bg-green-700"
+                            title="Publish your camera so viewers can see you"
+                          >
+                            <Video className="w-4 h-4 mr-2" />
+                            Go On-Air with My Camera
+                          </Button>
+                        )
+                      )}
+                      {isPaused ? (
+                        <Button variant="default" onClick={resumeStream}>
+                          <Play className="w-4 h-4 mr-2" />
+                          Resume
                         </Button>
                       ) : (
-                        <Button
-                          variant="default"
-                          onClick={goOnAir}
-                          className="bg-green-600 hover:bg-green-700"
-                          title="Publish your camera so viewers can see you"
-                        >
-                          <Video className="w-4 h-4 mr-2" />
-                          Go On-Air with My Camera
+                        <Button variant="outline" onClick={pauseStream}>
+                          <Pause className="w-4 h-4 mr-2" />
+                          Pause
                         </Button>
-                      )
-                    )}
-                    {isPaused ? (
-                      <Button variant="default" onClick={resumeStream}>
-                        <Play className="w-4 h-4 mr-2" />
-                        Resume
+                      )}
+                      <Button variant="destructive" onClick={handleEndStream}>
+                        <Square className="w-4 h-4 mr-2" />
+                        End Stream
                       </Button>
-                    ) : (
-                      <Button variant="outline" onClick={pauseStream}>
-                        <Pause className="w-4 h-4 mr-2" />
-                        Pause
-                      </Button>
-                    )}
-                    <Button variant="destructive" onClick={handleEndStream}>
-                      <Square className="w-4 h-4 mr-2" />
-                      End Stream
-                    </Button>
-                  </div>
-                ) : (
+                    </div>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs">
+                      {isOperatorMode ? "Operator Mode" : "View-only"} · broadcast controls disabled
+                    </Badge>
+                  )
+                ) : canBroadcastHere ? (
                   <Button
                     onClick={handleStartStream}
                     disabled={!mediaInitialized}
@@ -1078,6 +1171,10 @@ export function HostStreamInterface({
                     <Circle className="w-4 h-4 mr-2 fill-current" />
                     Go Live
                   </Button>
+                ) : (
+                  <Badge variant="secondary" className="text-xs">
+                    Waiting for broadcaster to start the stream
+                  </Badge>
                 )}
               </div>
             </div>
@@ -1385,7 +1482,7 @@ export function HostStreamInterface({
                       <span className="text-muted-foreground">({messages.length})</span>
                     ) : null}
                   </TabsTrigger>
-                  {isStreamOwner && (
+                  {canOperate && (
                     <TabsTrigger value="cameras" className="flex-1 text-xs gap-1">
                       <Camera className="w-3.5 h-3.5" />
                       Cameras
@@ -1394,8 +1491,12 @@ export function HostStreamInterface({
                 </TabsList>
               </div>
 
-              {/* Cameras Tab — Director Panel */}
-              {isStreamOwner && (
+              {/* Cameras Tab — Director Panel. Available to anyone who may
+                  operate the stream (owner, admin, assigned super user).
+                  The panel itself calls the participants/switch API which
+                  updates the DB; only the broadcaster's device relays the
+                  resulting co-host media stream to viewers. */}
+              {canOperate && (
                 <TabsContent value="cameras" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col">
                   <DirectorPanel
                     streamId={stream.id}
@@ -1403,6 +1504,12 @@ export function HostStreamInterface({
                     activeParticipantId={activeParticipantId}
                     onSwitch={(id, warmStream) => {
                       setActiveParticipantId(id);
+                      // Only the broadcaster relays media. Admins/super users
+                      // watching via this panel update DB via the director
+                      // panel's API call; the owner's page picks up the change
+                      // through its streams-row realtime subscription and
+                      // performs the actual relay on its device.
+                      if (!canBroadcastHere) return;
                       if (warmStream) {
                         // Warm pool had it ready — instant relay
                         relayStream(warmStream);
