@@ -51,6 +51,8 @@ import {
   Eye,
   EyeOff,
   Tv,
+  AlertTriangle,
+  Trash2,
 } from "lucide-react";
 
 interface Stream {
@@ -171,6 +173,10 @@ export function HostStreamInterface({
     isHostOnAir,
     controlRoomMode,
     downloadRecording,
+    pendingRecoveries,
+    refreshPendingRecoveries,
+    downloadPendingRecovery,
+    discardPendingRecovery,
   } = useHostStream({
     streamId: stream.id,
     roomCode: stream.room_code,
@@ -199,6 +205,29 @@ export function HostStreamInterface({
     typeof window !== "undefined"
       ? `${window.location.origin}/watch/${stream.room_code}`
       : "";
+
+  // ─── Refresh / close guard while actively recording ─────────────────────
+  // MediaRecorder writes a new WebM file each mount, so a refresh mid-stream
+  // cannot seamlessly continue the current recording. We mitigate this in two
+  // layers:
+  //   1. Every chunk is persisted to IndexedDB as it arrives (see
+  //      useHostStream), so whatever was captured up to the refresh is
+  //      recoverable via the banner below.
+  //   2. This effect installs a `beforeunload` handler while `isRecording`
+  //      is true so the browser shows its native "Leave site?" confirmation —
+  //      hosts no longer lose recordings to a reflexive Ctrl+R.
+  useEffect(() => {
+    if (!isRecording) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Modern browsers ignore the custom string and show their own message,
+      // but returnValue must still be set for the prompt to appear.
+      e.returnValue = "";
+      return "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isRecording]);
 
   // Detect mobile device
   useEffect(() => {
@@ -739,6 +768,78 @@ export function HostStreamInterface({
           <div className="mb-4 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-destructive" />
             <p className="text-sm text-destructive">{error}</p>
+          </div>
+        )}
+
+        {/* ─── Crash-recovery banner ──────────────────────────────────────
+            Shown when IndexedDB still holds recording chunks from a prior
+            tab/session that didn't reach stopStream() cleanly (refresh,
+            crash, or hard tab-close). Offers a download + discard path so
+            the host never silently loses captured video. */}
+        {pendingRecoveries && pendingRecoveries.length > 0 && (
+          <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/50 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-yellow-900 dark:text-yellow-200">
+                  Unsaved recording from a previous session
+                </p>
+                <p className="text-xs text-yellow-800/80 dark:text-yellow-300/80 mt-0.5">
+                  Your browser has recording data that was never downloaded.
+                  Save it now before starting a new stream, or it will be
+                  discarded.
+                </p>
+                <div className="flex flex-col gap-2 mt-3">
+                  {pendingRecoveries.map((p) => {
+                    const mb = (p.totalBytes / 1024 / 1024).toFixed(1);
+                    const when = new Date(p.startedAt).toLocaleString();
+                    return (
+                      <div
+                        key={p.sessionId}
+                        className="flex items-center justify-between gap-2 p-2 rounded-md bg-background/60 border border-yellow-500/30"
+                      >
+                        <div className="flex-1 min-w-0 text-xs">
+                          <div className="font-medium truncate">
+                            {when}
+                          </div>
+                          <div className="text-muted-foreground">
+                            {p.chunkCount} chunks · {mb} MB
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            const ok = await downloadPendingRecovery(
+                              p.sessionId
+                            );
+                            if (ok) {
+                              toast.success("Recording downloaded");
+                              await discardPendingRecovery(p.sessionId);
+                            } else {
+                              toast.error("Could not rebuild recording");
+                            }
+                          }}
+                        >
+                          <Download className="w-3.5 h-3.5 mr-1.5" />
+                          Download
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={async () => {
+                            await discardPendingRecovery(p.sessionId);
+                            toast.message("Recording discarded");
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
