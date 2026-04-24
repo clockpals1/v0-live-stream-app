@@ -162,10 +162,11 @@ export function ViewerStreamInterface({
   // Auto-unmute when: the name dialog has been dismissed (user interacted) AND
   // the remote stream is connected. Browsers allow setting video.muted=false at
   // any time after the first user gesture — only video.play() is gesture-gated.
+  // Note: We only unmute here, not call play(). The srcObject effect handles playback.
   useEffect(() => {
     if (!showNameDialog && remoteStream && videoRef.current && !hasManuallyMutedRef.current) {
+      console.log('[Viewer] Auto-unmuting after dialog dismissed');
       videoRef.current.muted = false;
-      videoRef.current.play().catch(() => {});
       setIsMuted(false);
     }
   }, [showNameDialog, remoteStream]);
