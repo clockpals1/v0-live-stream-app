@@ -17,6 +17,12 @@
 BEGIN;
 
 -- ─── New helper: is the authenticated user the owner of the given stream? ──
+-- Drop any pre-existing version first. An older build of this helper may
+-- already exist on the database with a different input parameter name
+-- (e.g. target_stream instead of p_stream_id). Postgres 42P13 forbids
+-- renaming parameters via CREATE OR REPLACE, so we drop then create.
+DROP FUNCTION IF EXISTS public.is_stream_owner(UUID);
+
 CREATE OR REPLACE FUNCTION public.is_stream_owner(p_stream_id UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
