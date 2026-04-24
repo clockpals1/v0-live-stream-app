@@ -209,33 +209,9 @@ export function ViewerStreamInterface({
       // Check video state after a short delay
       setTimeout(checkVideoPlaying, 1000);
       
-      // Play the video (handle autoplay restrictions)
-      const playVideo = async () => {
-        try {
-          await videoElement.play();
-          console.log('[Viewer] Video playing successfully');
-        } catch (error) {
-          console.error('[Viewer] Error playing video:', error);
-          // Handle autoplay restrictions
-          if (error instanceof Error && error.name === 'NotAllowedError') {
-            // Add user interaction hint
-            console.log('[Viewer] Autoplay blocked, waiting for user interaction');
-          }
-        }
-      };
-      
-      // Try to play immediately
-      playVideo();
-      
-      // Also try on user interaction
-      const handleUserInteraction = () => {
-        playVideo();
-        document.removeEventListener('click', handleUserInteraction);
-        document.removeEventListener('touchstart', handleUserInteraction);
-      };
-      
-      document.addEventListener('click', handleUserInteraction, { once: true });
-      document.addEventListener('touchstart', handleUserInteraction, { once: true });
+      // Note: play() is now called in the canplay event handler when the video is ready
+      // The autoPlay attribute on the video element will also attempt autoplay
+      console.log('[Viewer] Video stream attached, waiting for canplay event');
       
     } else {
       console.log('[Viewer] Clearing video stream');
@@ -257,12 +233,30 @@ export function ViewerStreamInterface({
       }
     };
     
+    const handleLoadedMetadata = () => {
+      console.log('[Viewer] Video metadata loaded');
+      // Try to play as soon as metadata is loaded
+      if (videoElement) {
+        videoElement.play().catch((error) => {
+          console.log('[Viewer] Autoplay failed in loadedmetadata handler:', error);
+        });
+      }
+    };
+    
     const handleCanPlay = () => {
       console.log('[Viewer] Video can play');
       const loadingOverlay = document.getElementById('video-loading');
       if (loadingOverlay) {
         loadingOverlay.classList.remove('opacity-100');
         loadingOverlay.classList.add('opacity-0');
+      }
+      
+      // Attempt to play the video now that it's ready
+      if (videoElement) {
+        videoElement.play().catch((error) => {
+          console.log('[Viewer] Autoplay failed in canplay handler:', error);
+          // Autoplay blocked - user will need to interact
+        });
       }
     };
     
@@ -304,6 +298,7 @@ export function ViewerStreamInterface({
     };
     
     videoElement.addEventListener('loadstart', handleLoadStart);
+    videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
     videoElement.addEventListener('canplay', handleCanPlay);
     videoElement.addEventListener('error', handleError);
     videoElement.addEventListener('stalled', handleStalled);
@@ -312,6 +307,7 @@ export function ViewerStreamInterface({
     
     return () => {
       videoElement.removeEventListener('loadstart', handleLoadStart);
+      videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
       videoElement.removeEventListener('canplay', handleCanPlay);
       videoElement.removeEventListener('error', handleError);
       videoElement.removeEventListener('stalled', handleStalled);
