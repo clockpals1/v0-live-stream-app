@@ -209,9 +209,28 @@ export function ViewerStreamInterface({
       // Check video state after a short delay
       setTimeout(checkVideoPlaying, 1000);
       
-      // Note: play() is now called in the canplay event handler when the video is ready
-      // The autoPlay attribute on the video element will also attempt autoplay
-      console.log('[Viewer] Video stream attached, waiting for canplay event');
+      // Attempt to play the video after a brief delay to allow browser to process the stream
+      // This is more reliable than waiting for events which may have already fired
+      console.log('[Viewer] Video stream attached, attempting playback');
+      
+      setTimeout(() => {
+        if (videoElement && videoElement.srcObject) {
+          videoElement.play().catch((error) => {
+            console.log('[Viewer] Initial autoplay failed:', error);
+            // Autoplay blocked - will retry on user interaction
+          });
+        }
+      }, 100);
+      
+      // Also try again after a longer delay in case the first attempt was too early
+      setTimeout(() => {
+        if (videoElement && videoElement.srcObject && videoElement.paused) {
+          console.log('[Viewer] Video still paused, retrying play()');
+          videoElement.play().catch((error) => {
+            console.log('[Viewer] Retry autoplay failed:', error);
+          });
+        }
+      }, 500);
       
     } else {
       console.log('[Viewer] Clearing video stream');
