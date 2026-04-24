@@ -184,183 +184,69 @@ export function ViewerStreamInterface({
     
     if (remoteStream) {
       console.log('[Viewer] Setting video stream:', remoteStream.id, remoteStream.getVideoTracks().length, remoteStream.getAudioTracks().length);
-      
-      // DIAGNOSTIC: Detailed stream info before attachment
-      console.log('[DIAGNOSTIC] Attaching stream to video element:', {
-        streamId: remoteStream.id,
-        videoTracks: remoteStream.getVideoTracks().map(t => ({
-          id: t.id,
-          enabled: t.enabled,
-          readyState: t.readyState,
-          muted: t.muted,
-        })),
-        audioTracks: remoteStream.getAudioTracks().map(t => ({
-          id: t.id,
-          enabled: t.enabled,
-          readyState: t.readyState,
-          muted: t.muted,
-        })),
-        videoElementReady: !!videoElement,
-        videoElementSrcObject: videoElement.srcObject,
-      });
-      
+
+      // ---- Event listeners (attached HERE because video element is conditionally rendered) ----
+      const onLoadStart = () => console.log('[Viewer] Video event: loadstart');
+      const onLoadedMetadata = () => {
+        console.log('[Viewer] Video event: loadedmetadata');
+        videoElement.play().catch(e => console.log('[Viewer] play() in loadedmetadata:', e));
+      };
+      const onCanPlay = () => {
+        console.log('[Viewer] Video event: canplay');
+        videoElement.play().catch(e => console.log('[Viewer] play() in canplay:', e));
+      };
+      const onPlaying = () => console.log('[Viewer] Video event: playing');
+      const onError = (e: Event) => console.error('[Viewer] Video event: error', e);
+      const onStalled = () => console.log('[Viewer] Video event: stalled');
+      const onSuspend = () => console.log('[Viewer] Video event: suspend');
+
+      videoElement.addEventListener('loadstart', onLoadStart);
+      videoElement.addEventListener('loadedmetadata', onLoadedMetadata);
+      videoElement.addEventListener('canplay', onCanPlay);
+      videoElement.addEventListener('playing', onPlaying);
+      videoElement.addEventListener('error', onError);
+      videoElement.addEventListener('stalled', onStalled);
+      videoElement.addEventListener('suspend', onSuspend);
+
       // Set the stream
       videoElement.srcObject = remoteStream;
-      
-      // DIAGNOSTIC: Verify attachment
-      console.log('[DIAGNOSTIC] After srcObject set:', {
-        srcObjectSet: !!videoElement.srcObject,
-        srcObjectId: (videoElement.srcObject as MediaStream)?.id,
-        videoElementReadyState: videoElement.readyState,
-      });
-      
-      // Check if video is actually playing and update hostVideoEnabled state
-      const checkVideoPlaying = () => {
-        const videoTracks = remoteStream.getVideoTracks();
-        const hasVideoTracks = videoTracks.length > 0;
-        const videoElementReady = videoElement.readyState >= 2; // HAVE_CURRENT_DATA
-        
-        if (hasVideoTracks && videoElementReady) {
-          const videoTrack = videoTracks[0];
-          const videoEnabled = videoTrack.enabled && videoTrack.readyState === 'live';
-          console.log('[Viewer] Video check - tracks:', hasVideoTracks, 'element ready:', videoElementReady, 'track enabled:', videoEnabled);
-          
-          // If video is playing, ensure hostVideoEnabled is true
-          if (videoEnabled && !hostVideoEnabled) {
-            console.log('[Viewer] Correcting hostVideoEnabled state - video is actually playing');
-            // This will be handled by the stream manager, but we can add additional checks
-          }
+      console.log('[Viewer] srcObject set');
+
+      // Immediate play attempts
+      const tryPlay = () => {
+        if (videoElement && videoElement.srcObject) {
+          videoElement.play().catch(e => console.log('[Viewer] play() attempt failed:', e));
         }
       };
-      
-      // Check video state after a short delay
-      setTimeout(checkVideoPlaying, 1000);
-      
-      // Attempt to play the video after a brief delay to allow browser to process the stream
-      // This is more reliable than waiting for events which may have already fired
-      console.log('[Viewer] Video stream attached, attempting playback');
-      
-      setTimeout(() => {
-        if (videoElement && videoElement.srcObject) {
-          videoElement.play().catch((error) => {
-            console.log('[Viewer] Initial autoplay failed:', error);
-            // Autoplay blocked - will retry on user interaction
-          });
-        }
-      }, 100);
-      
-      // Also try again after a longer delay in case the first attempt was too early
+      tryPlay();
+      setTimeout(tryPlay, 100);
       setTimeout(() => {
         if (videoElement && videoElement.srcObject && videoElement.paused) {
           console.log('[Viewer] Video still paused, retrying play()');
-          videoElement.play().catch((error) => {
-            console.log('[Viewer] Retry autoplay failed:', error);
-          });
+          tryPlay();
         }
       }, 500);
-      
+
+      return () => {
+        videoElement.removeEventListener('loadstart', onLoadStart);
+        videoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
+        videoElement.removeEventListener('canplay', onCanPlay);
+        videoElement.removeEventListener('playing', onPlaying);
+        videoElement.removeEventListener('error', onError);
+        videoElement.removeEventListener('stalled', onStalled);
+        videoElement.removeEventListener('suspend', onSuspend);
+      };
+
     } else {
       console.log('[Viewer] Clearing video stream');
       videoElement.srcObject = null;
     }
   }, [remoteStream]);
 
-  // Handle video element events
-  useEffect(() => {
-    const videoElement = videoRef.current;
-    if (!videoElement) return;
-    
-    const handleLoadStart = () => {
-      console.log('[Viewer] Video load start');
-      const loadingOverlay = document.getElementById('video-loading');
-      if (loadingOverlay) {
-        loadingOverlay.classList.remove('opacity-0');
-        loadingOverlay.classList.add('opacity-100');
-      }
-    };
-    
-    const handleLoadedMetadata = () => {
-      console.log('[Viewer] Video metadata loaded');
-      // Try to play as soon as metadata is loaded
-      if (videoElement) {
-        videoElement.play().catch((error) => {
-          console.log('[Viewer] Autoplay failed in loadedmetadata handler:', error);
-        });
-      }
-    };
-    
-    const handleCanPlay = () => {
-      console.log('[Viewer] Video can play');
-      const loadingOverlay = document.getElementById('video-loading');
-      if (loadingOverlay) {
-        loadingOverlay.classList.remove('opacity-100');
-        loadingOverlay.classList.add('opacity-0');
-      }
-      
-      // Attempt to play the video now that it's ready
-      if (videoElement) {
-        videoElement.play().catch((error) => {
-          console.log('[Viewer] Autoplay failed in canplay handler:', error);
-          // Autoplay blocked - user will need to interact
-        });
-      }
-    };
-    
-    const handleError = (e: Event) => {
-      console.error('[Viewer] Video error:', e);
-      // setError('Video playback failed. Please try refreshing.');
-      const loadingOverlay = document.getElementById('video-loading');
-      if (loadingOverlay) {
-        loadingOverlay.classList.remove('opacity-100');
-        loadingOverlay.classList.add('opacity-0');
-      }
-    };
-    
-    const handleStalled = () => {
-      console.log('[Viewer] Video stalled');
-      const loadingOverlay = document.getElementById('video-loading');
-      if (loadingOverlay) {
-        loadingOverlay.classList.remove('opacity-0');
-        loadingOverlay.classList.add('opacity-100');
-      }
-    };
-    
-    const handleSuspend = () => {
-      console.log('[Viewer] Video suspended');
-      const loadingOverlay = document.getElementById('video-loading');
-      if (loadingOverlay) {
-        loadingOverlay.classList.remove('opacity-0');
-        loadingOverlay.classList.add('opacity-100');
-      }
-    };
-    
-    const handlePlaying = () => {
-      console.log('[Viewer] Video playing');
-      const loadingOverlay = document.getElementById('video-loading');
-      if (loadingOverlay) {
-        loadingOverlay.classList.remove('opacity-100');
-        loadingOverlay.classList.add('opacity-0');
-      }
-    };
-    
-    videoElement.addEventListener('loadstart', handleLoadStart);
-    videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
-    videoElement.addEventListener('canplay', handleCanPlay);
-    videoElement.addEventListener('error', handleError);
-    videoElement.addEventListener('stalled', handleStalled);
-    videoElement.addEventListener('suspend', handleSuspend);
-    videoElement.addEventListener('playing', handlePlaying);
-    
-    return () => {
-      videoElement.removeEventListener('loadstart', handleLoadStart);
-      videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      videoElement.removeEventListener('canplay', handleCanPlay);
-      videoElement.removeEventListener('error', handleError);
-      videoElement.removeEventListener('stalled', handleStalled);
-      videoElement.removeEventListener('suspend', handleSuspend);
-      videoElement.removeEventListener('playing', handlePlaying);
-    };
-  }, []);
+  // NOTE: Video element event listeners are now attached inside the remoteStream
+  // useEffect below, because the <video> element is conditionally rendered and does
+  // not exist on mount. Attaching here with [] would always bail early on
+  // videoRef.current === null.
 
   // Handle mute/unmute
   useEffect(() => {
