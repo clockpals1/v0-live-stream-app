@@ -34,6 +34,8 @@ import {
   VolumeX,
   Maximize,
   Minimize,
+  Expand,
+  Shrink,
   Loader2,
   VideoOff,
   RefreshCw,
@@ -84,6 +86,10 @@ export function ViewerStreamInterface({
   const [isMuted, setIsMuted] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Video fit mode: 'contain' (letterbox, never crops) vs 'cover' (fills container,
+  // crops edges). Mobile viewers often prefer 'cover' in portrait; default to
+  // 'contain' so nothing is ever hidden by default.
+  const [fitMode, setFitMode] = useState<"contain" | "cover">("contain");
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
   const [showControls, setShowControls] = useState(true);
@@ -535,30 +541,53 @@ export function ViewerStreamInterface({
     }
   }, [isFullscreen]);
 
-  // ─── Fullscreen handling ──────────────────────────────────────────────────
+  // ─── Fullscreen handling ─────────────────────────────────────
+  // The Fullscreen API fires `fullscreenchange` on the document when the native
+  // element-level fullscreen enters or exits. iOS Safari uses a different path:
+  // calling `webkitEnterFullscreen()` on the <video> opens the native player,
+  // and the exit is signaled via `webkitpresentationmodechanged` on the video.
   useEffect(() => {
     const onChange = () => {
-      setIsFullscreen(!!(
+      const native = !!(
         document.fullscreenElement ||
         (document as any).webkitFullscreenElement ||
         (document as any).mozFullScreenElement
-      ));
+      );
+      // Only mutate state when it actually changes — avoids stomping the iOS
+      // presentation-mode path that sets the flag manually.
+      setIsFullscreen((prev) => (prev !== native ? native : prev));
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIsFullscreen(false); };
-    document.addEventListener("fullscreenchange",       onChange);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+
+    document.addEventListener("fullscreenchange", onChange);
     document.addEventListener("webkitfullscreenchange", onChange);
-    document.addEventListener("mozfullscreenchange",    onChange);
+    document.addEventListener("mozfullscreenchange", onChange);
     document.addEventListener("keydown", onKey);
+
+    // iOS Safari: the <video> element fires this when the user exits the
+    // native inline/fullscreen player. Keep React state in sync.
+    const video = videoRef.current;
+    const onPresentationChange = () => {
+      const mode = (video as any)?.webkitPresentationMode;
+      if (mode === "fullscreen") setIsFullscreen(true);
+      else if (mode === "inline") setIsFullscreen(false);
+    };
+    video?.addEventListener("webkitpresentationmodechanged", onPresentationChange);
+
     return () => {
-      document.removeEventListener("fullscreenchange",       onChange);
+      document.removeEventListener("fullscreenchange", onChange);
       document.removeEventListener("webkitfullscreenchange", onChange);
-      document.removeEventListener("mozfullscreenchange",    onChange);
+      document.removeEventListener("mozfullscreenchange", onChange);
       document.removeEventListener("keydown", onKey);
+      video?.removeEventListener("webkitpresentationmodechanged", onPresentationChange);
     };
   }, []);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 
+  // ... (rest of the code remains the same)
   // KEY FIX: joinStream is called directly from a button onClick / form onSubmit,
   // so we are inside a user-gesture call stack here. We:
   //   1. Mark gesture as received.
@@ -690,27 +719,74 @@ export function ViewerStreamInterface({
   const toggleFullscreen = async () => {
     const video = videoRef.current;
     const container = videoContainerRef.current;
+
     if (!isFullscreen) {
+      // iOS Safari path: opens native video player. Mark state immediately
+      // because `fullscreenchange` does not fire — `webkitpresentationmodechanged`
+      // does, and is wired up in the effect above (also flips state back on exit).
       if (video && typeof (video as any).webkitEnterFullscreen === "function") {
-        try { (video as any).webkitEnterFullscreen(); return; } catch { /* fallthrough */ }
+        try {
+          (video as any).webkitEnterFullscreen();
+          setIsFullscreen(true);
+          return;
+        } catch {
+          /* fall through to element-level API */
+        }
       }
+      // Standard path: request fullscreen on the video container so our overlay,
+      // ticker (which is outside), and controls composition remain predictable.
       const el = container || document.documentElement;
       try {
-        if (el.requestFullscreen) await el.requestFullscreen();
-        else if ((el as any).webkitRequestFullscreen) (el as any).webkitRequestFullscreen();
-        else setIsFullscreen(true);
-      } catch { setIsFullscreen(true); }
+        if (el.requestFullscreen) {
+          await el.requestFullscreen();
+        } else if ((el as any).webkitRequestFullscreen) {
+          (el as any).webkitRequestFullscreen();
+        } else {
+          // No API at all — use CSS-driven fallback.
+          setIsFullscreen(true);
+        }
+        // Note: do NOT manually setIsFullscreen(true) here on success. The
+        // `fullscreenchange` listener is the single source of truth and will
+        // fire within one frame. Double-setting caused a brief state flash.
+      } catch {
+        // Permission denied / gesture issue — fall back to CSS fullscreen.
+        setIsFullscreen(true);
+      }
     } else {
-      const native = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      // iOS: exit native player explicitly if present.
+      if (video && typeof (video as any).webkitExitFullscreen === "function" &&
+          (video as any).webkitPresentationMode === "fullscreen") {
+        try {
+          (video as any).webkitExitFullscreen();
+          setIsFullscreen(false);
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      const native = !!(
+        document.fullscreenElement || (document as any).webkitFullscreenElement
+      );
       if (native) {
         try {
-          if (document.exitFullscreen) await document.exitFullscreen();
-          else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
-        } catch { setIsFullscreen(false); }
+          if (document.exitFullscreen) {
+            await document.exitFullscreen();
+          } else if ((document as any).webkitExitFullscreen) {
+            (document as any).webkitExitFullscreen();
+          }
+          // fullscreenchange listener will flip state.
+        } catch {
+          setIsFullscreen(false);
+        }
       } else {
+        // CSS-fallback fullscreen — exit directly.
         setIsFullscreen(false);
       }
     }
+  };
+
+  const toggleFitMode = () => {
+    setFitMode((m) => (m === "contain" ? "cover" : "contain"));
   };
 
   const togglePiP = async () => {
@@ -875,6 +951,16 @@ export function ViewerStreamInterface({
 
             <Button variant="secondary" size="icon" className="rounded-full bg-black/50 hover:bg-black/70 text-white" onClick={toggleMute}>
               {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="icon"
+              className="rounded-full bg-black/50 hover:bg-black/70 text-white"
+              onClick={toggleFitMode}
+              title={fitMode === "contain" ? "Fill screen (crop)" : "Fit screen (letterbox)"}
+            >
+              {fitMode === "contain" ? <Expand className="w-5 h-5" /> : <Shrink className="w-5 h-5" />}
             </Button>
 
             <Button variant="secondary" size="icon" className="rounded-full bg-black/50 hover:bg-black/70 text-white" onClick={toggleFullscreen}>
@@ -1120,7 +1206,13 @@ export function ViewerStreamInterface({
               <div className="overflow-hidden sm:rounded-xl sm:border sm:border-border sm:shadow-sm">
                 <div
                   ref={videoContainerRef}
-                  className={`relative bg-black ${isFullscreen ? "fixed inset-0 z-50 w-screen h-screen" : "aspect-video w-full"}`}
+                  className={`relative bg-black ${
+                    isFullscreen
+                      ? // 100dvh uses the dynamic viewport so mobile browsers with
+                        // a collapsing URL bar never clip the bottom of the video.
+                        "fixed inset-0 z-50 w-screen h-[100dvh]"
+                      : "aspect-video w-full"
+                  }`}
                 >
                   {/* Video element is rendered here ALWAYS so the ref never goes stale.
                       getVideoContent() renders overlays and states on top of it.
@@ -1135,8 +1227,17 @@ export function ViewerStreamInterface({
                     playsInline
                     muted={isMuted}
                     controls={false}
-                    className="absolute inset-0 w-full h-full object-contain"
-                    style={{ display: (isStreamLive && isConnected && remoteStream) ? undefined : "none" }}
+                    className={`absolute inset-0 w-full h-full ${
+                      fitMode === "cover" ? "object-cover" : "object-contain"
+                    }`}
+                    style={{
+                      display:
+                        isStreamLive && isConnected && remoteStream ? undefined : "none",
+                      // GPU hint: promotes the <video> to its own compositor layer
+                      // for smoother scaling and fullscreen transitions on mobile.
+                      transform: "translateZ(0)",
+                      backfaceVisibility: "hidden",
+                    }}
                   />
                   {getVideoContent()}
                   {/* Host-controlled overlay — rendered on top of video, below controls badge */}
