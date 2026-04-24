@@ -8,6 +8,7 @@ import { useHostStream } from "@/lib/webrtc/use-host-stream";
 import { useCohostReceiver } from "@/lib/webrtc/use-cohost-receiver";
 import { playNotificationSound, vibrateDevice } from "@/lib/utils/notification";
 import { MAX_VIEWERS } from "@/lib/webrtc/config";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,17 @@ interface ChatMessage {
   created_at: string;
 }
 
+interface StreamParticipant {
+  id: string;
+  slot_label: string;
+  status: "invited" | "ready" | "live" | "offline";
+  host_id: string;
+  host?: {
+    display_name: string | null;
+    email: string;
+  };
+}
+
 interface HostStreamInterfaceProps {
   stream: Stream;
   host: Host;
@@ -94,6 +106,7 @@ export function HostStreamInterface({
 
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [cohostParticipants, setCohostParticipants] = useState<StreamParticipant[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -277,6 +290,42 @@ export function HostStreamInterface({
           if ('active_participant_id' in updated) {
             setActiveParticipantId(updated.active_participant_id ?? null);
           }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [stream.id]);
+
+  // Load co-host participants for this stream
+  useEffect(() => {
+    const loadParticipants = async () => {
+      const { data } = await supabase
+        .from("stream_participants")
+        .select("id, slot_label, status, host_id, host:hosts(display_name, email)")
+        .eq("stream_id", stream.id)
+        .neq("status", "offline");
+      if (data) {
+        setCohostParticipants(data as StreamParticipant[]);
+      }
+    };
+    loadParticipants();
+
+    // Subscribe to participant status changes
+    const channel = supabase
+      .channel(`participants-${stream.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "stream_participants",
+          filter: `stream_id=eq.${stream.id}`,
+        },
+        () => {
+          loadParticipants();
         }
       )
       .subscribe();
@@ -749,6 +798,53 @@ export function HostStreamInterface({
 
               {/* Chat Tab */}
               <TabsContent value="chat" className="flex-1 min-h-0 flex flex-col mt-0 overflow-hidden data-[state=active]:flex">
+                {/* Co-hosts Section */}
+                {cohostParticipants.length > 0 && (
+                  <div className="shrink-0 px-4 py-3 border-b border-border bg-muted/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-xs font-medium text-foreground">Co-hosts ({cohostParticipants.length})</span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {cohostParticipants.map((p) => {
+                        const displayName = p.host?.display_name || p.host?.email || "Unknown";
+                        const joinLink = `${typeof window !== "undefined" ? window.location.origin : ""}/host/stream/${stream.room_code}/cohost/${p.id}`;
+                        return (
+                          <div key={p.id} className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium truncate">{displayName}</span>
+                                <Badge
+                                  variant={p.status === "live" ? "default" : "secondary"}
+                                  className={`text-[10px] h-4 px-1.5 ${
+                                    p.status === "live" ? "bg-red-500 text-white" :
+                                    p.status === "ready" ? "bg-green-500/20 text-green-700" :
+                                    "bg-muted text-muted-foreground"
+                                  }`}
+                                >
+                                  {p.status === "live" ? "● LIVE" : p.status}
+                                </Badge>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground">{p.slot_label}</span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-[10px]"
+                              onClick={() => {
+                                navigator.clipboard.writeText(joinLink);
+                                toast.success("Join link copied!");
+                              }}
+                            >
+                              <Copy className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="shrink-0 flex items-center justify-between px-4 py-2">
                   <span className="text-xs text-muted-foreground">{messages.length} message{messages.length !== 1 ? 's' : ''}</span>
                   <Button variant="ghost" size="sm" onClick={refreshChat} disabled={isRefreshingChat} className="h-6 w-6 p-0">
