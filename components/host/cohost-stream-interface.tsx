@@ -129,7 +129,7 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
   useEffect(() => {
     const channel = supabase
       .channel(`chat-room-${stream.id}`, { config: { broadcast: { self: true } } })
-      .on("broadcast", { event: "chat-message" }, ({ payload }) => {
+      .on("broadcast", { event: "chat-message" }, ({ payload }: any) => {
         const msg = payload as ChatMessage;
         setMessages((prev) => {
           if (prev.some((m) => m.id === msg.id)) return prev;
@@ -206,6 +206,7 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Badge className="bg-purple-500 text-white text-xs">Co-hosting</Badge>
           <Badge variant="outline" className="text-xs">{participant.slot_label}</Badge>
           {isStreaming ? (
             <Badge className="bg-red-500 text-white text-xs animate-pulse">● LIVE</Badge>

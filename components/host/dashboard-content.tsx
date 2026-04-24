@@ -501,6 +501,36 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
       </header>
 
       <main className="container mx-auto px-4 py-8">
+        {/* Co-hosting Status Banner */}
+        {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length > 0 && (
+          <div className="mb-6 p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-2 border-purple-500/30 rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 bg-purple-500 rounded-full">
+                <Users className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  You are co-hosting {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length} stream{cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length !== 1 ? "s" : ""}
+                  {cohostParticipants.some(p => p.status === "live") && (
+                    <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
+                  )}
+                </h3>
+                <div className="flex flex-wrap gap-2 mt-1.5">
+                  {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").map((p) => (
+                    <Link
+                      key={p.id}
+                      href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}
+                      className="text-xs text-purple-600 hover:text-purple-700 underline"
+                    >
+                      {p.stream.title} ({p.slot_label})
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Create / Schedule Stream Card */}
           <Card className="lg:col-span-1">
