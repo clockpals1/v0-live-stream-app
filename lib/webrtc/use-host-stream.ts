@@ -91,12 +91,25 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
       // Add tracks — use relay (co-host) stream if active, else own camera
       const sourceStream = activeRelayStreamRef.current ?? mediaStreamRef.current;
+      console.log(`[v0] Creating peer for ${viewerId}, sourceStream:`, {
+        hasStream: !!sourceStream,
+        isRelay: !!activeRelayStreamRef.current,
+        videoTracks: sourceStream?.getVideoTracks().length ?? 0,
+        audioTracks: sourceStream?.getAudioTracks().length ?? 0,
+      });
       let audioSenderRef: RTCRtpSender | undefined;
       if (sourceStream) {
         sourceStream.getTracks().forEach((track) => {
+          console.log(`[v0] Adding ${track.kind} track to peer ${viewerId}:`, {
+            id: track.id,
+            enabled: track.enabled,
+            readyState: track.readyState,
+          });
           const s = pc.addTrack(track, sourceStream);
           if (track.kind === "audio") audioSenderRef = s;
         });
+      } else {
+        console.warn(`[v0] No source stream available for viewer ${viewerId}!`);
       }
       // Guarantee an audio transceiver always exists so replaceTrack() can relay
       // co-host audio even when the admin's own stream captured no microphone.
@@ -268,7 +281,28 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     try {
       // Make sure media is initialized
       if (!mediaStreamRef.current) {
+        console.log("[v0] Media not initialized, initializing now...");
         await initializeMedia();
+      }
+
+      // Verify media stream has tracks before going live
+      if (!mediaStreamRef.current) {
+        throw new Error("Failed to initialize media stream");
+      }
+
+      const videoTracks = mediaStreamRef.current.getVideoTracks();
+      const audioTracks = mediaStreamRef.current.getAudioTracks();
+      console.log("[v0] Starting stream with tracks:", {
+        video: videoTracks.length,
+        audio: audioTracks.length,
+        videoEnabled: videoTracks[0]?.enabled,
+        audioEnabled: audioTracks[0]?.enabled,
+        videoState: videoTracks[0]?.readyState,
+        audioState: audioTracks[0]?.readyState,
+      });
+
+      if (videoTracks.length === 0) {
+        throw new Error("No video track available. Please check camera permissions.");
       }
 
       // Update stream status in database
@@ -311,6 +345,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
       }
 
       // Broadcast stream start to all viewers
+      console.log("[v0] Broadcasting stream-start signal");
       channelRef.current?.send({
         type: "broadcast",
         event: "signal",
@@ -319,6 +354,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
       setIsStreaming(true);
       setError(null);
+      console.log("[v0] Stream started successfully");
     } catch (err) {
       console.error("[v0] Error starting stream:", err);
       setError("Failed to start stream");

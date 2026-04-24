@@ -94,7 +94,14 @@ export function useSimpleStream({
           peerConnectionRef.current = pc;
           
           pc.ontrack = (event) => {
-            console.log("[simple] Received track:", event.track.kind, event.streams.length);
+            console.log("[simple] Received track:", {
+              kind: event.track.kind,
+              id: event.track.id,
+              enabled: event.track.enabled,
+              readyState: event.track.readyState,
+              streamsCount: event.streams.length,
+              streamId: event.streams[0]?.id,
+            });
 
             if (event.streams.length > 0) {
               const stream = event.streams[0];
@@ -102,6 +109,16 @@ export function useSimpleStream({
               // Check if stream has video/audio tracks and update states
               const videoTracks = stream.getVideoTracks();
               const audioTracks = stream.getAudioTracks();
+              
+              console.log("[simple] Stream received with tracks:", {
+                streamId: stream.id,
+                videoCount: videoTracks.length,
+                audioCount: audioTracks.length,
+                videoEnabled: videoTracks[0]?.enabled,
+                audioEnabled: audioTracks[0]?.enabled,
+                videoState: videoTracks[0]?.readyState,
+                audioState: audioTracks[0]?.readyState,
+              });
               
               if (videoTracks.length > 0) {
                 const videoTrack = videoTracks[0];
@@ -130,11 +147,25 @@ export function useSimpleStream({
               // Track arrived with no associated stream (sender used addTransceiver
               // without streams option). Merge into existing remoteStream so the
               // video element's srcObject receives the track data.
-              console.log("[simple] Track has no streams — merging into remoteStream:", event.track.kind);
+              console.warn("[simple] Track has no streams — merging into remoteStream:", {
+                kind: event.track.kind,
+                id: event.track.id,
+                enabled: event.track.enabled,
+                readyState: event.track.readyState,
+              });
               setRemoteStream((prev) => {
                 const tracks = prev ? [...prev.getTracks()] : [];
-                if (!tracks.some((t) => t.id === event.track.id)) tracks.push(event.track);
-                return new MediaStream(tracks);
+                if (!tracks.some((t) => t.id === event.track.id)) {
+                  tracks.push(event.track);
+                  console.log("[simple] Added track to remoteStream, total tracks:", tracks.length);
+                }
+                const newStream = new MediaStream(tracks);
+                console.log("[simple] New remoteStream:", {
+                  id: newStream.id,
+                  videoCount: newStream.getVideoTracks().length,
+                  audioCount: newStream.getAudioTracks().length,
+                });
+                return newStream;
               });
               setIsConnected(true);
               setError(null);
