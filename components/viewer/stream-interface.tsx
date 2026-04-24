@@ -114,10 +114,10 @@ export function ViewerStreamInterface({
   }, []);
 
   // Always connect to the main host channel — camera relaying happens on the host side
+  // Note: Stream connection is independent of chat identity (viewerName)
   const streamHook = useSimpleStream({
     streamId: stream.id,
     roomCode: stream.room_code,
-    viewerName: viewerName || "Viewer",
     onStreamEnd: handleStreamEnd,
   });
 

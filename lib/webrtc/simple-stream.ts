@@ -9,7 +9,6 @@ interface UseSimpleStreamProps {
   streamId: string;
   roomCode: string;
   signalingChannel?: string; // overrides default stream-signal-{roomCode} channel
-  viewerName: string;
   onStreamEnd?: () => void;
 }
 
@@ -17,7 +16,6 @@ export function useSimpleStream({
   streamId,
   roomCode,
   signalingChannel,
-  viewerName,
   onStreamEnd,
 }: UseSimpleStreamProps) {
   // Compute the active channel — co-host switch overrides the default
@@ -41,6 +39,7 @@ export function useSimpleStream({
   const supabase = supabaseRef.current;
 
   // Join stream (declared FIRST to avoid TDZ in closures below)
+  // Note: viewerName is NOT in dependencies - stream connection is independent of chat identity
   const joinStream = useCallback(() => {
     if (!channelRef.current) return;
 
@@ -48,7 +47,7 @@ export function useSimpleStream({
       type: "viewer-join",
       from: viewerIdRef.current,
       to: "host",
-      viewerName: viewerName,
+      viewerName: "Viewer", // Use generic name for signaling - chat identity is separate
     };
 
     channelRef.current.send({
@@ -56,7 +55,7 @@ export function useSimpleStream({
       event: "signal",
       payload: joinMessage,
     });
-  }, [viewerName]);
+  }, []);
 
   // Leave stream
   const leaveStream = useCallback(() => {
