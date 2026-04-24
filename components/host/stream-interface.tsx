@@ -21,9 +21,6 @@ import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
 import { OverlayMusic } from "@/components/host/overlay-music";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
-import { CAPS, resolveRole, type StreamAccessMode } from "@/lib/rbac";
-import { StreamOperatorsPanel } from "@/components/admin/stream-operators-panel";
-import { PrivateOpsChat } from "@/components/host/private-ops-chat";
 import {
   Radio,
   Video,
@@ -54,9 +51,6 @@ import {
   Eye,
   EyeOff,
   Tv,
-  AlertTriangle,
-  Trash2,
-  ShieldCheck,
 } from "lucide-react";
 
 interface Stream {
@@ -98,24 +92,11 @@ interface StreamParticipant {
 interface HostStreamInterfaceProps {
   stream: Stream;
   host: Host;
-  /**
-   * Effective access mode resolved server-side by
-   * resolveStreamAccess() in @/lib/rbac. When omitted (older call sites)
-   * we fall back to the legacy owner/non-owner split for back-compat.
-   *
-   *   owner    — current user broadcasts this stream
-   *   admin    — platform admin on someone else's stream (full operator access)
-   *   operator — assigned super user (operator access, no broadcasting)
-   *   cohost   — assigned co-host (separate page handles this; here treated
-   *              conservatively as non-owner)
-   */
-  accessMode?: StreamAccessMode;
 }
 
 export function HostStreamInterface({
   stream: initialStream,
   host,
-  accessMode,
 }: HostStreamInterfaceProps) {
   const [stream, setStream] = useState(initialStream);
   const [copied, setCopied] = useState(false);
@@ -131,30 +112,6 @@ export function HostStreamInterface({
     (initialStream as any).active_participant_id ?? null
   );
   const isStreamOwner = host.id === initialStream.host_id;
-
-  // ─── Access-mode derived flags ────────────────────────────────────────────
-  // `accessMode` is resolved server-side in the stream page. For back-compat
-  // with any caller that doesn't pass it, fall back to the legacy owner/
-  // non-owner split so existing flows behave identically.
-  const effectiveAccess: StreamAccessMode =
-    accessMode ?? (isStreamOwner ? "owner" : "cohost");
-  const hostRole = resolveRole(host);
-  const isAdmin = hostRole === "admin";
-  // Who may operate the stream's control panels (overlay / ticker / music /
-  // slideshow / co-host switching / sharing)? Owner, platform admin, or a
-  // host who holds a stream_operators row for this stream (access=operator).
-  const canOperate =
-    effectiveAccess === "owner" ||
-    effectiveAccess === "admin" ||
-    effectiveAccess === "operator";
-  // Who may actually BROADCAST (Start/End/Pause/Resume/Go On-Air/Switch Cam)?
-  // Only the stream owner. Admins viewing someone else's stream operate but do
-  // not hijack the broadcast; operators (super users) cannot broadcast by
-  // construction. Gating broadcasting on owner keeps the media lifecycle
-  // (MediaRecorder, getUserMedia, on-air signalling) bound to exactly one
-  // device per stream — the original safety invariant.
-  const canBroadcastHere = effectiveAccess === "owner" && CAPS.canBroadcast(hostRole);
-  const isOperatorMode = effectiveAccess === "operator";
 
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -214,10 +171,6 @@ export function HostStreamInterface({
     isHostOnAir,
     controlRoomMode,
     downloadRecording,
-    pendingRecoveries,
-    refreshPendingRecoveries,
-    downloadPendingRecovery,
-    discardPendingRecovery,
   } = useHostStream({
     streamId: stream.id,
     roomCode: stream.room_code,
@@ -228,53 +181,24 @@ export function HostStreamInterface({
 
   // Fallback receiver: connects to the active co-host when the warm pool hasn't
   // pre-connected yet (race condition where admin switches before warm-up finishes).
-  //
-  // ONLY the broadcaster (the stream owner) subscribes to the co-host stream
-  // and then re-relays it to viewers. Operators (admins / super users) never
-  // receive or re-publish media on their device — they only update the DB,
-  // and the owner's page reacts to the realtime `active_participant_id`
-  // change and does the actual relay.
   const coHostFallbackStream = useCohostReceiver(
-    canBroadcastHere ? activeParticipantId : null
+    isStreamOwner ? activeParticipantId : null
   );
 
   // Relay fallback stream when warm pool missed and receiver connects
   useEffect(() => {
-    if (!canBroadcastHere) return;
+    if (!isStreamOwner) return;
     if (activeParticipantId && coHostFallbackStream) {
       relayStream(coHostFallbackStream);
     } else if (!activeParticipantId) {
       relayStream(null);
     }
-  }, [coHostFallbackStream, activeParticipantId, canBroadcastHere, relayStream]);
+  }, [coHostFallbackStream, activeParticipantId, isStreamOwner, relayStream]);
 
   const shareLink =
     typeof window !== "undefined"
       ? `${window.location.origin}/watch/${stream.room_code}`
       : "";
-
-  // ─── Refresh / close guard while actively recording ─────────────────────
-  // MediaRecorder writes a new WebM file each mount, so a refresh mid-stream
-  // cannot seamlessly continue the current recording. We mitigate this in two
-  // layers:
-  //   1. Every chunk is persisted to IndexedDB as it arrives (see
-  //      useHostStream), so whatever was captured up to the refresh is
-  //      recoverable via the banner below.
-  //   2. This effect installs a `beforeunload` handler while `isRecording`
-  //      is true so the browser shows its native "Leave site?" confirmation —
-  //      hosts no longer lose recordings to a reflexive Ctrl+R.
-  useEffect(() => {
-    if (!isRecording) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Modern browsers ignore the custom string and show their own message,
-      // but returnValue must still be set for the prompt to appear.
-      e.returnValue = "";
-      return "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isRecording]);
 
   // Detect mobile device
   useEffect(() => {
@@ -293,14 +217,6 @@ export function HostStreamInterface({
   // Instead we flag the page as "ready" immediately and let the host decide via
   // the Go-On-Air button. Legacy mode preserves the auto-init behavior.
   useEffect(() => {
-    // Operators (admins / super users viewing someone else's stream) must
-    // NEVER call initializeMedia() or startStream() — that would request
-    // their camera/mic and either publish it or collide with the owner's
-    // broadcast. We still mark the page as "ready" so the UI renders.
-    if (!canBroadcastHere) {
-      setMediaInitialized(true);
-      return;
-    }
     if (controlRoomMode) {
       setMediaInitialized(true);
       // Resume a previously-live stream without forcing the camera open.
@@ -326,7 +242,7 @@ export function HostStreamInterface({
       }
     };
     init();
-  }, [canBroadcastHere, controlRoomMode, initializeMedia, stream.status, isStreaming, startStream]);
+  }, [controlRoomMode, initializeMedia, stream.status, isStreaming, startStream]);
 
   // Drive the host's preview video element with whatever viewers are currently
   // seeing — same priority used on the server side (syncAllViewerTracks):
@@ -684,6 +600,19 @@ export function HostStreamInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
+  // Prevent accidental page refresh or navigation while the stream is live.
+  // The browser shows a generic "Leave site?" dialog — the exact message is
+  // controlled by the browser, not our string, in all modern browsers.
+  useEffect(() => {
+    if (!isStreaming) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isStreaming]);
+
   const copyShareLink = () => {
     navigator.clipboard.writeText(shareLink);
     setCopied(true);
@@ -758,8 +687,11 @@ export function HostStreamInterface({
   };
 
   const handleEndStream = async () => {
-    await stopStream();
+    const hadRecording = await stopStream();
     setStream((prev) => ({ ...prev, status: "ended" }));
+    if (hadRecording) {
+      toast.success("Stream ended — recording downloaded to your device.");
+    }
   };
 
   const handleStartStream = async () => {
@@ -823,108 +755,6 @@ export function HostStreamInterface({
           <div className="mb-4 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-destructive" />
             <p className="text-sm text-destructive">{error}</p>
-          </div>
-        )}
-
-        {/* ─── Operator mode banner ──────────────────────────────────────
-            Shown to admins and assigned Super Users when they are NOT the
-            stream owner. Makes it visually obvious that their controls here
-            are operator-scope only — they do not broadcast from this page. */}
-        {(effectiveAccess === "admin" || effectiveAccess === "operator") && (
-          <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/40 rounded-lg flex items-start gap-3">
-            <Tv className="w-5 h-5 text-purple-600 mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0 text-sm">
-              <div className="font-medium text-purple-900 dark:text-purple-200">
-                {effectiveAccess === "admin"
-                  ? "Admin Operator Mode"
-                  : "Super User Operator Mode"}
-              </div>
-              <div className="text-xs text-purple-800/80 dark:text-purple-300/80 mt-0.5">
-                You can manage overlays, music, ticker, slideshow and co-hosts
-                for this stream. You cannot broadcast from this screen — the
-                stream owner's device is the live source.
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Admin-only panel to manage which Super Users are assigned as
-            operators on this specific stream. */}
-        {isAdmin && (
-          <div className="mb-4">
-            <StreamOperatorsPanel streamId={stream.id} />
-          </div>
-        )}
-
-        {/* ─── Crash-recovery banner ──────────────────────────────────────
-            Shown when IndexedDB still holds recording chunks from a prior
-            tab/session that didn't reach stopStream() cleanly (refresh,
-            crash, or hard tab-close). Offers a download + discard path so
-            the host never silently loses captured video. */}
-        {pendingRecoveries && pendingRecoveries.length > 0 && (
-          <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/50 rounded-lg">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-yellow-900 dark:text-yellow-200">
-                  Unsaved recording from a previous session
-                </p>
-                <p className="text-xs text-yellow-800/80 dark:text-yellow-300/80 mt-0.5">
-                  Your browser has recording data that was never downloaded.
-                  Save it now before starting a new stream, or it will be
-                  discarded.
-                </p>
-                <div className="flex flex-col gap-2 mt-3">
-                  {pendingRecoveries.map((p) => {
-                    const mb = (p.totalBytes / 1024 / 1024).toFixed(1);
-                    const when = new Date(p.startedAt).toLocaleString();
-                    return (
-                      <div
-                        key={p.sessionId}
-                        className="flex items-center justify-between gap-2 p-2 rounded-md bg-background/60 border border-yellow-500/30"
-                      >
-                        <div className="flex-1 min-w-0 text-xs">
-                          <div className="font-medium truncate">
-                            {when}
-                          </div>
-                          <div className="text-muted-foreground">
-                            {p.chunkCount} chunks · {mb} MB
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            const ok = await downloadPendingRecovery(
-                              p.sessionId
-                            );
-                            if (ok) {
-                              toast.success("Recording downloaded");
-                              await discardPendingRecovery(p.sessionId);
-                            } else {
-                              toast.error("Could not rebuild recording");
-                            }
-                          }}
-                        >
-                          <Download className="w-3.5 h-3.5 mr-1.5" />
-                          Download
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={async () => {
-                            await discardPendingRecovery(p.sessionId);
-                            toast.message("Recording discarded");
-                          }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
@@ -1097,13 +927,9 @@ export function HostStreamInterface({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {/* Broadcast lifecycle buttons are OWNER-ONLY. Admins and
-                    operators (Super Users) view these states but cannot
-                    mutate them from this screen — they would race the
-                    broadcaster's device. */}
                 {stream.status === "ended" ? (
                   <>
-                    {canBroadcastHere && hasRecording && (
+                    {hasRecording && (
                       <Button variant="outline" onClick={downloadRecording}>
                         <Download className="w-4 h-4 mr-2" />
                         Download Recording
@@ -1117,55 +943,49 @@ export function HostStreamInterface({
                     </Button>
                   </>
                 ) : isStreaming ? (
-                  canBroadcastHere ? (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* Host-camera on/off-air toggle. Separate from the stream
-                          start/stop controls so the host can manage the stream
-                          without forcing their own camera to viewers. */}
-                      {controlRoomMode && (
-                        isHostOnAir ? (
-                          <Button
-                            variant="outline"
-                            onClick={goOffAir}
-                            title="Stop publishing your camera to viewers"
-                          >
-                            <VideoOff className="w-4 h-4 mr-2" />
-                            Stop My Camera
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="default"
-                            onClick={goOnAir}
-                            className="bg-green-600 hover:bg-green-700"
-                            title="Publish your camera so viewers can see you"
-                          >
-                            <Video className="w-4 h-4 mr-2" />
-                            Go On-Air with My Camera
-                          </Button>
-                        )
-                      )}
-                      {isPaused ? (
-                        <Button variant="default" onClick={resumeStream}>
-                          <Play className="w-4 h-4 mr-2" />
-                          Resume
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Host-camera on/off-air toggle. Separate from the stream
+                        start/stop controls so the host can manage the stream
+                        without forcing their own camera to viewers. */}
+                    {controlRoomMode && (
+                      isHostOnAir ? (
+                        <Button
+                          variant="outline"
+                          onClick={goOffAir}
+                          title="Stop publishing your camera to viewers"
+                        >
+                          <VideoOff className="w-4 h-4 mr-2" />
+                          Stop My Camera
                         </Button>
                       ) : (
-                        <Button variant="outline" onClick={pauseStream}>
-                          <Pause className="w-4 h-4 mr-2" />
-                          Pause
+                        <Button
+                          variant="default"
+                          onClick={goOnAir}
+                          className="bg-green-600 hover:bg-green-700"
+                          title="Publish your camera so viewers can see you"
+                        >
+                          <Video className="w-4 h-4 mr-2" />
+                          Go On-Air with My Camera
                         </Button>
-                      )}
-                      <Button variant="destructive" onClick={handleEndStream}>
-                        <Square className="w-4 h-4 mr-2" />
-                        End Stream
+                      )
+                    )}
+                    {isPaused ? (
+                      <Button variant="default" onClick={resumeStream}>
+                        <Play className="w-4 h-4 mr-2" />
+                        Resume
                       </Button>
-                    </div>
-                  ) : (
-                    <Badge variant="secondary" className="text-xs">
-                      {isOperatorMode ? "Operator Mode" : "View-only"} · broadcast controls disabled
-                    </Badge>
-                  )
-                ) : canBroadcastHere ? (
+                    ) : (
+                      <Button variant="outline" onClick={pauseStream}>
+                        <Pause className="w-4 h-4 mr-2" />
+                        Pause
+                      </Button>
+                    )}
+                    <Button variant="destructive" onClick={handleEndStream}>
+                      <Square className="w-4 h-4 mr-2" />
+                      End Stream
+                    </Button>
+                  </div>
+                ) : (
                   <Button
                     onClick={handleStartStream}
                     disabled={!mediaInitialized}
@@ -1173,10 +993,6 @@ export function HostStreamInterface({
                     <Circle className="w-4 h-4 mr-2 fill-current" />
                     Go Live
                   </Button>
-                ) : (
-                  <Badge variant="secondary" className="text-xs">
-                    Waiting for broadcaster to start the stream
-                  </Badge>
                 )}
               </div>
             </div>
@@ -1484,31 +1300,17 @@ export function HostStreamInterface({
                       <span className="text-muted-foreground">({messages.length})</span>
                     ) : null}
                   </TabsTrigger>
-                  {canOperate && (
+                  {isStreamOwner && (
                     <TabsTrigger value="cameras" className="flex-1 text-xs gap-1">
                       <Camera className="w-3.5 h-3.5" />
                       Cameras
                     </TabsTrigger>
                   )}
-                  {/* Ops channel — private chat between owner / admins /
-                      assigned Super Users for this stream only. Viewers never
-                      see this. Gated on canOperate so co-hosts / cohost
-                      fallback access modes don't see it either. */}
-                  {canOperate && (
-                    <TabsTrigger value="ops" className="flex-1 text-xs gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      Ops
-                    </TabsTrigger>
-                  )}
                 </TabsList>
               </div>
 
-              {/* Cameras Tab — Director Panel. Available to anyone who may
-                  operate the stream (owner, admin, assigned super user).
-                  The panel itself calls the participants/switch API which
-                  updates the DB; only the broadcaster's device relays the
-                  resulting co-host media stream to viewers. */}
-              {canOperate && (
+              {/* Cameras Tab — Director Panel */}
+              {isStreamOwner && (
                 <TabsContent value="cameras" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col">
                   <DirectorPanel
                     streamId={stream.id}
@@ -1516,12 +1318,6 @@ export function HostStreamInterface({
                     activeParticipantId={activeParticipantId}
                     onSwitch={(id, warmStream) => {
                       setActiveParticipantId(id);
-                      // Only the broadcaster relays media. Admins/super users
-                      // watching via this panel update DB via the director
-                      // panel's API call; the owner's page picks up the change
-                      // through its streams-row realtime subscription and
-                      // performs the actual relay on its device.
-                      if (!canBroadcastHere) return;
                       if (warmStream) {
                         // Warm pool had it ready — instant relay
                         relayStream(warmStream);
@@ -1532,20 +1328,6 @@ export function HostStreamInterface({
                       // If id set but no warmStream: useCohostReceiver fallback
                       // connects and the useEffect above relays when ready
                     }}
-                  />
-                </TabsContent>
-              )}
-
-              {/* Ops Tab — stream-scoped private chat for operators */}
-              {canOperate && (
-                <TabsContent
-                  value="ops"
-                  className="flex-1 min-h-0 flex flex-col mt-0 overflow-hidden data-[state=active]:flex"
-                >
-                  <PrivateOpsChat
-                    streamId={stream.id}
-                    currentHostId={host.id}
-                    canSend={canOperate}
                   />
                 </TabsContent>
               )}

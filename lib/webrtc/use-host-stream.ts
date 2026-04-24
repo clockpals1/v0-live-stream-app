@@ -5,16 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { ICE_SERVERS, SignalMessage, HOST_MEDIA_CONSTRAINTS, MAX_VIEWERS } from "./config";
 import { warmIceServers, getIceConfig } from "./get-ice-servers";
-import {
-  appendChunk as idbAppendChunk,
-  beginSession as idbBeginSession,
-  buildSessionBlob as idbBuildSessionBlob,
-  clearSession as idbClearSession,
-  downloadBlob as idbDownloadBlob,
-  listPendingSessions as idbListPendingSessions,
-  newSessionId as idbNewSessionId,
-  type PendingSessionSummary,
-} from "./recording-store";
 
 interface ViewerConnection {
   id: string;
@@ -69,24 +59,8 @@ export function useHostStream({
   const [error, setError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
-  // Pending recoverable sessions from a prior tab that was closed/crashed
-  // before `stopStream()` could finalize. Surfaced to the UI so the host can
-  // download or discard that data before starting fresh.
-  const [pendingRecoveries, setPendingRecoveries] = useState<
-    PendingSessionSummary[]
-  >([]);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  // ── Recording-session bookkeeping ─────────────────────────────────────────
-  // Each time MediaRecorder starts we generate a fresh sessionId so
-  // IndexedDB chunks from an earlier session (pre-refresh) don't get mixed
-  // with this session's chunks. startedAt + mimeType are captured once per
-  // session so recovery can still reconstruct a playable Blob even if the
-  // header record somehow got lost.
-  const recordingSessionIdRef = useRef<string | null>(null);
-  const recordingSeqRef = useRef(0);
-  const recordingMimeRef = useRef<string>("video/webm");
-  const recordingStartedAtRef = useRef<number>(0);
   const activeRelayStreamRef = useRef<MediaStream | null>(null);
   // Whether the host's OWN camera is being published to viewers right now.
   // Independent of whether `mediaStreamRef.current` exists (we may have the
@@ -111,6 +85,9 @@ export function useHostStream({
   // can detect stale callbacks fired for an older generation of the same viewerId.
   const pcGenCounterRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  // Parallel ref so download / stop always see all chunks synchronously,
+  // independent of React's batched state update schedule.
+  const recordedChunksRef = useRef<Blob[]>([]);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
@@ -470,11 +447,6 @@ export function useHostStream({
       // In control-room mode without goOnAir(), there is nothing to record on
       // the host device (co-host streams are not on the host's machine), and
       // MediaRecorder cannot be pointed at a remote stream anyway.
-      //
-      // Every recorder session is persisted chunk-by-chunk to IndexedDB so a
-      // tab close / crash / refresh cannot silently wipe captured video. On
-      // stopStream() we reassemble the blob from IDB (authoritative store)
-      // rather than from React state, trigger a download, and clear IDB.
       if (mediaStreamRef.current) {
         try {
           // Pick the best supported mimeType — VP9 is not available on all browsers
@@ -493,45 +465,11 @@ export function useHostStream({
             mimeType ? { mimeType } : {}
           );
 
-          // Begin a fresh IDB session BEFORE the first chunk can arrive.
-          const sessionId = idbNewSessionId();
-          const effectiveMime = mimeType || "video/webm";
-          const startedAt = Date.now();
-          recordingSessionIdRef.current = sessionId;
-          recordingSeqRef.current = 0;
-          recordingMimeRef.current = effectiveMime;
-          recordingStartedAtRef.current = startedAt;
-          // Non-blocking: if IDB is unavailable (private mode / quota) we
-          // still record to memory and surface a console warning.
-          idbBeginSession(streamId, sessionId, effectiveMime, startedAt).catch(
-            (err) => {
-              console.warn(
-                "[v0] IDB beginSession failed — recording will be memory-only:",
-                err
-              );
-            }
-          );
-
           mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size === 0) return;
-            // Keep the in-memory state around for the immediate "Download
-            // Recording" button path after stopStream() — useful when IDB
-            // is blocked (e.g. private browsing).
-            setRecordedChunks((prev) => [...prev, event.data]);
-            // Durable persistence: append to IDB in order. If it fails we
-            // just warn — the user still gets an in-memory download.
-            recordingSeqRef.current += 1;
-            const seq = recordingSeqRef.current;
-            idbAppendChunk(
-              streamId,
-              sessionId,
-              seq,
-              event.data,
-              effectiveMime,
-              startedAt
-            ).catch((err) => {
-              console.warn("[v0] IDB appendChunk failed:", err);
-            });
+            if (event.data.size > 0) {
+              recordedChunksRef.current.push(event.data);
+              setRecordedChunks((prev) => [...prev, event.data]);
+            }
           };
 
           mediaRecorderRef.current = mediaRecorder;
@@ -559,97 +497,39 @@ export function useHostStream({
     }
   }, [streamId, initializeMedia, supabase]);
 
-  // Stop streaming
-  //
-  // Order of operations matters:
-  //   1. Request MediaRecorder.stop() and WAIT for the final `ondataavailable`
-  //      + `onstop` — a last chunk (often the trailing cluster that seals the
-  //      WebM file) is emitted synchronously inside stop(). If we bail early
-  //      that tail is lost and the file can be unplayable.
-  //   2. Reassemble the blob from IndexedDB (authoritative) if possible, else
-  //      fall back to the in-memory chunks.
-  //   3. Auto-trigger a browser download so the file reaches the host's disk
-  //      immediately, BEFORE we tear the page / call anything async that might
-  //      reject. The existing "Download Recording" button stays available as a
-  //      manual re-download path after the stream ends.
-  //   4. Clear the IDB session (best-effort) so it doesn't show up as a
-  //      pending recovery next time the page loads.
-  const stopStream = useCallback(async () => {
-    // Stop recording + wait for the final chunk before proceeding.
+  // Stop streaming.
+  // Returns true if a recording was auto-downloaded so the caller can show a toast.
+  const stopStream = useCallback(async (): Promise<boolean> => {
+    let recordingDownloaded = false;
+
+    // Stop recording — await the recorder's final 'stop' event so the last
+    // dataavailable chunk is flushed into recordedChunksRef BEFORE we build
+    // the Blob. Calling stop() without waiting fires ondataavailable async and
+    // the previous code would race: download could run before the final chunk
+    // arrived, silently truncating the recording.
     const recorder = mediaRecorderRef.current;
-    const sessionId = recordingSessionIdRef.current;
-    const startedAt = recordingStartedAtRef.current;
-    if (recorder && isRecording) {
+    if (recorder && recorder.state !== 'inactive') {
       await new Promise<void>((resolve) => {
-        let settled = false;
-        const done = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-        try {
-          recorder.addEventListener("stop", done, { once: true });
-          // Safety net — some browsers don't fire 'stop' reliably if the
-          // track ended early. 2s is long enough for the final dataavailable.
-          setTimeout(done, 2000);
-          recorder.stop();
-        } catch (err) {
-          console.warn("[v0] recorder.stop() threw:", err);
-          done();
-        }
+        recorder.addEventListener('stop', () => resolve(), { once: true });
+        recorder.stop();
       });
       setIsRecording(false);
-    }
 
-    // Download whatever we captured. Prefer IDB — it's the only source that
-    // survives mid-session failures and is guaranteed in-order.
-    try {
-      let blob: Blob | null = null;
-      let mimeType = recordingMimeRef.current || "video/webm";
-      if (sessionId) {
-        const built = await idbBuildSessionBlob(streamId, sessionId);
-        if (built && built.blob.size > 0) {
-          blob = built.blob;
-          mimeType = built.mimeType;
-        }
+      // Auto-download: the host explicitly ended the stream (user gesture path),
+      // so a programmatic anchor click is permitted by browsers without any
+      // autoplay/download policy block.
+      if (recordedChunksRef.current.length > 0) {
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `stream-${roomCode}-${Date.now()}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+        recordingDownloaded = true;
       }
-      if (!blob) {
-        // IDB was empty (private browsing, quota error, or recording never
-        // started): fall back to in-memory chunks. Read synchronously from
-        // the ref-equivalent state — we scheduled the final setRecordedChunks
-        // already inside ondataavailable above.
-        // We purposefully don't rely on React's batched state here because
-        // stopStream may run before the next render; using recordedChunks
-        // captured in closure is fine for 99% of cases and guarded by the
-        // zero-size check below.
-        const memChunks = recordedChunks;
-        if (memChunks.length > 0) {
-          blob = new Blob(memChunks, { type: mimeType });
-        }
-      }
-      if (blob && blob.size > 0) {
-        const stamp = new Date(startedAt || Date.now())
-          .toISOString()
-          .replace(/[:.]/g, "-");
-        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
-        idbDownloadBlob(blob, `stream-${roomCode}-${stamp}.${ext}`);
-      } else {
-        console.log("[v0] No recorded data to download — skipping auto-save");
-      }
-    } catch (err) {
-      console.warn(
-        "[v0] Auto-download on stopStream failed; manual download still available:",
-        err
-      );
-    } finally {
-      // Best-effort cleanup — don't block stream-end on IDB errors.
-      if (sessionId) {
-        idbClearSession(streamId, sessionId).catch((err) =>
-          console.warn("[v0] IDB clearSession failed:", err)
-        );
-      }
-      recordingSessionIdRef.current = null;
-      recordingSeqRef.current = 0;
     }
 
     // Close all peer connections
@@ -675,7 +555,8 @@ export function useHostStream({
 
     setIsStreaming(false);
     setIsPaused(false);
-  }, [streamId, isRecording, supabase, roomCode, recordedChunks]);
+    return recordingDownloaded;
+  }, [streamId, supabase, roomCode]);
 
   // Pause streaming
   const pauseStream = useCallback(async () => {
@@ -909,11 +790,12 @@ export function useHostStream({
     syncAllViewerTracks();
   }, [syncAllViewerTracks]);
 
-  // Download recording
+  // Download recording — uses the ref directly so it always has the
+  // complete chunk list regardless of React's state batching schedule.
   const downloadRecording = useCallback(() => {
-    if (recordedChunks.length === 0) return;
+    if (recordedChunksRef.current.length === 0) return;
 
-    const blob = new Blob(recordedChunks, { type: "video/webm" });
+    const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -922,7 +804,7 @@ export function useHostStream({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [recordedChunks, roomCode]);
+  }, [roomCode]);
 
   // Set up signaling channel
   useEffect(() => {
@@ -952,69 +834,6 @@ export function useHostStream({
   useEffect(() => {
     warmIceServers();
   }, []);
-
-  // ─── Crash-recovery scan ─────────────────────────────────────────────────
-  // On mount, look for any IndexedDB sessions for this streamId that didn't
-  // get cleaned up by stopStream(). These are typically from a tab close,
-  // crash, or hard refresh mid-recording. The UI can then offer the host a
-  // "Download unsaved recording" / "Discard" banner so no captured video is
-  // silently lost.
-  //
-  // We skip any session that matches the CURRENT recorder session so a mid-
-  // stream mount pass (unlikely, but possible during fast-refresh in dev)
-  // doesn't flag the live recording as orphaned.
-  const refreshPendingRecoveries = useCallback(async () => {
-    try {
-      const list = await idbListPendingSessions(streamId);
-      const filtered = list.filter(
-        (s) => s.sessionId !== recordingSessionIdRef.current
-      );
-      setPendingRecoveries(filtered);
-    } catch (err) {
-      console.warn("[v0] listPendingSessions failed:", err);
-    }
-  }, [streamId]);
-
-  useEffect(() => {
-    refreshPendingRecoveries();
-  }, [refreshPendingRecoveries]);
-
-  const downloadPendingRecovery = useCallback(
-    async (sessionId: string) => {
-      try {
-        const built = await idbBuildSessionBlob(streamId, sessionId);
-        if (!built || built.blob.size === 0) {
-          console.warn("[v0] Pending session has no usable data:", sessionId);
-          return false;
-        }
-        const stamp = new Date(built.startedAt)
-          .toISOString()
-          .replace(/[:.]/g, "-");
-        const ext = built.mimeType.includes("mp4") ? "mp4" : "webm";
-        idbDownloadBlob(
-          built.blob,
-          `stream-${roomCode}-recovered-${stamp}.${ext}`
-        );
-        return true;
-      } catch (err) {
-        console.error("[v0] downloadPendingRecovery failed:", err);
-        return false;
-      }
-    },
-    [streamId, roomCode]
-  );
-
-  const discardPendingRecovery = useCallback(
-    async (sessionId: string) => {
-      try {
-        await idbClearSession(streamId, sessionId);
-        await refreshPendingRecoveries();
-      } catch (err) {
-        console.warn("[v0] discardPendingRecovery failed:", err);
-      }
-    },
-    [streamId, refreshPendingRecoveries]
-  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1054,11 +873,5 @@ export function useHostStream({
     isHostOnAir,
     controlRoomMode,
     downloadRecording,
-    // Crash-recovery surface — UI shows a banner when this is non-empty so
-    // the host can save or discard data captured in a prior, interrupted tab.
-    pendingRecoveries,
-    refreshPendingRecoveries,
-    downloadPendingRecovery,
-    discardPendingRecovery,
   };
 }
