@@ -4,6 +4,18 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { RealtimeChannel } from "@supabase/supabase-js";
 import { warmIceServers, getIceConfig } from "./get-ice-servers";
+import { getTwilioTurnCreds, hasFreshTurnCreds } from "./twilio-turn";
+
+// Start every peer connection with STUN only — most users (Canada/US/UK/Europe)
+// connect directly without any relay. TURN is added ONLY when ICE struggles.
+const STUN_ONLY_CONFIG: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceCandidatePoolSize: 2,
+};
+
+// If ICE stays in 'checking' this long without reaching 'connected',
+// we assume a restrictive NAT / high-latency carrier and inject TURN.
+const ICE_CHECKING_TIMEOUT_MS = 8000;
 
 interface UseSimpleStreamProps {
   streamId: string;
@@ -29,6 +41,9 @@ export function useSimpleStream({
   const [connectionState, setConnectionState] = useState<string>("new");
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [isStreamPaused, setIsStreamPaused] = useState(false);
+  // Debug/UX flag: surfaces whether the current PC is relaying through TURN.
+  // Viewer UI may show a subtle badge when true. Invisible to end users otherwise.
+  const [isUsingTurn, setIsUsingTurn] = useState(false);
 
   const viewerIdRef = useRef<string>(Math.random().toString(36).substr(2, 9));
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -37,6 +52,46 @@ export function useSimpleStream({
   const joinStreamRef = useRef<() => void>(() => {});
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  // ICE-recovery bookkeeping: tracks the 'checking' watchdog and whether TURN
+  // has already been injected on the current PC so we don't loop.
+  const iceCheckingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const turnInjectedRef = useRef(false);
+
+  // Inject Twilio TURN into the CURRENT peer connection and restart ICE.
+  // restartIce() avoids tearing down the PC so the existing stream keeps flowing
+  // as soon as new candidates succeed — no re-negotiation from scratch.
+  const injectTurnAndRestart = useCallback(async (reason: string) => {
+    const pc = peerConnectionRef.current;
+    if (!pc || pc.connectionState === "closed") return;
+    if (turnInjectedRef.current) return; // already relaying on this PC
+
+    console.log(`[simple] ICE fallback triggered (${reason}) — fetching Twilio TURN`);
+    const turnServers = await getTwilioTurnCreds();
+    if (!turnServers || turnServers.length === 0) {
+      console.warn("[simple] Twilio TURN unavailable — staying on STUN-only");
+      return;
+    }
+    // Current PC may have been closed while fetching.
+    const current = peerConnectionRef.current;
+    if (!current || current.connectionState === "closed") return;
+
+    try {
+      current.setConfiguration({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          ...turnServers,
+        ],
+        iceCandidatePoolSize: 2,
+      });
+      current.restartIce();
+      turnInjectedRef.current = true;
+      setIsUsingTurn(true);
+      console.log("[simple] TURN injected + restartIce() called");
+    } catch (err) {
+      console.error("[simple] setConfiguration/restartIce failed:", err);
+    }
+  }, []);
 
   // Join stream (declared FIRST to avoid TDZ in closures below)
   // Note: viewerName is NOT in dependencies - stream connection is independent of chat identity
@@ -88,9 +143,37 @@ export function useSimpleStream({
             peerConnectionRef.current.close();
             peerConnectionRef.current = null;
           }
-          
-          const pc = new RTCPeerConnection(getIceConfig());
+          if (iceCheckingTimerRef.current) {
+            clearTimeout(iceCheckingTimerRef.current);
+            iceCheckingTimerRef.current = null;
+          }
+          turnInjectedRef.current = false;
+          setIsUsingTurn(false);
+
+          // Start STUN-only. If the client already has fresh TURN creds cached
+          // from a prior struggling connection (e.g. same user re-joining on a
+          // bad network), seed the PC with them up-front to avoid the 8s wait.
+          const initialConfig: RTCConfiguration = hasFreshTurnCreds()
+            ? (await (async () => {
+                const turn = await getTwilioTurnCreds();
+                return turn && turn.length > 0
+                  ? {
+                      iceServers: [
+                        { urls: "stun:stun.l.google.com:19302" },
+                        ...turn,
+                      ],
+                      iceCandidatePoolSize: 2,
+                    }
+                  : STUN_ONLY_CONFIG;
+              })())
+            : STUN_ONLY_CONFIG;
+
+          const pc = new RTCPeerConnection(initialConfig);
           peerConnectionRef.current = pc;
+          if (initialConfig !== STUN_ONLY_CONFIG) {
+            turnInjectedRef.current = true;
+            setIsUsingTurn(true);
+          }
           
           pc.ontrack = (event) => {
             console.log("[simple] Received track:", {
@@ -218,13 +301,40 @@ export function useSimpleStream({
             }
           };
 
-          // ICE failure — immediately trigger a fresh viewer-join so the host
-          // creates a new peer connection without waiting for the 4s retry loop.
+          // ICE recovery strategy:
+          //   - 'checking' for > 8s with no 'connected' → inject TURN + restartIce()
+          //   - 'failed' or 'disconnected' → inject TURN + restartIce() (no PC teardown)
+          //   - If TURN is already injected and we still fail → fall back to full rejoin
+          // restartIce() keeps the existing PC alive so viewers don't lose the stream.
           pc.oniceconnectionstatechange = () => {
-            console.log("[simple] ICE connection state:", pc.iceConnectionState);
-            if (pc.iceConnectionState === "failed") {
-              console.log("[simple] ICE failed — triggering immediate rejoin");
-              joinStreamRef.current();
+            const s = pc.iceConnectionState;
+            console.log("[simple] ICE connection state:", s);
+
+            // Clear any pending 'checking' watchdog on state change.
+            if (iceCheckingTimerRef.current) {
+              clearTimeout(iceCheckingTimerRef.current);
+              iceCheckingTimerRef.current = null;
+            }
+
+            if (s === "checking") {
+              iceCheckingTimerRef.current = setTimeout(() => {
+                if (
+                  peerConnectionRef.current === pc &&
+                  pc.iceConnectionState === "checking"
+                ) {
+                  injectTurnAndRestart("stuck in checking > 8s");
+                }
+              }, ICE_CHECKING_TIMEOUT_MS);
+            } else if (s === "failed" || s === "disconnected") {
+              if (!turnInjectedRef.current) {
+                injectTurnAndRestart(s);
+              } else if (s === "failed") {
+                // Already on TURN and still failed — last resort: full rejoin.
+                console.log("[simple] ICE failed even with TURN — triggering rejoin");
+                joinStreamRef.current();
+              }
+            } else if (s === "connected" || s === "completed") {
+              // Successful — nothing to do.
             }
           };
           
@@ -387,6 +497,12 @@ export function useSimpleStream({
         peerConnectionRef.current.close();
         peerConnectionRef.current = null;
       }
+      if (iceCheckingTimerRef.current) {
+        clearTimeout(iceCheckingTimerRef.current);
+        iceCheckingTimerRef.current = null;
+      }
+      turnInjectedRef.current = false;
+      setIsUsingTurn(false);
       setIsConnected(false);
       setRemoteStream(null);
       leaveStream();
@@ -405,6 +521,7 @@ export function useSimpleStream({
     hostAudioEnabled,
     connectionState,
     isStreamPaused,
+    isUsingTurn,
     joinStream,
     leaveStream,
     attemptAlternativeConnection,

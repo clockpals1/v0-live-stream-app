@@ -135,6 +135,7 @@ export function ViewerStreamInterface({
     hostVideoEnabled,
     connectionState,
     isStreamPaused,
+    isUsingTurn,
   } = streamHook;
 
   // ─── Core play helper ────────────────────────────────────────────────────────
@@ -1109,7 +1110,18 @@ export function ViewerStreamInterface({
                     message={overlay.message}
                     background={overlay.background}
                   />
-                  <div className="absolute top-2 sm:top-3 right-2 sm:right-3 z-30">{getConnectionStatusBadge()}</div>
+                  <div className="absolute top-2 sm:top-3 right-2 sm:right-3 z-30 flex items-center gap-1.5">
+                    {isUsingTurn && (
+                      <Badge
+                        variant="outline"
+                        className="gap-1 bg-black/50 text-white border-white/20 text-[10px] h-5 px-1.5"
+                        title="Connected through a TURN relay (slower networks)"
+                      >
+                        Relay
+                      </Badge>
+                    )}
+                    {getConnectionStatusBadge()}
+                  </div>
                 </div>
               </div>
 
