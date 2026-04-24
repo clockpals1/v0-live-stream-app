@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isRole, type Role } from "@/lib/rbac";
 
 async function getAdminUser() {
   const supabase = await createServerClient();
@@ -8,11 +9,13 @@ async function getAdminUser() {
   if (!user) return null;
   const { data: host } = await supabase
     .from("hosts")
-    .select("id, is_admin")
+    .select("id, role, is_admin")
     .eq("user_id", user.id)
-    .eq("is_admin", true)
     .single();
-  return host ? user : null;
+  if (!host) return null;
+  const isAdmin = (host as { role?: string; is_admin?: boolean }).role === "admin"
+    || (host as { is_admin?: boolean }).is_admin === true;
+  return isAdmin ? user : null;
 }
 
 export async function GET() {
@@ -33,13 +36,28 @@ export async function POST(req: NextRequest) {
   const admin = await getAdminUser();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
-  const { email, displayName, password } = await req.json();
+  const { email, displayName, password, role } = await req.json();
 
   if (!email || !displayName || !password) {
     return NextResponse.json(
       { error: "email, displayName, and password are required" },
       { status: 400 }
     );
+  }
+
+  // Default to 'host' when the caller does not specify a role.
+  // Only 'host' and 'cohost' can be created through this endpoint — to make
+  // someone an admin, use the PATCH endpoint after creation so the
+  // self-demote / last-admin guards run consistently.
+  let newRole: Role = "host";
+  if (typeof role !== "undefined") {
+    if (!isRole(role) || role === "admin") {
+      return NextResponse.json(
+        { error: "role must be 'host' or 'cohost' when creating a user." },
+        { status: 400 }
+      );
+    }
+    newRole = role;
   }
 
   const adminClient = createAdminClient();
@@ -77,6 +95,7 @@ export async function POST(req: NextRequest) {
       user_id: authData.user.id,
       email: email.toLowerCase().trim(),
       display_name: displayName,
+      role: newRole,
     })
     .select()
     .single();

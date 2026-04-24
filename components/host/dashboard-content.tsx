@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
+import { CAPS, resolveRole, ROLE_LABELS, type Role } from "@/lib/rbac";
 
 interface Stream {
   id: string;
@@ -83,6 +84,7 @@ interface Host {
   user_id: string;
   email: string;
   display_name: string | null;
+  role?: Role | null;
   is_admin?: boolean;
 }
 
@@ -296,7 +298,13 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
   const handleCreateStream = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!host) return;
-    
+
+    // Role guard — mirrors RLS. Cohost-only users cannot create their own streams.
+    if (!CAPS.createOwnStreams(resolveRole(host))) {
+      toast.error("Your role doesn't allow creating streams. Ask an admin.");
+      return;
+    }
+
     setLoading(true);
     const roomCode = nanoid(8);
 
@@ -453,6 +461,11 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
     );
   }
 
+  const role = resolveRole(host);
+  const canCreateStreams = CAPS.createOwnStreams(role);
+  const canAccessAdmin = CAPS.accessAdminPanel(role)
+    || user.email?.toLowerCase() === 'sunday@isunday.me';
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border">
@@ -464,12 +477,28 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             <span className="font-bold text-foreground">Isunday Stream Live</span>
           </Link>
           <div className="flex items-center gap-4">
+            {/* Role badge — always visible so users know their permissions */}
+            <Badge
+              variant="secondary"
+              className={`text-xs gap-1 ${
+                role === "admin"
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : role === "cohost"
+                  ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                  : ""
+              }`}
+            >
+              {role === "admin" && <ShieldCheck className="w-3 h-3" />}
+              {role === "cohost" && <Users className="w-3 h-3" />}
+              {ROLE_LABELS[role]}
+            </Badge>
+
             {/* Admin Panel Link — only for admins */}
-            {(host.is_admin || user.email?.toLowerCase() === 'sunday@isunday.me') && (
+            {canAccessAdmin && (
               <Button variant="ghost" size="sm" asChild>
                 <Link href="/admin">
                   <ShieldCheck className="w-4 h-4 mr-2 text-primary" />
-                  <span className="hidden sm:inline">Host Management</span>
+                  <span className="hidden sm:inline">User Management</span>
                   <span className="sm:hidden">Admin</span>
                 </Link>
               </Button>
@@ -532,7 +561,8 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
         )}
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Create / Schedule Stream Card */}
+          {/* Create / Schedule Stream Card — hidden for cohost-only role */}
+          {canCreateStreams ? (
           <Card className="lg:col-span-1">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2">
@@ -603,6 +633,21 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
               </Tabs>
             </CardContent>
           </Card>
+          ) : (
+            <Card className="lg:col-span-1 border-purple-200 bg-purple-50/40 dark:bg-purple-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-purple-500" />
+                  Co-host Access
+                </CardTitle>
+                <CardDescription>
+                  You have the <strong>{ROLE_LABELS.cohost}</strong> role. You can only
+                  join streams you&apos;ve been invited to as a co-host — you can&apos;t
+                  create your own. Ask an admin if you need stream-creation access.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
 
           {/* Streams List */}
           <div className="lg:col-span-2 flex flex-col gap-6">
