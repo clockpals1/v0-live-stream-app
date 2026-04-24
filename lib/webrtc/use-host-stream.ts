@@ -97,6 +97,26 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         videoTracks: sourceStream?.getVideoTracks().length ?? 0,
         audioTracks: sourceStream?.getAudioTracks().length ?? 0,
       });
+      
+      // DIAGNOSTIC: Log detailed media state
+      console.log('[DIAGNOSTIC] Peer creation media state:', {
+        viewerId,
+        hasMediaStream: !!mediaStreamRef.current,
+        hasRelayStream: !!activeRelayStreamRef.current,
+        hasSourceStream: !!sourceStream,
+        mediaStreamTracks: mediaStreamRef.current?.getTracks().map(t => ({
+          kind: t.kind,
+          id: t.id,
+          enabled: t.enabled,
+          readyState: t.readyState,
+        })) ?? [],
+        sourceStreamTracks: sourceStream?.getTracks().map(t => ({
+          kind: t.kind,
+          id: t.id,
+          enabled: t.enabled,
+          readyState: t.readyState,
+        })) ?? [],
+      });
       let audioSenderRef: RTCRtpSender | undefined;
       if (sourceStream) {
         sourceStream.getTracks().forEach((track) => {

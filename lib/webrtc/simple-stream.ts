@@ -101,6 +101,24 @@ export function useSimpleStream({
               streamsCount: event.streams.length,
               streamId: event.streams[0]?.id,
             });
+            
+            // DIAGNOSTIC: Detailed track info
+            console.log('[DIAGNOSTIC] ontrack detailed:', {
+              trackKind: event.track.kind,
+              trackId: event.track.id,
+              trackEnabled: event.track.enabled,
+              trackReadyState: event.track.readyState,
+              trackMuted: event.track.muted,
+              hasStreams: event.streams.length > 0,
+              streamCount: event.streams.length,
+              firstStreamId: event.streams[0]?.id,
+              firstStreamTracks: event.streams[0]?.getTracks().map(t => ({
+                kind: t.kind,
+                id: t.id,
+                enabled: t.enabled,
+                readyState: t.readyState,
+              })) ?? [],
+            });
 
             if (event.streams.length > 0) {
               const stream = event.streams[0];

@@ -185,8 +185,34 @@ export function ViewerStreamInterface({
     if (remoteStream) {
       console.log('[Viewer] Setting video stream:', remoteStream.id, remoteStream.getVideoTracks().length, remoteStream.getAudioTracks().length);
       
+      // DIAGNOSTIC: Detailed stream info before attachment
+      console.log('[DIAGNOSTIC] Attaching stream to video element:', {
+        streamId: remoteStream.id,
+        videoTracks: remoteStream.getVideoTracks().map(t => ({
+          id: t.id,
+          enabled: t.enabled,
+          readyState: t.readyState,
+          muted: t.muted,
+        })),
+        audioTracks: remoteStream.getAudioTracks().map(t => ({
+          id: t.id,
+          enabled: t.enabled,
+          readyState: t.readyState,
+          muted: t.muted,
+        })),
+        videoElementReady: !!videoElement,
+        videoElementSrcObject: videoElement.srcObject,
+      });
+      
       // Set the stream
       videoElement.srcObject = remoteStream;
+      
+      // DIAGNOSTIC: Verify attachment
+      console.log('[DIAGNOSTIC] After srcObject set:', {
+        srcObjectSet: !!videoElement.srcObject,
+        srcObjectId: (videoElement.srcObject as MediaStream)?.id,
+        videoElementReadyState: videoElement.readyState,
+      });
       
       // Check if video is actually playing and update hostVideoEnabled state
       const checkVideoPlaying = () => {
