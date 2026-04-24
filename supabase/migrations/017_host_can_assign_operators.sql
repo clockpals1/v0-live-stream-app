@@ -16,14 +16,15 @@
 
 BEGIN;
 
--- ─── New helper: is the authenticated user the owner of the given stream? ──
--- Drop any pre-existing version first. An older build of this helper may
--- already exist on the database with a different input parameter name
--- (e.g. target_stream instead of p_stream_id). Postgres 42P13 forbids
--- renaming parameters via CREATE OR REPLACE, so we drop then create.
-DROP FUNCTION IF EXISTS public.is_stream_owner(UUID);
-
-CREATE OR REPLACE FUNCTION public.is_stream_owner(p_stream_id UUID)
+-- ─── Helper: is the authenticated user the owner of the given stream? ──────
+-- NOTE on parameter name: an earlier migration already created
+-- public.is_stream_owner(target_stream uuid) and stream_slides policies
+-- depend on it. Postgres refuses to RENAME an input parameter via
+-- CREATE OR REPLACE (error 42P13), and dropping the function would
+-- CASCADE-delete the dependent policies. We therefore intentionally keep
+-- the existing parameter name `target_stream` so this statement is a true
+-- idempotent replace and leaves all downstream policies untouched.
+CREATE OR REPLACE FUNCTION public.is_stream_owner(target_stream UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
@@ -33,7 +34,7 @@ AS $$
     SELECT 1
       FROM public.streams   s
       JOIN public.hosts     h ON h.id = s.host_id
-     WHERE s.id = p_stream_id
+     WHERE s.id = target_stream
        AND h.user_id = auth.uid()
   );
 $$;
