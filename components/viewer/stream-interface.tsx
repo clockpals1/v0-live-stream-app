@@ -186,13 +186,28 @@ export function ViewerStreamInterface({
       console.log("[Viewer] Attaching remote stream:", remoteStream.id);
       video.srcObject = remoteStream;
 
-      // If the user already gestured (dialog was dismissed before stream arrived),
-      // we can safely call play() now.
+      // Muted-autoplay → unmute-after-resolve pattern:
+      // Browsers universally allow play() on a muted <video> without a gesture.
+      // Once play() resolves we are safe to unmute (still within the microtask chain).
+      // We gate on hasUserGestureRef so the localStorage-restored session path
+      // (where no real gesture happened) falls back to the "Tap to unmute" overlay.
       if (hasUserGestureRef.current) {
-        const targetMuted = hasManuallyMutedRef.current ? true : false;
-        attemptPlay(targetMuted);
+        video.muted = true;
+        video
+          .play()
+          .then(() => {
+            if (!hasManuallyMutedRef.current) {
+              video.muted = false;
+              setIsMuted(false);
+            }
+          })
+          .catch((err) => {
+            console.log("[Viewer] play() blocked after srcObject set:", err);
+            // Fallback: keep muted and surface the "Tap to unmute" overlay.
+            setIsMuted(true);
+          });
       }
-      // Otherwise play() will be called inside the dialog submit handler (gesture).
+      // If no gesture yet, the unmute overlay handles play() on tap.
     } else {
       console.log("[Viewer] Clearing video stream");
       video.srcObject = null;
@@ -516,16 +531,33 @@ export function ViewerStreamInterface({
   const joinStream = async (name: string) => {
     if (!name.trim()) return;
 
-    // Mark gesture received — future remoteStream arrivals can also call play().
+    // ALWAYS mark gesture received — even if srcObject isn't set yet.
+    // The remoteStream effect will read this flag and start playback when the
+    // stream actually arrives (common case on slow connections).
     hasUserGestureRef.current = true;
 
-    // Unmute & play synchronously inside the gesture (critical for iOS).
     const video = videoRef.current;
-    if (video && video.srcObject) {
-      video.muted = false;
-      video.play().catch((err) => console.log("[Viewer] play() in join:", err));
+    if (video) {
+      // Keep muted until playback starts — muted autoplay is always allowed.
+      // We'll unmute automatically in the remoteStream effect after play() resolves.
+      video.muted = true;
+      if (video.srcObject) {
+        // Stream already present — play muted now, unmute on resolve.
+        video
+          .play()
+          .then(() => {
+            if (!hasManuallyMutedRef.current && videoRef.current) {
+              videoRef.current.muted = false;
+              setIsMuted(false);
+            }
+          })
+          .catch((err) => console.log("[Viewer] play() in join:", err));
+      }
+      // If srcObject is null, do NOT call play() here — it would throw.
+      // The remoteStream effect will handle play() as soon as the stream arrives.
     }
-    setIsMuted(false);
+    // Stay muted until playback actually starts; remoteStream effect will flip this.
+    setIsMuted(true);
 
     if (typeof window !== "undefined") localStorage.setItem("viewerName", name.trim());
 
