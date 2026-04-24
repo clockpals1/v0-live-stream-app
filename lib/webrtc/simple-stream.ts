@@ -462,17 +462,49 @@ export function useSimpleStream({
             setError(null);
             // Initial join after 1s
             setTimeout(joinStream, 1000);
-            // Retry every 4s until we have a fully CONNECTED peer connection.
-            // Using connectionState check so a closed/stale old PC doesn't stop retries.
+            // Retry viewer-join ONLY when we're clearly not in a live handshake.
+            //
+            // Root-cause guard for the "Called in wrong state: stable" error
+            // seen on the host:
+            //   - A healthy WebRTC handshake spends 2-10s in iceConnectionState
+            //     "checking" before reaching "connected".
+            //   - The OLD retry condition `pc.connectionState !== "connected"`
+            //     fired every 4s during this normal window, so the viewer sent
+            //     multiple "viewer-join" messages per join. The host then
+            //     created multiple PCs for the same viewerId, answers arrived
+            //     for superseded PCs, and setRemoteDescription threw.
+            //
+            // Retry here is only meant for the catastrophic case where the
+            // first join broadcast was dropped entirely and NO PC was ever
+            // created (or the one we had is dead). Anything else — including
+            // mid-handshake states — we let run to completion.
             const retryInterval = setInterval(() => {
               const pc = peerConnectionRef.current;
-              const fullyConnected = pc && pc.connectionState === "connected";
-              if (!fullyConnected) {
-                console.log("[simple] No connected peer yet, retrying viewer-join");
+              // No PC at all → first join likely never reached the host, retry.
+              if (!pc) {
+                console.log("[simple] No peer yet — retrying viewer-join");
                 joinStream();
-              } else {
-                clearInterval(retryInterval);
+                return;
               }
+              // Fully connected — we're done, stop the retry loop.
+              if (pc.connectionState === "connected") {
+                clearInterval(retryInterval);
+                return;
+              }
+              // PC is dead → rebuild.
+              if (
+                pc.connectionState === "closed" ||
+                pc.connectionState === "failed" ||
+                pc.signalingState === "closed"
+              ) {
+                console.log("[simple] Peer is dead — retrying viewer-join");
+                joinStream();
+                return;
+              }
+              // Everything else (new / connecting / disconnected transient,
+              // have-local-offer / have-remote-offer / stable) means a
+              // handshake is in flight or the PC has recovered — do NOT
+              // emit another join. Let the existing negotiation finish.
             }, 4000);
             reconnectTimeoutRef.current = retryInterval as any;
           } else if (stream?.status === "ended") {

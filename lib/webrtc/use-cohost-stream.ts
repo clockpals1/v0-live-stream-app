@@ -40,6 +40,9 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
   const supabase = supabaseRef.current;
   // Viewer-join requests that arrived before camera was ready — processed after init
   const pendingJoinsRef = useRef<{ from: string; viewerName: string }[]>([]);
+  // Serialize concurrent viewer-join handling per viewerId — see use-host-stream.ts
+  // for the full root-cause explanation.
+  const inFlightJoinsRef = useRef<Set<string>>(new Set());
   // Prevents accepting new viewer connections while co-host is stopped
   const acceptingRef = useRef(false);
   // Shared broadcast channel so director panel updates without postgres_changes publication
@@ -214,48 +217,72 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
 
     switch (message.type) {
       case "viewer-join": {
+        const viewerId = message.from;
         // If camera isn't ready yet, queue the join — initializeMedia will process it
         if (!mediaStreamRef.current) {
-          pendingJoinsRef.current.push({ from: message.from, viewerName: message.viewerName || "Viewer" });
+          pendingJoinsRef.current.push({ from: viewerId, viewerName: message.viewerName || "Viewer" });
           return;
         }
         // Not accepting connections while stopped (prevents zombie PCs after stopStream)
         if (!acceptingRef.current) return;
-        // Close any existing (stale/zombie) PC for this viewer before creating a new one
-        const existing = viewersRef.current.get(message.from);
+
+        // Same signaling-state guard as the host hook — see comments in
+        // use-host-stream.ts. Prevents the "Called in wrong state: stable"
+        // error when a viewer retries during an in-flight handshake.
+        if (inFlightJoinsRef.current.has(viewerId)) return;
+
+        const existing = viewersRef.current.get(viewerId);
         if (existing) {
-          existing.peerConnection.close();
-          viewersRef.current.delete(message.from);
+          const pc = existing.peerConnection;
+          const negotiating = pc.signalingState === "have-local-offer";
+          const healthy =
+            pc.connectionState === "connected" ||
+            pc.connectionState === "connecting";
+          if (negotiating || healthy) return;
+          pc.close();
+          viewersRef.current.delete(viewerId);
           setViewerCount(viewersRef.current.size);
         }
-        const pc = await createPeerConnection(message.from, message.viewerName || "Viewer");
-        if (!pc) return;
+
+        inFlightJoinsRef.current.add(viewerId);
         try {
+          const pc = await createPeerConnection(viewerId, message.viewerName || "Viewer");
+          if (!pc) return;
           const offer = await pc.createOffer();
+          const entryAfterCreate = viewersRef.current.get(viewerId);
+          if (!entryAfterCreate || entryAfterCreate.peerConnection !== pc) {
+            try { pc.close(); } catch { /* ignore */ }
+            return;
+          }
           await pc.setLocalDescription(offer);
           channelRef.current?.send({
             type: "broadcast", event: "signal",
-            payload: { type: "offer", from: "host", to: message.from, payload: pc.localDescription?.toJSON() } as SignalMessage,
+            payload: { type: "offer", from: "host", to: viewerId, payload: pc.localDescription?.toJSON() } as SignalMessage,
           });
         } catch (err) { console.error("[cohost] Error creating offer:", err); }
+        finally { inFlightJoinsRef.current.delete(viewerId); }
         break;
       }
       case "answer": {
         const viewer = viewersRef.current.get(message.from);
-        if (viewer && message.payload) {
-          await viewer.peerConnection.setRemoteDescription(
-            new RTCSessionDescription(message.payload as RTCSessionDescriptionInit)
-          ).catch(console.error);
-        }
+        if (!viewer || !message.payload) break;
+        const pc = viewer.peerConnection;
+        // Drop stale answers for superseded PCs — root-cause guard for
+        // "InvalidStateError: Called in wrong state: stable".
+        if (pc.signalingState !== "have-local-offer") break;
+        await pc.setRemoteDescription(
+          new RTCSessionDescription(message.payload as RTCSessionDescriptionInit)
+        ).catch(console.error);
         break;
       }
       case "ice-candidate": {
         const viewer = viewersRef.current.get(message.from);
-        if (viewer && message.payload) {
-          await viewer.peerConnection.addIceCandidate(
-            new RTCIceCandidate(message.payload as RTCIceCandidateInit)
-          ).catch(console.error);
-        }
+        if (!viewer || !message.payload) break;
+        const pc = viewer.peerConnection;
+        if (!pc.remoteDescription || pc.signalingState === "closed") break;
+        await pc.addIceCandidate(
+          new RTCIceCandidate(message.payload as RTCIceCandidateInit)
+        ).catch(console.error);
         break;
       }
       case "viewer-leave":

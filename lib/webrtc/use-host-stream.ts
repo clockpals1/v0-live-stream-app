@@ -12,6 +12,15 @@ interface ViewerConnection {
   peerConnection: RTCPeerConnection;
   connected: boolean;
   audioSender?: RTCRtpSender;
+  /**
+   * Monotonic generation counter — bumped every time we create a fresh PC
+   * for this viewerId. Used to discard stale answers/ICE that were emitted
+   * by the viewer for a previous PC generation (race when a viewer retries
+   * joining while an earlier handshake is still in flight).
+   */
+  generation: number;
+  /** Wall-clock timestamp the current PC was created — used to age-out stale offers. */
+  createdAt: number;
 }
 
 interface UseHostStreamProps {
@@ -34,6 +43,19 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
   const activeRelayStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
+  // Serialize viewer-join handling per viewerId. Supabase Realtime can deliver
+  // duplicate `viewer-join` events (viewer's own 4-second retry loop fires
+  // during the initial ICE `checking` phase). Without this guard, two concurrent
+  // async handlers both call createPeerConnection() and then
+  // setLocalDescription() on PCs that get overwritten in the map mid-flight,
+  // which causes answers to arrive for already-closed PCs OR on PCs that are
+  // already in `stable` — the source of the "Called in wrong state: stable"
+  // error reported in logs.
+  const inFlightJoinsRef = useRef<Set<string>>(new Set());
+  // Global monotonic counter used to tag each freshly created PC with a unique
+  // generation. Stored on the viewer entry so downstream answer/ICE handlers
+  // can detect stale callbacks fired for an older generation of the same viewerId.
+  const pcGenCounterRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
@@ -185,12 +207,15 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         console.log(`[v0] ICE state for ${viewerId}:`, pc.iceConnectionState);
       };
 
+      pcGenCounterRef.current += 1;
       const viewerConnection: ViewerConnection = {
         id: viewerId,
         name: viewerName,
         peerConnection: pc,
         connected: false,
         audioSender: audioSenderRef,
+        generation: pcGenCounterRef.current,
+        createdAt: Date.now(),
       };
 
       viewersRef.current.set(viewerId, viewerConnection);
@@ -219,32 +244,68 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
       switch (message.type) {
         case "viewer-join": {
-          console.log("[v0] Viewer joining:", message.from, message.viewerName);
+          const viewerId = message.from;
+          console.log("[v0] Viewer joining:", viewerId, message.viewerName);
 
-          // If this viewer already has a connection (retry/reconnect), close the
-          // stale PC first to avoid accumulating dozens of orphaned connections.
-          const stale = viewersRef.current.get(message.from);
-          if (stale) {
-            console.log("[v0] Closing stale connection for viewer:", message.from);
-            stale.peerConnection.close();
-            viewersRef.current.delete(message.from);
-          } else if (viewersRef.current.size >= MAX_VIEWERS) {
-            console.log("[v0] Max viewers reached");
-            return;
+          // Serialize: if we're mid-flight processing a join for this viewer,
+          // drop the duplicate. The viewer's retry loop will re-emit if the
+          // handshake genuinely fails, but we must not start a second
+          // createPeerConnection() before the first finishes setLocalDescription,
+          // or answers will collide on the map entry.
+          if (inFlightJoinsRef.current.has(viewerId)) {
+            console.log("[v0] Dropping duplicate viewer-join (in flight):", viewerId);
+            break;
           }
 
-          const pc = await createPeerConnection(message.from, message.viewerName || "Anonymous");
-          if (!pc) return;
+          // If an existing PC is mid-negotiation and young, the viewer will still
+          // receive the in-flight offer — no need to recreate. Only recycle
+          // when the PC is clearly stale (closed/failed) or old enough that the
+          // previous offer is presumed lost.
+          const existing = viewersRef.current.get(viewerId);
+          if (existing) {
+            const pc = existing.peerConnection;
+            const ageMs = Date.now() - existing.createdAt;
+            const negotiating =
+              pc.signalingState === "have-local-offer" && ageMs < 15000;
+            const healthy =
+              pc.connectionState === "connected" ||
+              pc.connectionState === "connecting";
+            if (negotiating || healthy) {
+              console.log(
+                `[v0] Ignoring re-join for ${viewerId}; existing PC signalingState=${pc.signalingState} connectionState=${pc.connectionState} ageMs=${ageMs}`
+              );
+              break;
+            }
+            console.log("[v0] Closing stale connection for viewer:", viewerId);
+            pc.close();
+            viewersRef.current.delete(viewerId);
+          } else if (viewersRef.current.size >= MAX_VIEWERS) {
+            console.log("[v0] Max viewers reached");
+            break;
+          }
 
-          // Create and send offer
+          inFlightJoinsRef.current.add(viewerId);
           try {
+            const pc = await createPeerConnection(
+              viewerId,
+              message.viewerName || "Anonymous"
+            );
+            if (!pc) return;
+
             const offer = await pc.createOffer();
+            // Abort if a newer generation has replaced us during the await.
+            const entryAfterCreate = viewersRef.current.get(viewerId);
+            if (!entryAfterCreate || entryAfterCreate.peerConnection !== pc) {
+              console.log("[v0] Aborting offer for superseded PC:", viewerId);
+              try { pc.close(); } catch { /* ignore */ }
+              return;
+            }
             await pc.setLocalDescription(offer);
 
             const signalMessage: SignalMessage = {
               type: "offer",
               from: "host",
-              to: message.from,
+              to: viewerId,
               payload: pc.localDescription?.toJSON(),
             };
 
@@ -255,34 +316,56 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
             });
           } catch (err) {
             console.error("[v0] Error creating offer:", err);
+          } finally {
+            inFlightJoinsRef.current.delete(viewerId);
           }
           break;
         }
 
         case "answer": {
           const viewer = viewersRef.current.get(message.from);
-          if (viewer && message.payload) {
-            try {
-              await viewer.peerConnection.setRemoteDescription(
-                new RTCSessionDescription(message.payload as RTCSessionDescriptionInit)
-              );
-            } catch (err) {
-              console.error("[v0] Error setting remote description:", err);
-            }
+          if (!viewer || !message.payload) break;
+          const pc = viewer.peerConnection;
+          // Guard against the exact bug that caused
+          // "InvalidStateError: Called in wrong state: stable":
+          // only a PC that has sent its local offer and not yet received an
+          // answer is in `have-local-offer`. Any other state means this answer
+          // is stale (already-applied duplicate, or for a superseded PC that
+          // happened to share the viewerId key), and applying it would corrupt
+          // the live connection.
+          if (pc.signalingState !== "have-local-offer") {
+            console.warn(
+              `[v0] Dropping stale answer for ${message.from}; signalingState=${pc.signalingState}`
+            );
+            break;
+          }
+          try {
+            await pc.setRemoteDescription(
+              new RTCSessionDescription(message.payload as RTCSessionDescriptionInit)
+            );
+          } catch (err) {
+            console.error("[v0] Error setting remote description:", err);
           }
           break;
         }
 
         case "ice-candidate": {
           const viewer = viewersRef.current.get(message.from);
-          if (viewer && message.payload) {
-            try {
-              await viewer.peerConnection.addIceCandidate(
-                new RTCIceCandidate(message.payload as RTCIceCandidateInit)
-              );
-            } catch (err) {
-              console.error("[v0] Error adding ICE candidate:", err);
-            }
+          if (!viewer || !message.payload) break;
+          const pc = viewer.peerConnection;
+          // addIceCandidate on a PC with no remote description yet throws.
+          // This happens when ICE arrives before the answer handshake for a
+          // superseded PC has been unwound. Silently drop — the PC currently
+          // live for this viewerId will get its own ICE batch.
+          if (!pc.remoteDescription || pc.signalingState === "closed") {
+            break;
+          }
+          try {
+            await pc.addIceCandidate(
+              new RTCIceCandidate(message.payload as RTCIceCandidateInit)
+            );
+          } catch (err) {
+            console.error("[v0] Error adding ICE candidate:", err);
           }
           break;
         }
