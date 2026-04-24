@@ -550,6 +550,38 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     }
   }, []);
 
+  // ── Overlay music: replace the audio track sent to every viewer with a
+  // mixed/music track, or restore the original mic track when null.
+  // Uses sender.replaceTrack() — no renegotiation needed, matches the
+  // same pattern as switchCamera + relayStream.
+  //
+  // The caller (overlay-music component) owns the mixed MediaStreamTrack
+  // produced by createOverlayAudioMixer() and is responsible for tearing
+  // it down when stopping. Pass null here to revert to the live mic track.
+  const liveAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const setLiveAudioTrack = useCallback((track: MediaStreamTrack | null) => {
+    liveAudioTrackRef.current = track;
+    const ownStream = mediaStreamRef.current;
+    const relayStream = activeRelayStreamRef.current;
+    // Resolution priority when track is null (restore): relay audio > mic audio.
+    const restoreAudio =
+      relayStream?.getAudioTracks()[0] ??
+      ownStream?.getAudioTracks()[0] ??
+      null;
+    const next = track ?? restoreAudio;
+    viewersRef.current.forEach((viewer) => {
+      const sender =
+        viewer.audioSender ??
+        viewer.peerConnection.getSenders().find((s) => s.track?.kind === "audio");
+      if (!sender) return;
+      if (sender.track !== next) {
+        sender.replaceTrack(next).catch((err) => {
+          console.error("[v0] setLiveAudioTrack replaceTrack failed:", err);
+        });
+      }
+    });
+  }, []);
+
   // Relay a remote stream to all existing viewer connections via replaceTrack().
   // Pass null to restore the admin's own camera on all connections.
   const relayStream = useCallback((remoteStream: MediaStream | null) => {
@@ -650,6 +682,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     toggleAudio,
     switchCamera,
     relayStream,
+    setLiveAudioTrack,
     downloadRecording,
   };
 }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { vibrateDevice } from "@/lib/utils/notification";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream";
+import { useViewportHeight } from "@/lib/hooks/use-viewport-height";
 import { StreamOverlay, type OverlayBackground } from "@/components/stream/stream-overlay";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { StreamSlideshow } from "@/components/stream/stream-slideshow";
@@ -136,6 +137,11 @@ export function ViewerStreamInterface({
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasManuallyMutedRef = useRef(false);
+
+  // Keep --app-vh CSS var in sync with the real visible viewport so our
+  // fullscreen container renders correctly during URL-bar collapse, keyboard
+  // open/close, and orientation change on mobile.
+  useViewportHeight("--app-vh");
 
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
@@ -386,7 +392,10 @@ export function ViewerStreamInterface({
 
   // ─── Auto-scroll chat ─────────────────────────────────────────────────────
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // block:"nearest" scopes the scroll to the chat's own ScrollArea viewport.
+    // Without it, scrollIntoView walks up to the document and drags the whole
+    // page to the bottom on mobile every time a message arrives or is sent.
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
   // ─── Restore session from localStorage ───────────────────────────────────
@@ -619,6 +628,16 @@ export function ViewerStreamInterface({
     document.addEventListener("mozfullscreenchange", onChange);
     document.addEventListener("keydown", onKey);
 
+    // Lock body scroll while in CSS-fallback fullscreen so touch gestures
+    // don't drag the page behind the video on mobile. When native Fullscreen
+    // API is used, the UA already handles this — locking again is harmless.
+    const prevOverflow = document.body.style.overflow;
+    const prevOverscroll = (document.body.style as any).overscrollBehavior as string | undefined;
+    if (isFullscreen) {
+      document.body.style.overflow = "hidden";
+      (document.body.style as any).overscrollBehavior = "contain";
+    }
+
     // iOS Safari: the <video> element fires this when the user exits the
     // native inline/fullscreen player. Keep React state in sync.
     const video = videoRef.current;
@@ -635,8 +654,13 @@ export function ViewerStreamInterface({
       document.removeEventListener("mozfullscreenchange", onChange);
       document.removeEventListener("keydown", onKey);
       video?.removeEventListener("webkitpresentationmodechanged", onPresentationChange);
+      // Restore body styles we touched when entering fullscreen.
+      if (isFullscreen) {
+        document.body.style.overflow = prevOverflow;
+        (document.body.style as any).overscrollBehavior = prevOverscroll ?? "";
+      }
     };
-  }, []);
+  }, [isFullscreen]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 
@@ -1255,11 +1279,19 @@ export function ViewerStreamInterface({
               <div className="overflow-hidden sm:rounded-xl sm:border sm:border-border sm:shadow-sm">
                 <div
                   ref={videoContainerRef}
+                  style={
+                    isFullscreen
+                      ? {
+                          // `--app-vh` is updated live from VisualViewport via
+                          // useViewportHeight(); falls back to 100dvh on browsers
+                          // where the CSS var isn't set yet (desktop / non-JS).
+                          height: "var(--app-vh, 100dvh)",
+                        }
+                      : undefined
+                  }
                   className={`relative bg-black ${
                     isFullscreen
-                      ? // 100dvh uses the dynamic viewport so mobile browsers with
-                        // a collapsing URL bar never clip the bottom of the video.
-                        "fixed inset-0 z-50 w-screen h-[100dvh]"
+                      ? "fixed inset-0 z-50 w-screen"
                       : "aspect-video w-full"
                   }`}
                 >

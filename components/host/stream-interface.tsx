@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectorPanel } from "@/components/host/director-panel";
 import { StreamOverlay } from "@/components/stream/stream-overlay";
 import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
+import { OverlayMusic } from "@/components/host/overlay-music";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import {
@@ -122,6 +123,14 @@ export function HostStreamInterface({
   const [overlayBg, setOverlayBg] = useState<"dark" | "light" | "branded">("dark");
   const [overlayImageUrl, setOverlayImageUrl] = useState("");
 
+  // ---- Overlay music state (persisted; track replacement done in-hook) ----
+  const [overlayMusicUrl, setOverlayMusicUrl] = useState("");
+  const [overlayMusicState, setOverlayMusicState] = useState<{
+    active: boolean;
+    volume: number;
+    mixWithMic: boolean;
+  }>({ active: false, volume: 0.8, mixWithMic: true });
+
   // ---- Ticker state (scrolling news-style crawl below the video) ----
   const [tickerActive, setTickerActive] = useState(false);
   const [tickerMessage, setTickerMessage] = useState("");
@@ -156,6 +165,7 @@ export function HostStreamInterface({
     toggleAudio,
     switchCamera,
     relayStream,
+    setLiveAudioTrack,
     downloadRecording,
   } = useHostStream({
     streamId: stream.id,
@@ -284,7 +294,7 @@ export function HostStreamInterface({
       const { data } = await supabase
         .from("streams")
         .select(
-          "overlay_active, overlay_message, overlay_background, overlay_image_url, ticker_active, ticker_message, ticker_speed, ticker_style"
+          "overlay_active, overlay_message, overlay_background, overlay_image_url, overlay_music_url, overlay_music_volume, overlay_music_mix_mic, ticker_active, ticker_message, ticker_speed, ticker_style"
         )
         .eq("id", stream.id)
         .single();
@@ -295,6 +305,12 @@ export function HostStreamInterface({
         const bg = d.overlay_background;
         if (bg === "dark" || bg === "light" || bg === "branded") setOverlayBg(bg);
         setOverlayImageUrl(d.overlay_image_url ?? "");
+        setOverlayMusicUrl(d.overlay_music_url ?? "");
+        setOverlayMusicState({
+          active: false, // never auto-resume music — requires user gesture
+          volume: typeof d.overlay_music_volume === "number" ? d.overlay_music_volume : 0.8,
+          mixWithMic: d.overlay_music_mix_mic !== false,
+        });
 
         setTickerActive(!!d.ticker_active);
         setTickerMessage(d.ticker_message ?? "");
@@ -368,6 +384,29 @@ export function HostStreamInterface({
       background: overlayBg,
       imageUrl: overlayImageUrl,
     });
+  };
+
+  // Persist overlay-music state to DB. Music does not need to be broadcast to
+  // viewers over signaling — the audio reaches them via the WebRTC track swap
+  // done in useHostStream.setLiveAudioTrack(). This is purely so the host's
+  // own settings survive a refresh.
+  const pushOverlayMusicState = async (next: {
+    url?: string;
+    active?: boolean;
+    volume?: number;
+    mixWithMic?: boolean;
+  }) => {
+    try {
+      const update: Record<string, unknown> = {};
+      if (typeof next.url === "string") update.overlay_music_url = next.url;
+      if (typeof next.active === "boolean") update.overlay_music_active = next.active;
+      if (typeof next.volume === "number") update.overlay_music_volume = next.volume;
+      if (typeof next.mixWithMic === "boolean") update.overlay_music_mix_mic = next.mixWithMic;
+      if (Object.keys(update).length === 0) return;
+      await supabase.from("streams").update(update).eq("id", stream.id);
+    } catch (err) {
+      console.warn("[v0] pushOverlayMusicState failed:", err);
+    }
   };
 
   // Re-broadcast on background/message/image change while overlay is active so viewers see edits live
@@ -531,7 +570,7 @@ export function HostStreamInterface({
 
   // Auto-scroll chat
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
   const copyShareLink = () => {
@@ -938,6 +977,42 @@ export function HostStreamInterface({
                   onUploaded={(url) => setOverlayImageUrl(url)}
                   onCleared={() => setOverlayImageUrl("")}
                 />
+
+                {/* Overlay music — upload + play live alongside the image overlay.
+                    Audio is attached to the outgoing WebRTC stream by replacing
+                    the audio sender track in each viewer peer connection. */}
+                <div className="pt-2 border-t border-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Overlay Music
+                    </span>
+                    {overlayMusicState.active && (
+                      <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
+                        PLAYING LIVE
+                      </Badge>
+                    )}
+                  </div>
+                  <OverlayMusic
+                    streamId={stream.id}
+                    currentUrl={overlayMusicUrl}
+                    micTrack={mediaStream?.getAudioTracks()[0] ?? null}
+                    isStreaming={isStreaming}
+                    initial={overlayMusicState}
+                    onLiveAudioTrack={setLiveAudioTrack}
+                    onUploaded={(url) => {
+                      setOverlayMusicUrl(url);
+                      pushOverlayMusicState({ url });
+                    }}
+                    onCleared={() => {
+                      setOverlayMusicUrl("");
+                      pushOverlayMusicState({ url: "", active: false });
+                    }}
+                    onStateChange={(s) => {
+                      setOverlayMusicState(s);
+                      pushOverlayMusicState(s);
+                    }}
+                  />
+                </div>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-muted-foreground mr-1">Background:</span>

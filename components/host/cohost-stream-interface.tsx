@@ -159,7 +159,7 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
 
   // Auto-scroll when new messages arrive and chat is open
   useEffect(() => {
-    if (chatOpen) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatOpen) messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, chatOpen]);
 
   const sendChatMessage = async (e: React.FormEvent) => {
