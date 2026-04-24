@@ -109,7 +109,8 @@ export function ViewerStreamInterface({
     active: boolean;
     message: string;
     background: OverlayBackground;
-  }>({ active: false, message: "", background: "dark" });
+    imageUrl: string;
+  }>({ active: false, message: "", background: "dark", imageUrl: "" });
 
   // ---- Host-controlled ticker (scrolling crawl below the video) ----
   const [ticker, setTicker] = useState<{
@@ -200,8 +201,13 @@ export function ViewerStreamInterface({
   }, [connectingSeconds]);
 
   // ─── Attach remoteStream to video element ─────────────────────────────────
-  // Only sets srcObject. Play is triggered separately so we never call play()
-  // outside a user-gesture context on iOS.
+  // Assigns srcObject and always calls play(). Muted-autoplay is universally
+  // allowed by every browser, so this is safe even without a user gesture.
+  // CRITICAL: we do NOT touch `video.muted` here — mute state is owned by
+  // the `isMuted` React state + its sync effect. If the user unmuted inside
+  // their gesture (join dialog / Tap-to-unmute), that state persists and the
+  // new stream plays with audio. If they have not unmuted, it plays muted
+  // and the "Tap to unmute" overlay is shown.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -209,34 +215,17 @@ export function ViewerStreamInterface({
     if (remoteStream) {
       console.log("[Viewer] Attaching remote stream:", remoteStream.id);
       video.srcObject = remoteStream;
-
-      // Muted-autoplay → unmute-after-resolve pattern:
-      // Browsers universally allow play() on a muted <video> without a gesture.
-      // Once play() resolves we are safe to unmute (still within the microtask chain).
-      // We gate on hasUserGestureRef so the localStorage-restored session path
-      // (where no real gesture happened) falls back to the "Tap to unmute" overlay.
-      if (hasUserGestureRef.current) {
-        video.muted = true;
-        video
-          .play()
-          .then(() => {
-            if (!hasManuallyMutedRef.current) {
-              video.muted = false;
-              setIsMuted(false);
-            }
-          })
-          .catch((err) => {
-            console.log("[Viewer] play() blocked after srcObject set:", err);
-            // Fallback: keep muted and surface the "Tap to unmute" overlay.
-            setIsMuted(true);
-          });
-      }
-      // If no gesture yet, the unmute overlay handles play() on tap.
+      video.play().catch((err) => {
+        // Only way play() fails on a muted video is an edge-case browser
+        // restriction. Force muted state so the Tap-to-unmute overlay appears.
+        console.log("[Viewer] play() blocked after srcObject set:", err);
+        setIsMuted(true);
+      });
     } else {
       console.log("[Viewer] Clearing video stream");
       video.srcObject = null;
     }
-  }, [remoteStream, attemptPlay]);
+  }, [remoteStream]);
 
   // ─── Video element event handlers ────────────────────────────────────────
   useEffect(() => {
@@ -252,10 +241,9 @@ export function ViewerStreamInterface({
 
     const onLoadedMetadata = () => {
       console.log("[Viewer] loadedmetadata");
-      // Only play here if user has gestured — avoids autoplay policy violations.
-      if (hasUserGestureRef.current) {
-        attemptPlay(video.muted);
-      }
+      // Belt-and-braces play() call in case the remoteStream effect raced the
+      // element being ready. Muted-autoplay is always allowed so this is safe.
+      video.play().catch(() => {});
     };
     const onCanPlay = () => { console.log("[Viewer] canplay"); hideLoader(); };
     const onPlaying  = () => { console.log("[Viewer] playing");  hideLoader(); };
@@ -335,6 +323,7 @@ export function ViewerStreamInterface({
         active: !!payload.active,
         message: typeof payload.message === "string" ? payload.message : "",
         background: bg,
+        imageUrl: typeof payload.imageUrl === "string" ? payload.imageUrl : "",
       });
     });
 
@@ -401,7 +390,11 @@ export function ViewerStreamInterface({
   }, [messages]);
 
   // ─── Restore session from localStorage ───────────────────────────────────
+  // Only auto-restore when the stream is NOT already ended. If the host ended
+  // the stream before we mounted, we skip auto-join so the user sees the
+  // ended screen cleanly rather than flashing a joined state.
   useEffect(() => {
+    if (initialStream.status === "ended") return;
     const savedName = typeof window !== "undefined" ? localStorage.getItem("viewerName") : null;
     if (savedName && savedName !== "Guest") {
       setViewerName(savedName);
@@ -409,15 +402,15 @@ export function ViewerStreamInterface({
         .from("viewers")
         .insert({ stream_id: stream.id, name: savedName, joined_at: new Date().toISOString() })
         .then(() => {
-          // Mark gesture as done — user already interacted in a previous session.
-          // Note: we still can't call play() here because this runs in useEffect,
-          // not a gesture. The unmute-overlay tap will trigger play() for them.
-          hasUserGestureRef.current = true;
+          // NOTE: do NOT set hasUserGestureRef=true here. This code path runs
+          // in a useEffect, not a real user gesture. Setting it to true would
+          // cause the auto-unmute logic to fire outside a gesture context —
+          // which iOS Safari silently blocks. The "Tap to unmute" overlay
+          // is the correct UX for restored sessions.
           setHasJoined(true);
           setShowNameDialog(false);
         })
         .catch(() => {
-          hasUserGestureRef.current = true;
           setHasJoined(true);
           setShowNameDialog(false);
         });
@@ -425,13 +418,49 @@ export function ViewerStreamInterface({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ─── Session cleanup on stream end ───────────────────────────────────────
+  // When the stream transitions to "ended", clear the viewer's local identity
+  // and chat state so the NEXT visit / next stream starts clean. We use a
+  // ref to track the previous status and only run cleanup on the actual
+  // live|waiting → ended transition (not on re-mount into an already-ended
+  // stream — there's nothing to clear in that case).
+  const prevStreamStatusRef = useRef(stream.status);
+  useEffect(() => {
+    const prev = prevStreamStatusRef.current;
+    const curr = stream.status;
+    prevStreamStatusRef.current = curr;
+
+    if (curr === "ended" && prev !== "ended") {
+      console.log("[Viewer] Stream ended — clearing local session data");
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("viewerName");
+        }
+      } catch {
+        /* ignore quota / private-mode errors */
+      }
+      // Wipe in-memory chat + identity so nothing leaks to the next visit.
+      setMessages([]);
+      setNewMessage("");
+      setViewerName("");
+      setHasJoined(false);
+      setShowNameDialog(false); // ended screen replaces the dialog
+      setEmergencyMessage("");
+      setEmergencySent(false);
+      // Reset audio-gesture flags so a brand-new session (new stream on this
+      // same tab) has a clean mute state.
+      hasUserGestureRef.current = false;
+      hasManuallyMutedRef.current = false;
+    }
+  }, [stream.status]);
+
   // ─── Load current overlay + ticker state on mount (for mid-stream joiners) ──
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from("streams")
         .select(
-          "overlay_active, overlay_message, overlay_background, ticker_active, ticker_message, ticker_speed, ticker_style, slideshow_active, slideshow_current_url, slideshow_current_caption"
+          "overlay_active, overlay_message, overlay_background, overlay_image_url, ticker_active, ticker_message, ticker_speed, ticker_style, slideshow_active, slideshow_current_url, slideshow_current_caption"
         )
         .eq("id", stream.id)
         .single();
@@ -442,6 +471,7 @@ export function ViewerStreamInterface({
           active: !!d.overlay_active,
           message: d.overlay_message ?? "",
           background: bg === "light" || bg === "branded" ? bg : "dark",
+          imageUrl: d.overlay_image_url ?? "",
         });
         const sp = d.ticker_speed;
         const st = d.ticker_style;
@@ -619,36 +649,32 @@ export function ViewerStreamInterface({
   const joinStream = async (name: string) => {
     if (!name.trim()) return;
 
-    // ALWAYS mark gesture received — even if srcObject isn't set yet.
-    // The remoteStream effect will read this flag and start playback when the
-    // stream actually arrives (common case on slow connections).
+    // CRITICAL: this function is invoked from onClick / onSubmit, so we are
+    // synchronously inside a user-gesture call stack. We MUST unmute here
+    // (and only here) — iOS Safari disallows unmute outside a gesture.
     hasUserGestureRef.current = true;
 
     const video = videoRef.current;
-    if (video) {
-      // Keep muted until playback starts — muted autoplay is always allowed.
-      // We'll unmute automatically in the remoteStream effect after play() resolves.
-      video.muted = true;
+    if (video && !hasManuallyMutedRef.current) {
+      // Unmute + play synchronously inside the gesture. Both the DOM write
+      // and the play() call happen before any await, so iOS considers this
+      // a valid gesture-initiated unmute.
+      video.muted = false;
+      setIsMuted(false);
       if (video.srcObject) {
-        // Stream already present — play muted now, unmute on resolve.
-        video
-          .play()
-          .then(() => {
-            if (!hasManuallyMutedRef.current && videoRef.current) {
-              videoRef.current.muted = false;
-              setIsMuted(false);
-            }
-          })
-          .catch((err) => console.log("[Viewer] play() in join:", err));
+        video.play().catch((err) => {
+          // Rare: play() with audio rejected. Fall back to muted playback;
+          // the Tap-to-unmute overlay will let the user try again.
+          console.log("[Viewer] play() during join rejected:", err);
+          if (videoRef.current) videoRef.current.muted = true;
+          setIsMuted(true);
+        });
       }
-      // If srcObject is null, do NOT call play() here — it would throw.
-      // The remoteStream effect will handle play() as soon as the stream arrives.
+      // If srcObject isn't set yet, the remoteStream effect will call play()
+      // when it arrives. By then `video.muted === false` (from above) so the
+      // stream plays with audio — within the recent-gesture window that
+      // every browser honors for several seconds.
     }
-    // IMPORTANT: Do NOT call setIsMuted(true) here. The DOM sync effect
-    // (`video.muted = isMuted`) would then race the remoteStream effect's
-    // play().then() unmute and the video could get re-muted mid-transition.
-    // We rely on the DOM-level video.muted=true we set above; React state
-    // (isMuted) is flipped to false inside play().then() when playback starts.
 
     if (typeof window !== "undefined") localStorage.setItem("viewerName", name.trim());
 
@@ -1275,6 +1301,7 @@ export function ViewerStreamInterface({
                     active={overlay.active}
                     message={overlay.message}
                     background={overlay.background}
+                    imageUrl={overlay.imageUrl}
                   />
                   <div className="absolute top-2 sm:top-3 right-2 sm:right-3 z-30 flex items-center gap-1.5">
                     {isUsingTurn && (

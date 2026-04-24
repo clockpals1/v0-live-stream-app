@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectorPanel } from "@/components/host/director-panel";
 import { StreamOverlay } from "@/components/stream/stream-overlay";
+import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import {
@@ -119,6 +120,7 @@ export function HostStreamInterface({
   const [overlayActive, setOverlayActive] = useState(false);
   const [overlayMessage, setOverlayMessage] = useState("");
   const [overlayBg, setOverlayBg] = useState<"dark" | "light" | "branded">("dark");
+  const [overlayImageUrl, setOverlayImageUrl] = useState("");
 
   // ---- Ticker state (scrolling news-style crawl below the video) ----
   const [tickerActive, setTickerActive] = useState(false);
@@ -282,7 +284,7 @@ export function HostStreamInterface({
       const { data } = await supabase
         .from("streams")
         .select(
-          "overlay_active, overlay_message, overlay_background, ticker_active, ticker_message, ticker_speed, ticker_style"
+          "overlay_active, overlay_message, overlay_background, overlay_image_url, ticker_active, ticker_message, ticker_speed, ticker_style"
         )
         .eq("id", stream.id)
         .single();
@@ -292,6 +294,7 @@ export function HostStreamInterface({
         setOverlayMessage(d.overlay_message ?? "");
         const bg = d.overlay_background;
         if (bg === "dark" || bg === "light" || bg === "branded") setOverlayBg(bg);
+        setOverlayImageUrl(d.overlay_image_url ?? "");
 
         setTickerActive(!!d.ticker_active);
         setTickerMessage(d.ticker_message ?? "");
@@ -309,11 +312,13 @@ export function HostStreamInterface({
     active: boolean;
     message: string;
     background: "dark" | "light" | "branded";
+    imageUrl: string;
   }) => {
     const payload = {
       active: next.active,
       message: next.message.slice(0, 120),
       background: next.background,
+      imageUrl: next.imageUrl,
     };
     try {
       chatChannelRef.current?.send({
@@ -331,6 +336,7 @@ export function HostStreamInterface({
           overlay_active: payload.active,
           overlay_message: payload.message,
           overlay_background: payload.background,
+          overlay_image_url: payload.imageUrl,
         })
         .eq("id", stream.id);
     } catch (err) {
@@ -340,28 +346,44 @@ export function HostStreamInterface({
 
   const showOverlay = () => {
     const msg = overlayMessage.trim();
-    if (!msg) {
-      toast.error("Enter an overlay message first");
+    // Overlay may now be image-only, text-only, or both. Require at least one.
+    if (!msg && !overlayImageUrl) {
+      toast.error("Enter a message or upload an image first");
       return;
     }
     setOverlayActive(true);
-    pushOverlayState({ active: true, message: msg, background: overlayBg });
+    pushOverlayState({
+      active: true,
+      message: msg,
+      background: overlayBg,
+      imageUrl: overlayImageUrl,
+    });
   };
 
   const hideOverlay = () => {
     setOverlayActive(false);
-    pushOverlayState({ active: false, message: overlayMessage, background: overlayBg });
+    pushOverlayState({
+      active: false,
+      message: overlayMessage,
+      background: overlayBg,
+      imageUrl: overlayImageUrl,
+    });
   };
 
-  // Re-broadcast on background/message change while overlay is active so viewers see edits live
+  // Re-broadcast on background/message/image change while overlay is active so viewers see edits live
   useEffect(() => {
     if (!overlayActive) return;
     const t = setTimeout(() => {
-      pushOverlayState({ active: true, message: overlayMessage, background: overlayBg });
+      pushOverlayState({
+        active: true,
+        message: overlayMessage,
+        background: overlayBg,
+        imageUrl: overlayImageUrl,
+      });
     }, 250);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayMessage, overlayBg]);
+  }, [overlayMessage, overlayBg, overlayImageUrl]);
 
   // ---- Ticker broadcast + persist (mirrors overlay pattern) ----
   const pushTickerState = async (next: {
@@ -696,6 +718,7 @@ export function HostStreamInterface({
                     active={overlayActive}
                     message={overlayMessage}
                     background={overlayBg}
+                    imageUrl={overlayImageUrl}
                   />
                   {/* Bottom controls bar */}
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent pt-8 pb-4 px-4">
@@ -903,10 +926,17 @@ export function HostStreamInterface({
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <Input
-                  placeholder="e.g. We'll be right back in 5 minutes..."
+                  placeholder="Optional text message (e.g. We'll be right back in 5 minutes...)"
                   value={overlayMessage}
                   onChange={(e) => setOverlayMessage(e.target.value.slice(0, 120))}
                   maxLength={120}
+                />
+                {/* Drag-drop image uploader — self-contained module. */}
+                <OverlayImageUpload
+                  streamId={stream.id}
+                  currentUrl={overlayImageUrl}
+                  onUploaded={(url) => setOverlayImageUrl(url)}
+                  onCleared={() => setOverlayImageUrl("")}
                 />
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-1.5">
