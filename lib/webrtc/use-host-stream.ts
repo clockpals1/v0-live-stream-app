@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -11,7 +11,14 @@ interface ViewerConnection {
   name: string;
   peerConnection: RTCPeerConnection;
   connected: boolean;
+  /**
+   * Persistent audio/video senders created as sendonly transceivers the moment
+   * the PC is built — EVEN when there is no source track yet. Storing them here
+   * lets syncAllViewerTracks() replaceTrack() on them the instant a feed becomes
+   * available (co-host switch, host goes on-air, etc.) without renegotiation.
+   */
   audioSender?: RTCRtpSender;
+  videoSender?: RTCRtpSender;
   /**
    * Monotonic generation counter — bumped every time we create a fresh PC
    * for this viewerId. Used to discard stale answers/ICE that were emitted
@@ -26,9 +33,23 @@ interface ViewerConnection {
 interface UseHostStreamProps {
   streamId: string;
   roomCode: string;
+  /**
+   * When true (default), the host page loads in "Control Room" mode:
+   *   - getUserMedia is NOT called on mount (no camera/mic permission prompt)
+   *   - The host's own camera is NOT published to viewers until goOnAir() is called
+   *   - Starting the stream is allowed even with no host camera — viewers see the
+   *     active co-host feed (or a "waiting" placeholder if none)
+   * When false, the old behavior is preserved: the host's camera is the default
+   * on-air source and is published automatically on startStream().
+   */
+  controlRoomMode?: boolean;
 }
 
-export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
+export function useHostStream({
+  streamId,
+  roomCode,
+  controlRoomMode = true,
+}: UseHostStreamProps) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
@@ -41,6 +62,13 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const activeRelayStreamRef = useRef<MediaStream | null>(null);
+  // Whether the host's OWN camera is being published to viewers right now.
+  // Independent of whether `mediaStreamRef.current` exists (we may have the
+  // camera open for local preview while keeping it off-air).
+  // In control-room mode this starts false — admin must explicitly go on-air.
+  // In legacy mode it starts true so startStream() behaves as before.
+  const [isHostOnAir, setIsHostOnAir] = useState(!controlRoomMode);
+  const isHostOnAirRef = useRef(!controlRoomMode);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
   // Serialize viewer-join handling per viewerId. Supabase Realtime can deliver
@@ -111,59 +139,54 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
 
       const pc = new RTCPeerConnection(getIceConfig());
 
-      // Add tracks — use relay (co-host) stream if active, else own camera
-      const sourceStream = activeRelayStreamRef.current ?? mediaStreamRef.current;
-      console.log(`[v0] Creating peer for ${viewerId}, sourceStream:`, {
-        hasStream: !!sourceStream,
-        isRelay: !!activeRelayStreamRef.current,
-        videoTracks: sourceStream?.getVideoTracks().length ?? 0,
-        audioTracks: sourceStream?.getAudioTracks().length ?? 0,
+      // ALWAYS create one video + one audio sendonly transceiver up-front, with
+      // no initial track. This is the key to making late-joiners reliably
+      // inherit the current on-air feed:
+      //   - If we have a feed right now (relay or host-on-air), we attach it
+      //     via replaceTrack() below.
+      //   - If we don't have a feed yet, the transceivers are empty sendonly
+      //     slots that syncAllViewerTracks() will fill via replaceTrack() the
+      //     instant a feed becomes available — WITHOUT renegotiation.
+      //
+      // We use a single stable placeholder MediaStream as the streams association
+      // so the viewer's ontrack event always sees the same stream id — this is
+      // the only way ontrack(event).streams[0] merging works cleanly on all browsers.
+      const placeholder = new MediaStream();
+      const videoTransceiver = pc.addTransceiver("video", {
+        direction: "sendonly",
+        streams: [placeholder],
       });
-      
-      // DIAGNOSTIC: Log detailed media state
-      console.log('[DIAGNOSTIC] Peer creation media state:', {
-        viewerId,
-        hasMediaStream: !!mediaStreamRef.current,
-        hasRelayStream: !!activeRelayStreamRef.current,
-        hasSourceStream: !!sourceStream,
-        mediaStreamTracks: mediaStreamRef.current?.getTracks().map(t => ({
-          kind: t.kind,
-          id: t.id,
-          enabled: t.enabled,
-          readyState: t.readyState,
-        })) ?? [],
-        sourceStreamTracks: sourceStream?.getTracks().map(t => ({
-          kind: t.kind,
-          id: t.id,
-          enabled: t.enabled,
-          readyState: t.readyState,
-        })) ?? [],
+      const audioTransceiver = pc.addTransceiver("audio", {
+        direction: "sendonly",
+        streams: [placeholder],
       });
-      let audioSenderRef: RTCRtpSender | undefined;
-      if (sourceStream) {
-        sourceStream.getTracks().forEach((track) => {
-          console.log(`[v0] Adding ${track.kind} track to peer ${viewerId}:`, {
-            id: track.id,
-            enabled: track.enabled,
-            readyState: track.readyState,
-          });
-          const s = pc.addTrack(track, sourceStream);
-          if (track.kind === "audio") audioSenderRef = s;
-        });
-      } else {
-        console.warn(`[v0] No source stream available for viewer ${viewerId}!`);
+      const videoSenderRef: RTCRtpSender = videoTransceiver.sender;
+      const audioSenderRef: RTCRtpSender = audioTransceiver.sender;
+
+      // Resolve the initial track priority: relay > host-on-air > null.
+      const relay = activeRelayStreamRef.current;
+      const host = isHostOnAirRef.current ? mediaStreamRef.current : null;
+      const initialVideo =
+        relay?.getVideoTracks()[0] ?? host?.getVideoTracks()[0] ?? null;
+      const initialAudio =
+        relay?.getAudioTracks()[0] ?? host?.getAudioTracks()[0] ?? null;
+
+      console.log(`[v0] Creating peer for ${viewerId}`, {
+        hasRelay: !!relay,
+        hostOnAir: isHostOnAirRef.current,
+        willSendVideo: !!initialVideo,
+        willSendAudio: !!initialAudio,
+      });
+
+      if (initialVideo) {
+        videoSenderRef
+          .replaceTrack(initialVideo)
+          .catch((err) => console.error("[v0] initial video replaceTrack failed:", err));
       }
-      // Guarantee an audio transceiver always exists so replaceTrack() can relay
-      // co-host audio even when the admin's own stream captured no microphone.
-      // IMPORTANT: pass streams:[sourceStream] so the receiver's ontrack fires with
-      // event.streams[0] containing the audio track — without this event.streams is
-      // empty, the viewer's handler skips it, and audio never enters remoteStream.
-      if (!audioSenderRef) {
-        const at = pc.addTransceiver("audio", {
-          direction: "sendonly",
-          streams: sourceStream ? [sourceStream] : [],
-        });
-        audioSenderRef = at.sender;
+      if (initialAudio) {
+        audioSenderRef
+          .replaceTrack(initialAudio)
+          .catch((err) => console.error("[v0] initial audio replaceTrack failed:", err));
       }
 
       // Handle ICE candidates
@@ -214,6 +237,7 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         peerConnection: pc,
         connected: false,
         audioSender: audioSenderRef,
+        videoSender: videoSenderRef,
         generation: pcGenCounterRef.current,
         createdAt: Date.now(),
       };
@@ -379,33 +403,35 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     [createPeerConnection, removeViewer]
   );
 
-  // Start streaming
+  // Start streaming.
+  //
+  // In control-room mode (default), the stream can go live with NO host camera:
+  // viewers will see the active co-host feed, or a blank feed if no co-host is
+  // selected yet. The host decides explicitly via goOnAir() when (and if) to
+  // put their own camera on-air.
+  //
+  // In legacy (controlRoomMode=false) mode, we preserve the old behavior: the
+  // host's camera is initialized automatically and is the default on-air source.
   const startStream = useCallback(async () => {
     try {
-      // Make sure media is initialized
-      if (!mediaStreamRef.current) {
-        console.log("[v0] Media not initialized, initializing now...");
-        await initializeMedia();
-      }
-
-      // Verify media stream has tracks before going live
-      if (!mediaStreamRef.current) {
-        throw new Error("Failed to initialize media stream");
-      }
-
-      const videoTracks = mediaStreamRef.current.getVideoTracks();
-      const audioTracks = mediaStreamRef.current.getAudioTracks();
-      console.log("[v0] Starting stream with tracks:", {
-        video: videoTracks.length,
-        audio: audioTracks.length,
-        videoEnabled: videoTracks[0]?.enabled,
-        audioEnabled: audioTracks[0]?.enabled,
-        videoState: videoTracks[0]?.readyState,
-        audioState: audioTracks[0]?.readyState,
-      });
-
-      if (videoTracks.length === 0) {
-        throw new Error("No video track available. Please check camera permissions.");
+      if (!controlRoomMode) {
+        // Legacy path: host camera is the default source, require it before going live.
+        if (!mediaStreamRef.current) {
+          console.log("[v0] Media not initialized, initializing now...");
+          await initializeMedia();
+        }
+        if (!mediaStreamRef.current) {
+          throw new Error("Failed to initialize media stream");
+        }
+        const videoTracks = mediaStreamRef.current.getVideoTracks();
+        if (videoTracks.length === 0) {
+          throw new Error("No video track available. Please check camera permissions.");
+        }
+        // Legacy behavior: host is on-air from the moment we start streaming.
+        isHostOnAirRef.current = true;
+        setIsHostOnAir(true);
+      } else {
+        console.log("[v0] Starting stream in control-room mode (host camera NOT published)");
       }
 
       // Update stream status in database
@@ -414,7 +440,10 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
         .update({ status: "live", started_at: new Date().toISOString() })
         .eq("id", streamId);
 
-      // Start recording
+      // Start recording — only if we actually have a local stream to capture.
+      // In control-room mode without goOnAir(), there is nothing to record on
+      // the host device (co-host streams are not on the host's machine), and
+      // MediaRecorder cannot be pointed at a remote stream anyway.
       if (mediaStreamRef.current) {
         try {
           // Pick the best supported mimeType — VP9 is not available on all browsers
@@ -633,61 +662,101 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     }
   }, []);
 
-  // ── Overlay music: replace the audio track sent to every viewer with a
-  // mixed/music track, or restore the original mic track when null.
-  // Uses sender.replaceTrack() — no renegotiation needed, matches the
-  // same pattern as switchCamera + relayStream.
+  // ── The single source of truth for "what track is each viewer receiving?".
   //
-  // The caller (overlay-music component) owns the mixed MediaStreamTrack
-  // produced by createOverlayAudioMixer() and is responsible for tearing
-  // it down when stopping. Pass null here to revert to the live mic track.
+  // Called after every state change that can affect the on-air feed:
+  //   - relayStream()     (co-host switch / clear)
+  //   - goOnAir() / goOffAir()  (host camera published / withdrawn)
+  //   - setLiveAudioTrack() (overlay music started / stopped)
+  //
+  // Priority for each sender:
+  //   1. Overlay-music audio (if set) — AUDIO sender only.
+  //   2. Relay (co-host) track         — both kinds.
+  //   3. Host camera track IF isHostOnAir — both kinds.
+  //   4. null                          — viewer sees black / silence.
+  //
+  // This is what lets a late-joining viewer inherit the CURRENT feed: their
+  // transceivers are created empty in createPeerConnection() and this function
+  // fills them immediately with whatever is on-air.
   const liveAudioTrackRef = useRef<MediaStreamTrack | null>(null);
-  const setLiveAudioTrack = useCallback((track: MediaStreamTrack | null) => {
-    liveAudioTrackRef.current = track;
-    const ownStream = mediaStreamRef.current;
-    const relayStream = activeRelayStreamRef.current;
-    // Resolution priority when track is null (restore): relay audio > mic audio.
-    const restoreAudio =
-      relayStream?.getAudioTracks()[0] ??
-      ownStream?.getAudioTracks()[0] ??
+  const syncAllViewerTracks = useCallback(() => {
+    const relay = activeRelayStreamRef.current;
+    const host = isHostOnAirRef.current ? mediaStreamRef.current : null;
+    const nextVideo =
+      relay?.getVideoTracks()[0] ?? host?.getVideoTracks()[0] ?? null;
+    const overlayAudio = liveAudioTrackRef.current;
+    const nextAudio =
+      overlayAudio ??
+      relay?.getAudioTracks()[0] ??
+      host?.getAudioTracks()[0] ??
       null;
-    const next = track ?? restoreAudio;
+
     viewersRef.current.forEach((viewer) => {
-      const sender =
-        viewer.audioSender ??
-        viewer.peerConnection.getSenders().find((s) => s.track?.kind === "audio");
-      if (!sender) return;
-      if (sender.track !== next) {
-        sender.replaceTrack(next).catch((err) => {
-          console.error("[v0] setLiveAudioTrack replaceTrack failed:", err);
+      if (viewer.videoSender && viewer.videoSender.track !== nextVideo) {
+        viewer.videoSender.replaceTrack(nextVideo).catch((err) => {
+          console.error("[v0] sync video replaceTrack failed:", err);
+        });
+      }
+      if (viewer.audioSender && viewer.audioSender.track !== nextAudio) {
+        viewer.audioSender.replaceTrack(nextAudio).catch((err) => {
+          console.error("[v0] sync audio replaceTrack failed:", err);
         });
       }
     });
   }, []);
 
-  // Relay a remote stream to all existing viewer connections via replaceTrack().
-  // Pass null to restore the admin's own camera on all connections.
-  const relayStream = useCallback((remoteStream: MediaStream | null) => {
-    const ownStream = mediaStreamRef.current;
-    viewersRef.current.forEach((viewer) => {
-      viewer.peerConnection.getSenders().forEach((sender) => {
-        // Resolve kind: use track.kind when available, else fall back to the
-        // stored audioSender reference (covers guaranteed null-track transceivers).
-        const kind: "video" | "audio" | undefined =
-          (sender.track?.kind as "video" | "audio" | undefined) ??
-          (viewer.audioSender === sender ? "audio" : undefined);
-        if (!kind) return;
-        const newTrack =
-          remoteStream?.getTracks().find((t) => t.kind === kind) ??
-          ownStream?.getTracks().find((t) => t.kind === kind) ??
-          null;
-        if (newTrack !== sender.track) {
-          sender.replaceTrack(newTrack).catch(console.error);
-        }
-      });
-    });
-    activeRelayStreamRef.current = remoteStream;
-  }, []);
+  // Overlay music track swap — delegates to syncAllViewerTracks so it shares
+  // the one centralized priority chain. Pass null to revert to the live mic.
+  const setLiveAudioTrack = useCallback(
+    (track: MediaStreamTrack | null) => {
+      liveAudioTrackRef.current = track;
+      syncAllViewerTracks();
+    },
+    [syncAllViewerTracks]
+  );
+
+  // Relay a remote (co-host) stream to all existing viewer connections.
+  // Pass null to stop relaying. Stores the stream for late joiners and lets
+  // syncAllViewerTracks() apply the track swap.
+  const relayStream = useCallback(
+    (remoteStream: MediaStream | null) => {
+      activeRelayStreamRef.current = remoteStream;
+      syncAllViewerTracks();
+    },
+    [syncAllViewerTracks]
+  );
+
+  // ── Host-camera on/off-air toggle.
+  //
+  // goOnAir():   initialize the host's camera (if not already) and publish it.
+  //              If a co-host is currently relayed, the relay takes priority —
+  //              the host camera becomes the fallback when the co-host stops.
+  // goOffAir():  stop publishing the host's camera to viewers. If a co-host
+  //              is relayed, viewers keep seeing the co-host. Otherwise they
+  //              see a black / silent feed (expected in monitoring mode).
+  //
+  // Both are safe to call at any time; neither triggers renegotiation.
+  const goOnAir = useCallback(async () => {
+    try {
+      if (!mediaStreamRef.current) {
+        await initializeMedia();
+      }
+      isHostOnAirRef.current = true;
+      setIsHostOnAir(true);
+      syncAllViewerTracks();
+    } catch (err) {
+      console.error("[v0] goOnAir failed:", err);
+      setError("Could not start your camera. Check permissions and try again.");
+      isHostOnAirRef.current = false;
+      setIsHostOnAir(false);
+    }
+  }, [initializeMedia, syncAllViewerTracks]);
+
+  const goOffAir = useCallback(() => {
+    isHostOnAirRef.current = false;
+    setIsHostOnAir(false);
+    syncAllViewerTracks();
+  }, [syncAllViewerTracks]);
 
   // Download recording
   const downloadRecording = useCallback(() => {
@@ -766,6 +835,10 @@ export function useHostStream({ streamId, roomCode }: UseHostStreamProps) {
     switchCamera,
     relayStream,
     setLiveAudioTrack,
+    goOnAir,
+    goOffAir,
+    isHostOnAir,
+    controlRoomMode,
     downloadRecording,
   };
 }

@@ -166,10 +166,17 @@ export function HostStreamInterface({
     switchCamera,
     relayStream,
     setLiveAudioTrack,
+    goOnAir,
+    goOffAir,
+    isHostOnAir,
+    controlRoomMode,
     downloadRecording,
   } = useHostStream({
     streamId: stream.id,
     roomCode: stream.room_code,
+    // Control-room by default: admin can manage/monitor without auto-publishing
+    // their camera. Host explicitly clicks "Go On-Air" to publish.
+    controlRoomMode: true,
   });
 
   // Fallback receiver: connects to the active co-host when the warm pool hasn't
@@ -205,8 +212,20 @@ export function HostStreamInterface({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Initialize camera on mount and check if stream should resume
+  // In control-room mode we DO NOT call initializeMedia() on mount — that would
+  // request camera/mic permission before the host has decided to go on-air.
+  // Instead we flag the page as "ready" immediately and let the host decide via
+  // the Go-On-Air button. Legacy mode preserves the auto-init behavior.
   useEffect(() => {
+    if (controlRoomMode) {
+      setMediaInitialized(true);
+      // Resume a previously-live stream without forcing the camera open.
+      if (stream.status === 'live' && !isStreaming) {
+        console.log('[Host] Stream was live, resuming in control-room mode...');
+        setTimeout(() => { startStream(); }, 500);
+      }
+      return;
+    }
     const init = async () => {
       try {
         const mediaStreamResult = await initializeMedia('environment');
@@ -214,28 +233,36 @@ export function HostStreamInterface({
           videoRef.current.srcObject = mediaStreamResult;
         }
         setMediaInitialized(true);
-        
-        // Check if stream was live and should resume
         if (stream.status === 'live' && !isStreaming) {
           console.log('[Host] Stream was live, resuming automatically...');
-          setTimeout(() => {
-            startStream();
-          }, 1000); // Give time for media to initialize
+          setTimeout(() => { startStream(); }, 1000);
         }
       } catch (err) {
         console.error("[v0] Failed to initialize media:", err);
       }
     };
-
     init();
-  }, [initializeMedia, stream.status, isStreaming, startStream]);
+  }, [controlRoomMode, initializeMedia, stream.status, isStreaming, startStream]);
 
-  // Update video element when media stream changes
+  // Drive the host's preview video element with whatever viewers are currently
+  // seeing — same priority used on the server side (syncAllViewerTracks):
+  //   1. Active co-host (coHostFallbackStream) when a co-host is on-air
+  //   2. Host's own camera when host is on-air
+  //   3. null (preview stays black until something goes on-air)
+  // This is what gives the host an accurate "program out" monitor in control-room
+  // mode instead of showing a stale local camera that isn't being published.
   useEffect(() => {
-    if (videoRef.current && mediaStream) {
-      videoRef.current.srcObject = mediaStream;
+    if (!videoRef.current) return;
+    const next =
+      (activeParticipantId && coHostFallbackStream)
+        ? coHostFallbackStream
+        : (isHostOnAir && mediaStream)
+          ? mediaStream
+          : null;
+    if (videoRef.current.srcObject !== next) {
+      videoRef.current.srcObject = next;
     }
-  }, [mediaStream]);
+  }, [mediaStream, coHostFallbackStream, activeParticipantId, isHostOnAir]);
 
   // Real-time chat via Broadcast (reliable; no Supabase publication config needed)
   useEffect(() => {
@@ -900,7 +927,32 @@ export function HostStreamInterface({
                     </Button>
                   </>
                 ) : isStreaming ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Host-camera on/off-air toggle. Separate from the stream
+                        start/stop controls so the host can manage the stream
+                        without forcing their own camera to viewers. */}
+                    {controlRoomMode && (
+                      isHostOnAir ? (
+                        <Button
+                          variant="outline"
+                          onClick={goOffAir}
+                          title="Stop publishing your camera to viewers"
+                        >
+                          <VideoOff className="w-4 h-4 mr-2" />
+                          Stop My Camera
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="default"
+                          onClick={goOnAir}
+                          className="bg-green-600 hover:bg-green-700"
+                          title="Publish your camera so viewers can see you"
+                        >
+                          <Video className="w-4 h-4 mr-2" />
+                          Go On-Air with My Camera
+                        </Button>
+                      )
+                    )}
                     {isPaused ? (
                       <Button variant="default" onClick={resumeStream}>
                         <Play className="w-4 h-4 mr-2" />
