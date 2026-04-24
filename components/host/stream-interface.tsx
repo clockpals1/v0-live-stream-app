@@ -811,7 +811,7 @@ function OwnerStreamInterface({
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {isAdmin && (
+            {(isAdmin || isStreamOwner) && (
               <StreamOperatorsDialog
                 streamId={stream.id}
                 streamTitle={stream.title}

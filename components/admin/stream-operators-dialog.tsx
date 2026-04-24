@@ -1,11 +1,20 @@
 "use client";
 
 /**
- * Admin-only dialog for assigning Super Users to a specific stream.
+ * Dialog for assigning Super Users / operators to a specific stream.
  *
- * Writes go through /api/admin/streams/[streamId]/operators — which enforces
- * admin role and handles the DB insert. Reads are via the same endpoint so
- * we get the joined hosts row in a single request.
+ * Accessible to:
+ *   - platform admins  (can manage any stream)
+ *   - the stream owner (can manage their own stream) — since migration 017
+ *
+ * Writes go through /api/admin/streams/[streamId]/operators — which now
+ * enforces admin OR stream-owner at both the API and RLS layers.
+ *
+ * The candidate list is loaded from /api/admin/hosts when the caller is an
+ * admin, falling back to /api/hosts/directory for non-admin stream owners.
+ * The dialog also accepts controlled `open` / `onOpenChange` props so callers
+ * (e.g. the host dashboard) can open it programmatically after creating a
+ * new stream.
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -35,10 +44,25 @@ interface Props {
   streamId: string;
   streamTitle: string;
   trigger?: React.ReactNode;
+  /** Controlled open state — lets callers drive the dialog programmatically. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function StreamOperatorsDialog({ streamId, streamTitle, trigger }: Props) {
-  const [open, setOpen] = useState(false);
+export function StreamOperatorsDialog({
+  streamId,
+  streamTitle,
+  trigger,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+}: Props) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? (controlledOpen as boolean) : uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    controlledOnOpenChange?.(next);
+  };
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -51,7 +75,7 @@ export function StreamOperatorsDialog({ streamId, streamTitle, trigger }: Props)
     setLoading(true);
     setNotSetUp(false);
     try {
-      const [opsRes, hostsRes] = await Promise.all([
+      const [opsRes, adminHostsRes] = await Promise.all([
         fetch(`/api/admin/streams/${streamId}/operators`),
         fetch(`/api/admin/hosts`),
       ]);
@@ -63,14 +87,25 @@ export function StreamOperatorsDialog({ streamId, streamTitle, trigger }: Props)
       }
 
       const opsBody = await opsRes.json();
-      const hostsBody = await hostsRes.json();
-
       if (!opsRes.ok) {
         toast.error(opsBody.error || "Failed to load operators");
       } else {
         setOperators(opsBody.operators || []);
       }
-      if (hostsRes.ok) setAllHosts(hostsBody.hosts || []);
+
+      // Hosts list: admins get the full directory from /api/admin/hosts.
+      // Non-admin stream owners fall back to /api/hosts/directory which is
+      // open to any authenticated host and already excludes admins.
+      if (adminHostsRes.ok) {
+        const body = await adminHostsRes.json();
+        setAllHosts(body.hosts || []);
+      } else if (adminHostsRes.status === 401 || adminHostsRes.status === 403) {
+        const dirRes = await fetch(`/api/hosts/directory`);
+        if (dirRes.ok) {
+          const body = await dirRes.json();
+          setAllHosts(body.hosts || []);
+        }
+      }
     } catch (err: any) {
       toast.error("Load failed: " + (err?.message ?? "unknown"));
     } finally {
@@ -134,14 +169,19 @@ export function StreamOperatorsDialog({ streamId, streamTitle, trigger }: Props)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button variant="outline" size="sm">
-            <ShieldCheck className="w-4 h-4 mr-1.5" />
-            Super Users
-          </Button>
-        )}
-      </DialogTrigger>
+      {/* When controlled externally without an explicit trigger, skip the
+          default trigger button entirely so it doesn't leak into the calling
+          page. The caller is responsible for opening the dialog. */}
+      {!(isControlled && !trigger) && (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button variant="outline" size="sm">
+              <ShieldCheck className="w-4 h-4 mr-1.5" />
+              Super Users
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

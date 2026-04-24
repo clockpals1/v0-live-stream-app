@@ -14,6 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
+import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import {
   Radio,
   Video,
@@ -309,8 +310,57 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
     return () => { supabase.removeChannel(ch); };
   }, [host]);
 
+  // Real-time: Super User assignments. When an admin/host assigns (or removes)
+  // this user as an operator, the "Streams you manage" section updates
+  // immediately — no reload needed, no hunting through lists.
+  useEffect(() => {
+    if (!host) return;
+    const refreshOps = async () => {
+      const { data, error } = await supabase
+        .from("stream_operators")
+        .select("id, stream:streams(id, title, room_code, status)")
+        .eq("host_id", host.id);
+      if (error) return; // table missing / permission — silent fallback
+      const filtered = ((data as any[]) ?? []).filter(
+        (r) => r.stream && r.stream.status !== "ended",
+      );
+      setOperatorStreams(filtered);
+    };
+    const ch = supabase
+      .channel(`stream-ops-rt-${host.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stream_operators" },
+        (payload: any) => {
+          const row = payload.new ?? payload.old;
+          if (row && row.host_id === host.id) {
+            if (payload.eventType === "INSERT") {
+              toast.success("You have been assigned as a Super User on a stream.", {
+                duration: 5000,
+              });
+            }
+            refreshOps();
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [host, supabase]);
+
   const [deletingStream, setDeletingStream] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  // When non-null, the StreamOperatorsDialog at the bottom of the page opens
+  // for this specific stream. Used by both the "Your Streams" dropdown and
+  // the post-schedule auto-open flow.
+  const [manageOperatorsFor, setManageOperatorsFor] = useState<
+    { id: string; title: string } | null
+  >(null);
+  // When set, the dashboard will navigate to this room as soon as the
+  // operator-assignment dialog closes — used by the "Go Live Now" flow to
+  // offer operator assignment BEFORE entering the live stream page.
+  const [pendingGoLiveRoom, setPendingGoLiveRoom] = useState<string | null>(null);
   const [, forceUpdate] = useState(0);
 
   // Countdown re-render every 30 seconds
@@ -362,9 +412,14 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
     // Reset form and loading state
     setNewStreamTitle("");
     setLoading(false);
-    
-    // Navigate to stream
-    router.push(`/host/stream/${data.room_code}`);
+
+    // Before navigating, give the host a chance to attach Super Users.
+    // Closing the dialog (skip or confirm) triggers the navigation below.
+    setPendingGoLiveRoom(data.room_code);
+    setManageOperatorsFor({ id: data.id, title: data.title });
+    toast.info("Assign Super Users — or close this dialog to go live immediately.", {
+      duration: 5000,
+    });
   };
 
   const handleSignOut = async () => {
@@ -598,36 +653,84 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
           </div>
         )}
 
-        {/* Super User banner — shows streams this user manages as an operator */}
+        {/* Super User section — assigned streams are the operator's homepage. */}
         {operatorStreams.length > 0 && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-2 border-amber-500/30 rounded-lg">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 bg-amber-500 rounded-full">
-                <ShieldCheck className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  You manage {operatorStreams.length} stream{operatorStreams.length !== 1 ? "s" : ""} as a Super User
-                  {operatorStreams.some((p) => p.stream.status === "live") && (
-                    <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
-                  )}
-                </h3>
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  {operatorStreams.map((op) => (
-                    <Link
-                      key={op.id}
-                      href={`/host/stream/${op.stream.room_code}`}
-                      className="text-xs text-amber-700 hover:text-amber-800 underline"
-                    >
-                      {op.stream.title}
-                      {op.stream.status === "live" && <span className="ml-1 text-red-500">●</span>}
-                    </Link>
-                  ))}
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Operators can manage overlays, ticker, co-hosts, and send private messages. Only the stream owner can go live.
-                </p>
-              </div>
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-amber-500" />
+              Streams You Manage
+              <Badge
+                variant="secondary"
+                className="text-[10px] bg-amber-500/15 text-amber-600 border-amber-500/30"
+              >
+                Super User
+              </Badge>
+              {operatorStreams.some((p) => p.stream.status === "live") && (
+                <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
+              )}
+            </h2>
+            <div className="grid gap-3">
+              {operatorStreams.map((p) => {
+                const live = p.stream.status === "live";
+                return (
+                  <Card
+                    key={p.id}
+                    className={
+                      live
+                        ? "border-red-300 bg-red-50/40 dark:bg-red-950/20"
+                        : "border-amber-200 bg-amber-50/40 dark:bg-amber-950/20"
+                    }
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            {live && (
+                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
+                            )}
+                            <h3 className="font-semibold text-foreground truncate">
+                              {p.stream.title}
+                            </h3>
+                            {live ? (
+                              <Badge className="bg-red-500 text-white text-xs shrink-0">● LIVE</Badge>
+                            ) : p.stream.status === "scheduled" ? (
+                              <Badge className="bg-blue-500 text-white text-xs shrink-0 gap-1">
+                                <CalendarClock className="w-3 h-3" /> Scheduled
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs shrink-0">
+                                {p.stream.status === "waiting" ? "Waiting" : p.stream.status}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <span className="text-xs font-medium text-amber-600 flex items-center gap-1">
+                              <ShieldCheck className="w-3 h-3" /> Operator access
+                            </span>
+                            <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+                              {p.stream.room_code}
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          asChild
+                          size="sm"
+                          className={
+                            live
+                              ? "bg-red-600 hover:bg-red-700 text-white shrink-0"
+                              : "bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+                          }
+                        >
+                          <Link href={`/host/stream/${p.stream.room_code}`}>
+                            <Radio className="w-4 h-4 mr-1" />
+                            {live ? "Open Control Room" : "Enter Control Room"}
+                          </Link>
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </div>
         )}
@@ -689,7 +792,7 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                   {host && (
                     <ScheduleStreamForm
                       currentHostId={host.id}
-                      onScheduled={() => {
+                      onScheduled={(newStream) => {
                         if (host) {
                           supabase
                             .from("streams")
@@ -698,6 +801,9 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                             .order("created_at", { ascending: false })
                             .then(({ data }: { data: Stream[] | null }) => { if (data) setStreams(data); });
                         }
+                        // Immediately prompt the host to attach operators
+                        // to the freshly-scheduled stream.
+                        if (newStream) setManageOperatorsFor(newStream);
                       }}
                     />
                   )}
@@ -842,6 +948,16 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                                   <Play className="w-4 h-4 mr-1" />
                                   Start
                                 </Link>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  setManageOperatorsFor({ id: stream.id, title: stream.title })
+                                }
+                                title="Manage Super Users for this scheduled stream"
+                              >
+                                <ShieldCheck className="w-4 h-4 text-amber-500" />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -1017,7 +1133,18 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                                 <Copy className="w-4 h-4 mr-2" />
                                 Copy Link
                               </DropdownMenuItem>
-                              
+
+                              <DropdownMenuSeparator />
+
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  setManageOperatorsFor({ id: stream.id, title: stream.title })
+                                }
+                              >
+                                <ShieldCheck className="w-4 h-4 mr-2 text-amber-500" />
+                                Manage Super Users
+                              </DropdownMenuItem>
+
                               {stream.recording_url && (
                                 <>
                                   <DropdownMenuSeparator />
@@ -1153,6 +1280,29 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Shared operator-assignment dialog — driven programmatically from
+          both the per-stream dropdown and the post-schedule auto-open. */}
+      {manageOperatorsFor && (
+        <StreamOperatorsDialog
+          streamId={manageOperatorsFor.id}
+          streamTitle={manageOperatorsFor.title}
+          open={!!manageOperatorsFor}
+          onOpenChange={(next) => {
+            if (!next) {
+              setManageOperatorsFor(null);
+              // Instant-go-live handoff: navigate to the live stream page
+              // immediately after the host finishes (or skips) assignment.
+              if (pendingGoLiveRoom) {
+                const room = pendingGoLiveRoom;
+                setPendingGoLiveRoom(null);
+                router.push(`/host/stream/${room}`);
+              }
+            }
+          }}
+          trigger={null}
+        />
+      )}
     </div>
   );
 }

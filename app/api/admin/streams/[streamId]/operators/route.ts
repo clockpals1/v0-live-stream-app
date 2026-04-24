@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Admin-only endpoints for managing per-stream Super-User assignments.
+ * Endpoints for managing per-stream Super-User / operator assignments.
  *
  *   GET  /api/admin/streams/:streamId/operators
  *        — list { id, host_id, created_at, host: {...} } for this stream
@@ -11,17 +11,22 @@ import { createClient } from "@/lib/supabase/server";
  *        body { hostId: string }
  *        — assign the given host as an operator on this stream
  *
- * Admin authorization is enforced by querying hosts.role === 'admin' for the
- * authenticated user. RLS on stream_operators also restricts writes to admins,
- * so this is defence in depth, not the sole check.
+ * Authorization: the caller must be either
+ *   (a) a platform admin (hosts.role === 'admin' OR hosts.is_admin),  OR
+ *   (b) the owner of the target stream (streams.host_id === caller.hosts.id).
+ *
+ * Migration 017 widens the stream_operators RLS policy accordingly, so this
+ * API is defence-in-depth — RLS will also reject mismatched writes.
  */
 
-async function requireAdmin(req: NextRequest) {
+async function requireAdminOrStreamOwner(_req: NextRequest, streamId: string) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
+  if (!user) {
+    return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
+  }
 
   const { data: me } = await supabase
     .from("hosts")
@@ -29,10 +34,30 @@ async function requireAdmin(req: NextRequest) {
     .eq("user_id", user.id)
     .single();
 
-  if (!me || (me.role !== "admin" && !me.is_admin)) {
+  if (!me) {
     return { error: NextResponse.json({ error: "forbidden" }, { status: 403 }) };
   }
-  return { supabase, me };
+
+  const isAdmin = me.role === "admin" || me.is_admin === true;
+  if (isAdmin) return { supabase, me, isAdmin: true };
+
+  // Fall back: is this caller the owner of the target stream?
+  const { data: stream } = await supabase
+    .from("streams")
+    .select("host_id")
+    .eq("id", streamId)
+    .single();
+
+  if (stream && stream.host_id === me.id) {
+    return { supabase, me, isAdmin: false };
+  }
+
+  return {
+    error: NextResponse.json(
+      { error: "only the stream owner or an admin can manage operators for this stream" },
+      { status: 403 },
+    ),
+  };
 }
 
 export async function GET(
@@ -40,7 +65,7 @@ export async function GET(
   { params }: { params: Promise<{ streamId: string }> },
 ) {
   const { streamId } = await params;
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminOrStreamOwner(req, streamId);
   if ("error" in auth) return auth.error;
   const { supabase } = auth;
 
@@ -70,7 +95,7 @@ export async function POST(
   { params }: { params: Promise<{ streamId: string }> },
 ) {
   const { streamId } = await params;
-  const auth = await requireAdmin(req);
+  const auth = await requireAdminOrStreamOwner(req, streamId);
   if ("error" in auth) return auth.error;
   const { supabase, me } = auth;
 

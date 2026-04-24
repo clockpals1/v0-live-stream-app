@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
  * — admin removes an operator assignment. The row's id is the stream_operators.id.
  */
 export async function DELETE(
-  req: NextRequest,
+  _req: NextRequest,
   {
     params,
   }: {
@@ -22,12 +22,28 @@ export async function DELETE(
 
   const { data: me } = await supabase
     .from("hosts")
-    .select("role, is_admin")
+    .select("id, role, is_admin")
     .eq("user_id", user.id)
     .single();
 
-  if (!me || (me.role !== "admin" && !me.is_admin)) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (!me) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  const isAdmin = me.role === "admin" || me.is_admin === true;
+  let allowed = isAdmin;
+  if (!allowed) {
+    // Fall back: is the caller the owner of the target stream?
+    const { data: stream } = await supabase
+      .from("streams")
+      .select("host_id")
+      .eq("id", streamId)
+      .single();
+    if (stream && stream.host_id === me.id) allowed = true;
+  }
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "only the stream owner or an admin can remove operators" },
+      { status: 403 },
+    );
   }
 
   const { error } = await supabase

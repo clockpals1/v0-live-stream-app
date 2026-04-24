@@ -18,7 +18,11 @@ interface Host {
 
 interface ScheduleStreamFormProps {
   currentHostId: string;
-  onScheduled?: () => void;
+  /**
+   * Called after a stream is successfully scheduled. The new stream is passed
+   * so the caller can auto-open the operator assignment dialog for it.
+   */
+  onScheduled?: (newStream?: { id: string; title: string }) => void;
 }
 
 export function ScheduleStreamForm({ currentHostId, onScheduled }: ScheduleStreamFormProps) {
@@ -90,7 +94,7 @@ export function ScheduleStreamForm({ currentHostId, onScheduled }: ScheduleStrea
       setScheduleDate("");
       setScheduleTime("");
       setAssignedHostId(currentHostId);
-      onScheduled?.();
+      onScheduled?.({ id: data.id, title: data.title });
       router.refresh();
     } catch (err) {
       console.error("Error scheduling stream:", err);
