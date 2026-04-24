@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectorPanel } from "@/components/host/director-panel";
 import { StreamOverlay } from "@/components/stream/stream-overlay";
+import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import {
   Radio,
   Video,
@@ -46,6 +47,7 @@ import {
   Megaphone,
   Eye,
   EyeOff,
+  Tv,
 } from "lucide-react";
 
 interface Stream {
@@ -116,6 +118,12 @@ export function HostStreamInterface({
   const [overlayActive, setOverlayActive] = useState(false);
   const [overlayMessage, setOverlayMessage] = useState("");
   const [overlayBg, setOverlayBg] = useState<"dark" | "light" | "branded">("dark");
+
+  // ---- Ticker state (scrolling news-style crawl below the video) ----
+  const [tickerActive, setTickerActive] = useState(false);
+  const [tickerMessage, setTickerMessage] = useState("");
+  const [tickerSpeed, setTickerSpeed] = useState<TickerSpeed>("normal");
+  const [tickerStyle, setTickerStyle] = useState<TickerStyle>("default");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -267,19 +275,29 @@ export function HostStreamInterface({
     };
   }, [stream.id, host.display_name]);
 
-  // Load existing overlay state from DB on mount (in case host refreshed while overlay was active)
+  // Load existing overlay + ticker state from DB on mount (in case host refreshed while active)
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from("streams")
-        .select("overlay_active, overlay_message, overlay_background")
+        .select(
+          "overlay_active, overlay_message, overlay_background, ticker_active, ticker_message, ticker_speed, ticker_style"
+        )
         .eq("id", stream.id)
         .single();
       if (data) {
-        setOverlayActive(!!(data as any).overlay_active);
-        setOverlayMessage((data as any).overlay_message ?? "");
-        const bg = (data as any).overlay_background;
+        const d = data as any;
+        setOverlayActive(!!d.overlay_active);
+        setOverlayMessage(d.overlay_message ?? "");
+        const bg = d.overlay_background;
         if (bg === "dark" || bg === "light" || bg === "branded") setOverlayBg(bg);
+
+        setTickerActive(!!d.ticker_active);
+        setTickerMessage(d.ticker_message ?? "");
+        const sp = d.ticker_speed;
+        if (sp === "slow" || sp === "normal" || sp === "fast") setTickerSpeed(sp);
+        const st = d.ticker_style;
+        if (st === "default" || st === "urgent" || st === "info") setTickerStyle(st);
       }
     })();
   }, [stream.id, supabase]);
@@ -343,6 +361,73 @@ export function HostStreamInterface({
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlayMessage, overlayBg]);
+
+  // ---- Ticker broadcast + persist (mirrors overlay pattern) ----
+  const pushTickerState = async (next: {
+    active: boolean;
+    message: string;
+    speed: TickerSpeed;
+    style: TickerStyle;
+  }) => {
+    const payload = {
+      active: next.active,
+      message: next.message.slice(0, 280),
+      speed: next.speed,
+      style: next.style,
+    };
+    try {
+      chatChannelRef.current?.send({
+        type: "broadcast",
+        event: "stream-ticker",
+        payload,
+      });
+    } catch (err) {
+      console.error("[Host] Failed to broadcast ticker:", err);
+    }
+    try {
+      await supabase
+        .from("streams")
+        .update({
+          ticker_active: payload.active,
+          ticker_message: payload.message,
+          ticker_speed: payload.speed,
+          ticker_style: payload.style,
+        })
+        .eq("id", stream.id);
+    } catch (err) {
+      console.error("[Host] Failed to persist ticker:", err);
+    }
+  };
+
+  const startTicker = () => {
+    const msg = tickerMessage.trim();
+    if (!msg) {
+      toast.error("Enter a ticker message first");
+      return;
+    }
+    setTickerActive(true);
+    pushTickerState({ active: true, message: msg, speed: tickerSpeed, style: tickerStyle });
+  };
+
+  const stopTicker = () => {
+    setTickerActive(false);
+    pushTickerState({ active: false, message: tickerMessage, speed: tickerSpeed, style: tickerStyle });
+  };
+
+  // Debounced re-broadcast while ticker is active and host edits text/speed/style
+  useEffect(() => {
+    if (!tickerActive) return;
+    const t = setTimeout(() => {
+      pushTickerState({
+        active: true,
+        message: tickerMessage,
+        speed: tickerSpeed,
+        style: tickerStyle,
+      });
+    }, 300);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickerMessage, tickerSpeed, tickerStyle]);
 
   const refreshChat = async () => {
     setIsRefreshingChat(true);
@@ -875,6 +960,112 @@ export function HostStreamInterface({
                   Viewers will see this as a full-screen overlay on top of your video.
                   Useful for announcements, break screens, or title cards.
                 </p>
+              </CardContent>
+            </Card>
+
+            {/* Ticker Control — scrolling news-style crawl under the video */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Tv className="w-4 h-4" />
+                  Stream Ticker
+                  {tickerActive && (
+                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
+                      SCROLLING
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <textarea
+                  placeholder="e.g. BREAKING: Service starts at 10am AST • Prayer requests welcome in chat • Follow us on Instagram..."
+                  value={tickerMessage}
+                  onChange={(e) => setTickerMessage(e.target.value.slice(0, 280))}
+                  maxLength={280}
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">Speed:</span>
+                      {(["slow", "normal", "fast"] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setTickerSpeed(s)}
+                          className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
+                            tickerSpeed === s
+                              ? "border-primary ring-2 ring-primary/30 bg-primary/10"
+                              : "border-border hover:border-foreground/30"
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">Style:</span>
+                      {(["default", "urgent", "info"] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setTickerStyle(s)}
+                          className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
+                            tickerStyle === s
+                              ? "border-primary ring-2 ring-primary/30"
+                              : "border-border hover:border-foreground/30"
+                          }`}
+                          style={{
+                            background:
+                              s === "default"
+                                ? "#111827"
+                                : s === "urgent"
+                                  ? "#dc2626"
+                                  : "#1d4ed8",
+                            color: "#fff",
+                          }}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <span className="text-[11px] text-muted-foreground tabular-nums">
+                      {tickerMessage.length}/280
+                    </span>
+                    {tickerActive ? (
+                      <Button size="sm" variant="destructive" onClick={stopTicker}>
+                        <Square className="w-4 h-4 mr-1.5" />
+                        Stop Ticker
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        onClick={startTicker}
+                        disabled={!tickerMessage.trim()}
+                      >
+                        <Play className="w-4 h-4 mr-1.5" />
+                        Start Ticker
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {/* Host preview — WYSIWYG ticker as viewers see it */}
+                <div className="rounded-md overflow-hidden border border-border">
+                  <StreamTicker
+                    active={tickerActive && !!tickerMessage.trim()}
+                    message={tickerMessage || " "}
+                    speed={tickerSpeed}
+                    style={tickerStyle}
+                  />
+                  {!tickerActive && (
+                    <p className="text-[11px] text-muted-foreground py-2 px-3 bg-muted/30">
+                      Preview appears here when the ticker is running.
+                    </p>
+                  )}
+                </div>
               </CardContent>
             </Card>
 

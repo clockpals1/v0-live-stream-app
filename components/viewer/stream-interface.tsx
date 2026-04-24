@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { vibrateDevice } from "@/lib/utils/notification";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream";
 import { StreamOverlay, type OverlayBackground } from "@/components/stream/stream-overlay";
+import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -102,6 +103,14 @@ export function ViewerStreamInterface({
     message: string;
     background: OverlayBackground;
   }>({ active: false, message: "", background: "dark" });
+
+  // ---- Host-controlled ticker (scrolling crawl below the video) ----
+  const [ticker, setTicker] = useState<{
+    active: boolean;
+    message: string;
+    speed: TickerSpeed;
+    style: TickerStyle;
+  }>({ active: false, message: "", speed: "normal", style: "default" });
 
   // Track whether the user has completed the join gesture (name dialog submitted).
   // This is the key gate for triggering play() — iOS Safari only allows audio/video
@@ -315,6 +324,21 @@ export function ViewerStreamInterface({
       });
     });
 
+    // Host ticker broadcasts — same channel, same pattern as overlay.
+    channel.on("broadcast", { event: "stream-ticker" }, ({ payload }: any) => {
+      if (!payload) return;
+      const sp: TickerSpeed =
+        payload.speed === "slow" || payload.speed === "fast" ? payload.speed : "normal";
+      const st: TickerStyle =
+        payload.style === "urgent" || payload.style === "info" ? payload.style : "default";
+      setTicker({
+        active: !!payload.active,
+        message: typeof payload.message === "string" ? payload.message : "",
+        speed: sp,
+        style: st,
+      });
+    });
+
     chatChannelRef.current = channel;
 
     const loadExistingMessages = async () => {
@@ -377,20 +401,31 @@ export function ViewerStreamInterface({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Load current overlay state on mount (for mid-stream joiners) ────────
+  // ─── Load current overlay + ticker state on mount (for mid-stream joiners) ──
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from("streams")
-        .select("overlay_active, overlay_message, overlay_background")
+        .select(
+          "overlay_active, overlay_message, overlay_background, ticker_active, ticker_message, ticker_speed, ticker_style"
+        )
         .eq("id", stream.id)
         .single();
       if (data) {
-        const bg = (data as any).overlay_background;
+        const d = data as any;
+        const bg = d.overlay_background;
         setOverlay({
-          active: !!(data as any).overlay_active,
-          message: (data as any).overlay_message ?? "",
+          active: !!d.overlay_active,
+          message: d.overlay_message ?? "",
           background: bg === "light" || bg === "branded" ? bg : "dark",
+        });
+        const sp = d.ticker_speed;
+        const st = d.ticker_style;
+        setTicker({
+          active: !!d.ticker_active,
+          message: d.ticker_message ?? "",
+          speed: sp === "slow" || sp === "fast" ? sp : "normal",
+          style: st === "urgent" || st === "info" ? st : "default",
         });
       }
     })();
@@ -1124,6 +1159,16 @@ export function ViewerStreamInterface({
                   </div>
                 </div>
               </div>
+
+              {/* Host-controlled scrolling ticker — sits BELOW the video container,
+                  outside videoContainerRef so fullscreen mode and the overlay
+                  z-index stack are never affected. */}
+              <StreamTicker
+                active={ticker.active}
+                message={ticker.message}
+                speed={ticker.speed}
+                style={ticker.style}
+              />
 
               {/* Stream info bar */}
               <div className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-0 sm:py-0 border-b sm:border-b-0 border-border">
