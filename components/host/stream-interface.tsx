@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectorPanel } from "@/components/host/director-panel";
+import { StreamOverlay } from "@/components/stream/stream-overlay";
 import {
   Radio,
   Video,
@@ -42,6 +43,9 @@ import {
   WifiOff as DataSaver,
   Pause,
   Play,
+  Megaphone,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 interface Stream {
@@ -107,6 +111,11 @@ export function HostStreamInterface({
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [cohostParticipants, setCohostParticipants] = useState<StreamParticipant[]>([]);
+
+  // ---- Overlay state (broadcast to all viewers over existing chat channel) ----
+  const [overlayActive, setOverlayActive] = useState(false);
+  const [overlayMessage, setOverlayMessage] = useState("");
+  const [overlayBg, setOverlayBg] = useState<"dark" | "light" | "branded">("dark");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -257,6 +266,83 @@ export function HostStreamInterface({
       chatChannelRef.current = null;
     };
   }, [stream.id, host.display_name]);
+
+  // Load existing overlay state from DB on mount (in case host refreshed while overlay was active)
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("streams")
+        .select("overlay_active, overlay_message, overlay_background")
+        .eq("id", stream.id)
+        .single();
+      if (data) {
+        setOverlayActive(!!(data as any).overlay_active);
+        setOverlayMessage((data as any).overlay_message ?? "");
+        const bg = (data as any).overlay_background;
+        if (bg === "dark" || bg === "light" || bg === "branded") setOverlayBg(bg);
+      }
+    })();
+  }, [stream.id, supabase]);
+
+  // Broadcast + persist overlay state. Broadcast gives viewers instant updates;
+  // DB upsert ensures mid-stream joiners see the current overlay on their initial fetch.
+  const pushOverlayState = async (next: {
+    active: boolean;
+    message: string;
+    background: "dark" | "light" | "branded";
+  }) => {
+    const payload = {
+      active: next.active,
+      message: next.message.slice(0, 120),
+      background: next.background,
+    };
+    try {
+      chatChannelRef.current?.send({
+        type: "broadcast",
+        event: "stream-overlay",
+        payload,
+      });
+    } catch (err) {
+      console.error("[Host] Failed to broadcast overlay:", err);
+    }
+    try {
+      await supabase
+        .from("streams")
+        .update({
+          overlay_active: payload.active,
+          overlay_message: payload.message,
+          overlay_background: payload.background,
+        })
+        .eq("id", stream.id);
+    } catch (err) {
+      console.error("[Host] Failed to persist overlay:", err);
+    }
+  };
+
+  const showOverlay = () => {
+    const msg = overlayMessage.trim();
+    if (!msg) {
+      toast.error("Enter an overlay message first");
+      return;
+    }
+    setOverlayActive(true);
+    pushOverlayState({ active: true, message: msg, background: overlayBg });
+  };
+
+  const hideOverlay = () => {
+    setOverlayActive(false);
+    pushOverlayState({ active: false, message: overlayMessage, background: overlayBg });
+  };
+
+  // Re-broadcast on background/message change while overlay is active so viewers see edits live
+  useEffect(() => {
+    if (!overlayActive) return;
+    const t = setTimeout(() => {
+      pushOverlayState({ active: true, message: overlayMessage, background: overlayBg });
+    }, 250);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayMessage, overlayBg]);
 
   const refreshChat = async () => {
     setIsRefreshingChat(true);
@@ -519,6 +605,12 @@ export function HostStreamInterface({
                       <VideoOff className="w-16 h-16 text-muted-foreground" />
                     </div>
                   )}
+                  {/* Host preview overlay — mirrors what viewers see */}
+                  <StreamOverlay
+                    active={overlayActive}
+                    message={overlayMessage}
+                    background={overlayBg}
+                  />
                   {/* Bottom controls bar */}
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent pt-8 pb-4 px-4">
                     <div className="flex items-end justify-center gap-4">
@@ -706,6 +798,82 @@ export function HostStreamInterface({
                 <p className="text-xs text-muted-foreground mt-2">
                   Share this link with viewers to join your stream (up to{" "}
                   {MAX_VIEWERS} viewers)
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Overlay Control — announcements / title cards / pause screens */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Megaphone className="w-4 h-4" />
+                  Stream Overlay
+                  {overlayActive && (
+                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
+                      LIVE ON SCREEN
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <Input
+                  placeholder="e.g. We'll be right back in 5 minutes..."
+                  value={overlayMessage}
+                  onChange={(e) => setOverlayMessage(e.target.value.slice(0, 120))}
+                  maxLength={120}
+                />
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground mr-1">Background:</span>
+                    {(["dark", "light", "branded"] as const).map((bg) => (
+                      <button
+                        key={bg}
+                        type="button"
+                        onClick={() => setOverlayBg(bg)}
+                        className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
+                          overlayBg === bg
+                            ? "border-primary ring-2 ring-primary/30"
+                            : "border-border hover:border-foreground/30"
+                        }`}
+                        style={{
+                          background:
+                            bg === "dark"
+                              ? "#111"
+                              : bg === "light"
+                                ? "#f5f5f5"
+                                : "hsl(var(--primary))",
+                          color:
+                            bg === "light" ? "#111" : "#fff",
+                        }}
+                      >
+                        {bg}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <span className="text-[11px] text-muted-foreground tabular-nums">
+                      {overlayMessage.length}/120
+                    </span>
+                    {overlayActive ? (
+                      <Button size="sm" variant="destructive" onClick={hideOverlay}>
+                        <EyeOff className="w-4 h-4 mr-1.5" />
+                        Hide
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        onClick={showOverlay}
+                        disabled={!overlayMessage.trim()}
+                      >
+                        <Eye className="w-4 h-4 mr-1.5" />
+                        Show Overlay
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Viewers will see this as a full-screen overlay on top of your video.
+                  Useful for announcements, break screens, or title cards.
                 </p>
               </CardContent>
             </Card>

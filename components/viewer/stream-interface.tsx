@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { vibrateDevice } from "@/lib/utils/notification";
 import { useSimpleStream } from "@/lib/webrtc/simple-stream";
+import { StreamOverlay, type OverlayBackground } from "@/components/stream/stream-overlay";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -94,6 +95,13 @@ export function ViewerStreamInterface({
   const [isPiP, setIsPiP] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  // ---- Host-controlled overlay (announcements / break screens) ----
+  const [overlay, setOverlay] = useState<{
+    active: boolean;
+    message: string;
+    background: OverlayBackground;
+  }>({ active: false, message: "", background: "dark" });
 
   // Track whether the user has completed the join gesture (name dialog submitted).
   // This is the key gate for triggering play() — iOS Safari only allows audio/video
@@ -277,6 +285,20 @@ export function ViewerStreamInterface({
         if (status === "SUBSCRIBED") loadExistingMessages();
       });
 
+    // Also listen for host overlay broadcasts on the same channel (no extra subscription).
+    channel.on("broadcast", { event: "stream-overlay" }, ({ payload }: any) => {
+      if (!payload) return;
+      const bg: OverlayBackground =
+        payload.background === "light" || payload.background === "branded"
+          ? payload.background
+          : "dark";
+      setOverlay({
+        active: !!payload.active,
+        message: typeof payload.message === "string" ? payload.message : "",
+        background: bg,
+      });
+    });
+
     chatChannelRef.current = channel;
 
     const loadExistingMessages = async () => {
@@ -338,6 +360,25 @@ export function ViewerStreamInterface({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ─── Load current overlay state on mount (for mid-stream joiners) ────────
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("streams")
+        .select("overlay_active, overlay_message, overlay_background")
+        .eq("id", stream.id)
+        .single();
+      if (data) {
+        const bg = (data as any).overlay_background;
+        setOverlay({
+          active: !!(data as any).overlay_active,
+          message: (data as any).overlay_message ?? "",
+          background: bg === "light" || bg === "branded" ? bg : "dark",
+        });
+      }
+    })();
+  }, [stream.id, supabase]);
 
   // ─── Load chat messages on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -1022,7 +1063,13 @@ export function ViewerStreamInterface({
                     style={{ display: (isStreamLive && isConnected && remoteStream && hostVideoEnabled) ? undefined : "none" }}
                   />
                   {getVideoContent()}
-                  <div className="absolute top-2 sm:top-3 right-2 sm:right-3">{getConnectionStatusBadge()}</div>
+                  {/* Host-controlled overlay — rendered on top of video, below controls badge */}
+                  <StreamOverlay
+                    active={overlay.active}
+                    message={overlay.message}
+                    background={overlay.background}
+                  />
+                  <div className="absolute top-2 sm:top-3 right-2 sm:right-3 z-30">{getConnectionStatusBadge()}</div>
                 </div>
               </div>
 
