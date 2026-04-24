@@ -167,37 +167,86 @@ export function PrivateMessagesPanel({ streamId, host }: Props) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-1.5 px-1 pb-2 text-[11px] text-muted-foreground">
-        <Lock className="w-3 h-3" />
-        <span>Private to admin, host, co-host, and stream operators. Viewers cannot see this.</span>
+        <Lock className="w-3 h-3 shrink-0" />
+        <span className="truncate">
+          Private to admin, host, co-host, and stream operators.
+        </span>
       </div>
 
-      <ScrollArea className="flex-1 mb-2">
-        <div className="flex flex-col gap-2 pr-2">
+      <ScrollArea className="flex-1 min-h-0 -mx-1 px-1 mb-2">
+        <div className="flex flex-col gap-3 pr-1 pb-1">
           {messages.length === 0 ? (
-            <p className="text-xs text-muted-foreground py-4 text-center">No private messages yet.</p>
+            <div className="flex flex-col items-center gap-1.5 py-8 text-center">
+              <Lock className="w-5 h-5 text-muted-foreground/50" />
+              <p className="text-xs text-muted-foreground">No private messages yet.</p>
+              <p className="text-[10px] text-muted-foreground/70">
+                Start the conversation below — only stream staff will see it.
+              </p>
+            </div>
           ) : (
-            messages.map((m) => {
+            messages.map((m, idx) => {
               const isSelf = m.sender_id === host.id;
               const badge = ROLE_BADGES[m.sender_role] ?? ROLE_BADGES.host;
               const time = new Date(m.created_at).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
               });
+              const prev = messages[idx - 1];
+              const sameAuthorCluster =
+                prev && prev.sender_id === m.sender_id &&
+                new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 2 * 60_000;
+
+              const initial = (m.sender_name || "?").trim().charAt(0).toUpperCase();
+
               return (
                 <div
                   key={m.id}
-                  className={`text-sm px-2 py-1.5 rounded-md border ${
-                    isSelf ? "bg-primary/5 border-primary/20 ml-4" : "bg-muted/20 border-border mr-4"
+                  className={`flex gap-2 ${isSelf ? "flex-row-reverse" : "flex-row"} ${
+                    sameAuthorCluster ? "-mt-1.5" : ""
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-xs font-medium text-foreground">{m.sender_name}</span>
-                    <Badge variant="outline" className={`h-4 text-[9px] px-1 ${badge.className}`}>
-                      {badge.label}
-                    </Badge>
-                    <span className="text-[10px] text-muted-foreground ml-auto">{time}</span>
+                  {!sameAuthorCluster ? (
+                    <div
+                      className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 ${
+                        isSelf
+                          ? "bg-primary/20 text-primary"
+                          : m.sender_role === "admin"
+                            ? "bg-amber-500/20 text-amber-300"
+                            : m.sender_role === "super_user"
+                              ? "bg-purple-500/20 text-purple-300"
+                              : m.sender_role === "cohost"
+                                ? "bg-cyan-500/20 text-cyan-300"
+                                : "bg-blue-500/20 text-blue-300"
+                      }`}
+                    >
+                      {initial}
+                    </div>
+                  ) : (
+                    <div className="w-7 shrink-0" />
+                  )}
+
+                  <div className={`flex flex-col max-w-[78%] ${isSelf ? "items-end" : "items-start"}`}>
+                    {!sameAuthorCluster && (
+                      <div className={`flex items-center gap-1.5 mb-0.5 ${isSelf ? "flex-row-reverse" : ""}`}>
+                        <span className="text-[11px] font-semibold text-foreground truncate max-w-[140px]">
+                          {isSelf ? "You" : m.sender_name}
+                        </span>
+                        <Badge variant="outline" className={`h-4 text-[9px] px-1.5 ${badge.className}`}>
+                          {badge.label}
+                        </Badge>
+                      </div>
+                    )}
+                    <div
+                      className={`px-3 py-1.5 rounded-2xl text-[13px] leading-snug border [overflow-wrap:anywhere] ${
+                        isSelf
+                          ? "bg-primary/15 border-primary/25 text-foreground rounded-tr-sm"
+                          : "bg-muted/40 border-border text-foreground rounded-tl-sm"
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{m.message}</p>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground/80 mt-0.5 px-1">{time}</span>
                   </div>
-                  <p className="text-xs text-foreground whitespace-pre-wrap break-words">{m.message}</p>
                 </div>
               );
             })

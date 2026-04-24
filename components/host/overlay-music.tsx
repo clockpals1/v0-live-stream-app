@@ -25,7 +25,7 @@
  * unchanged.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -88,7 +88,16 @@ interface OverlayMusicProps {
   }) => void;
 }
 
-export function OverlayMusic({
+export interface OverlayMusicHandle {
+  play: () => void | Promise<void>;
+  pause: () => void;
+  stop: () => void;
+  setVolume: (v: number) => void;
+  setMixWithMic: (m: boolean) => void;
+  isReady: () => boolean;
+}
+
+export const OverlayMusic = forwardRef<OverlayMusicHandle, OverlayMusicProps>(function OverlayMusic({
   streamId,
   currentUrl,
   micTrack,
@@ -98,7 +107,7 @@ export function OverlayMusic({
   onUploaded,
   onCleared,
   onStateChange,
-}: OverlayMusicProps) {
+}, ref) {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -295,6 +304,32 @@ export function OverlayMusic({
       toast.error("Could not resume music: " + msg);
     }
   }, [handlePlay, mixWithMic, volume, onStateChange]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      play: async () => {
+        if (audioRef.current) {
+          await handleResume();
+        } else {
+          await handlePlay();
+        }
+      },
+      pause: () => handlePause(),
+      stop: () => handleStop(),
+      setVolume: (v: number) => {
+        const clamped = Math.max(0, Math.min(1, v));
+        setVolume(clamped);
+        onStateChange({ active: playing, volume: clamped, mixWithMic });
+      },
+      setMixWithMic: (m: boolean) => {
+        setMixWithMic(m);
+        onStateChange({ active: playing, volume, mixWithMic: m });
+      },
+      isReady: () => !!currentUrl,
+    }),
+    [handlePlay, handlePause, handleResume, handleStop, mixWithMic, volume, playing, currentUrl, onStateChange],
+  );
 
   // Propagate live volume + mix changes WITHOUT restarting playback.
   useEffect(() => {
@@ -495,4 +530,4 @@ export function OverlayMusic({
       )}
     </div>
   );
-}
+});

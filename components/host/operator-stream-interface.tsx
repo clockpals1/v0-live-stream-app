@@ -44,6 +44,8 @@ import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import { PrivateMessagesPanel } from "@/components/stream/private-messages-panel";
+import { OperatorAudioPanel } from "@/components/host/operator/operator-audio-panel";
+import { OperatorChatPanel } from "@/components/host/operator/operator-chat-panel";
 import {
   Radio,
   Users,
@@ -110,10 +112,8 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
 
   // ── Chat state ────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [newMessage, setNewMessage] = useState("");
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
   const chatChannelRef = useRef<any>(null);
@@ -176,18 +176,17 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
   }, [stream.id, supabase]);
 
   // ── Chat channel + history ────────────────────────────────────────────────
+  const loadMessages = useCallback(async () => {
+    const { data } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("stream_id", stream.id)
+      .order("created_at", { ascending: true })
+      .limit(200);
+    if (data) setMessages(data as ChatMessage[]);
+  }, [stream.id, supabase]);
+
   useEffect(() => {
-    const senderName = host.display_name || "Operator";
-
-    const loadMessages = async () => {
-      const { data } = await supabase
-        .from("chat_messages")
-        .select("*")
-        .eq("stream_id", stream.id)
-        .order("created_at", { ascending: true });
-      if (data) setMessages(data);
-    };
-
     const channel = supabase
       .channel(`chat-room-${stream.id}`, { config: { broadcast: { self: true } } })
       .on("broadcast", { event: "chat-message" }, ({ payload }: { payload: any }) => {
@@ -204,7 +203,7 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
       chatChannelRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stream.id, host.display_name]);
+  }, [stream.id]);
 
   // ── Stream status updates ─────────────────────────────────────────────────
   useEffect(() => {
@@ -226,10 +225,6 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
       supabase.removeChannel(channel);
     };
   }, [stream.id, supabase]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [messages]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const pushOverlayState = useCallback(
@@ -340,21 +335,36 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickerMessage, tickerSpeed, tickerStyle]);
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-    const msgText = newMessage.trim();
-    setNewMessage("");
-    const senderName = `${host.display_name || "Operator"} (operator)`;
-    const { data } = await supabase
-      .from("chat_messages")
-      .insert({ stream_id: stream.id, sender_name: senderName, message: msgText })
-      .select()
-      .single();
-    if (data && chatChannelRef.current) {
-      chatChannelRef.current.send({ type: "broadcast", event: "chat-message", payload: data });
-    }
-  };
+  const operatorDisplayName = host.display_name || "Operator";
+
+  const handleChatSend = useCallback(
+    async (text: string): Promise<boolean> => {
+      const senderName = `${operatorDisplayName} (operator)`;
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .insert({ stream_id: stream.id, sender_name: senderName, message: text })
+        .select()
+        .single();
+      if (error || !data) {
+        console.error("[operator] chat send failed:", error);
+        return false;
+      }
+      try {
+        chatChannelRef.current?.send({
+          type: "broadcast",
+          event: "chat-message",
+          payload: data,
+        });
+      } catch (err) {
+        console.warn("[operator] chat broadcast failed:", err);
+      }
+      setMessages((prev) =>
+        prev.some((m) => m.id === (data as ChatMessage).id) ? prev : [...prev, data as ChatMessage],
+      );
+      return true;
+    },
+    [operatorDisplayName, stream.id, supabase],
+  );
 
   const copyShareLink = () => {
     navigator.clipboard.writeText(shareLink);
@@ -607,6 +617,14 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
               </CardContent>
             </Card>
 
+            {/* Audio / music remote control — commands relayed to owner */}
+            <OperatorAudioPanel
+              streamId={stream.id}
+              isStreamLive={stream.status === "live"}
+              operatorName={operatorDisplayName}
+              channelRef={chatChannelRef}
+            />
+
             <SlideshowPanel streamId={stream.id} chatChannelRef={chatChannelRef} />
           </div>
 
@@ -638,34 +656,12 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
                   </TabsContent>
 
                   <TabsContent value="chat" className="flex-1 px-3 pb-3 mt-2 flex flex-col">
-                    <ScrollArea className="flex-1 mb-2">
-                      <div className="flex flex-col gap-2 pr-2">
-                        {messages.length === 0 ? (
-                          <p className="text-xs text-muted-foreground py-4 text-center">
-                            No messages yet.
-                          </p>
-                        ) : (
-                          messages.map((m) => (
-                            <div key={m.id} className="text-sm">
-                              <span className="text-xs font-medium text-foreground">{m.sender_name}:</span>{" "}
-                              <span className="text-muted-foreground">{m.message}</span>
-                            </div>
-                          ))
-                        )}
-                        <div ref={messagesEndRef} />
-                      </div>
-                    </ScrollArea>
-                    <form onSubmit={sendMessage} className="flex gap-2">
-                      <Input
-                        value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
-                        placeholder="Send to viewers…"
-                        className="text-sm"
-                      />
-                      <Button type="submit" size="sm" disabled={!newMessage.trim()}>
-                        <Send className="w-4 h-4" />
-                      </Button>
-                    </form>
+                    <OperatorChatPanel
+                      senderName={operatorDisplayName}
+                      messages={messages}
+                      onSend={handleChatSend}
+                      onRefresh={loadMessages}
+                    />
                   </TabsContent>
                 </Tabs>
               </CardContent>

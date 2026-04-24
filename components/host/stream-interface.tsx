@@ -18,11 +18,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DirectorPanel } from "@/components/host/director-panel";
 import { StreamOverlay } from "@/components/stream/stream-overlay";
 import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
-import { OverlayMusic } from "@/components/host/overlay-music";
+import { OverlayMusic, type OverlayMusicHandle } from "@/components/host/overlay-music";
 import { OperatorStreamInterface } from "@/components/host/operator-stream-interface";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
+import { PrivateMessagesPanel } from "@/components/stream/private-messages-panel";
 import type { StreamAccess } from "@/lib/rbac";
 import { resolveRole } from "@/lib/rbac";
+import {
+  OPERATOR_COMMAND_EVENT,
+  type OperatorCommandEnvelope,
+} from "@/lib/stream-ops";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import {
@@ -55,6 +60,7 @@ import {
   Eye,
   EyeOff,
   Tv,
+  Lock,
 } from "lucide-react";
 
 interface Stream {
@@ -171,6 +177,7 @@ function OwnerStreamInterface({
   const supabase = supabaseRef.current;
   const activeTabRef = useRef("chat");
   const chatChannelRef = useRef<any>(null);
+  const overlayMusicRef = useRef<OverlayMusicHandle>(null);
 
   const {
     mediaStream,
@@ -330,6 +337,42 @@ function OwnerStreamInterface({
           vibrateDevice();
         }
       })
+      // Remote commands from operators / admins. Only the stream owner's
+      // browser ever executes these — the command just reflects an ops request.
+      .on(
+        "broadcast",
+        { event: OPERATOR_COMMAND_EVENT },
+        ({ payload }: { payload: any }) => {
+          const env = payload as OperatorCommandEnvelope;
+          if (!env?.command) return;
+          const by = env.issuedBy || "Operator";
+          const c = env.command;
+          try {
+            if (c.op === "mic-toggle") {
+              const audioTrack = mediaStream?.getAudioTracks()?.[0];
+              if (audioTrack && audioTrack.enabled !== c.enable) {
+                toggleAudio();
+              }
+              toast.info(`${by} ${c.enable ? "unmuted" : "muted"} your microphone`);
+            } else if (c.op === "music-play") {
+              overlayMusicRef.current?.play();
+              toast.info(`${by} started the overlay music`);
+            } else if (c.op === "music-pause") {
+              overlayMusicRef.current?.pause();
+              toast.info(`${by} paused the overlay music`);
+            } else if (c.op === "music-stop") {
+              overlayMusicRef.current?.stop();
+              toast.info(`${by} stopped the overlay music`);
+            } else if (c.op === "music-volume") {
+              overlayMusicRef.current?.setVolume(c.volume);
+            } else if (c.op === "music-mix-mic") {
+              overlayMusicRef.current?.setMixWithMic(c.mixWithMic);
+            }
+          } catch (err) {
+            console.error("[host] operator-command execution failed:", err);
+          }
+        },
+      )
       .subscribe((status: string) => {
         if (status === "SUBSCRIBED") loadMessages();
       });
@@ -340,7 +383,25 @@ function OwnerStreamInterface({
       supabase.removeChannel(channel);
       chatChannelRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.id, host.display_name]);
+
+  // Whenever our own mic state flips (remote-triggered or clicked locally),
+  // echo the authoritative value to every listener on the channel so the
+  // operator panel shows reality instead of its last optimistic guess.
+  useEffect(() => {
+    const ch = chatChannelRef.current;
+    if (!ch) return;
+    try {
+      ch.send({
+        type: "broadcast",
+        event: "mic-state",
+        payload: { muted: !audioEnabled },
+      });
+    } catch (err) {
+      console.warn("[host] mic-state echo failed:", err);
+    }
+  }, [audioEnabled]);
 
   // Load existing overlay + ticker state from DB on mount (in case host refreshed while active)
   useEffect(() => {
@@ -1095,6 +1156,7 @@ function OwnerStreamInterface({
                     )}
                   </div>
                   <OverlayMusic
+                    ref={overlayMusicRef}
                     streamId={stream.id}
                     currentUrl={overlayMusicUrl}
                     micTrack={mediaStream?.getAudioTracks()[0] ?? null}
@@ -1334,6 +1396,10 @@ function OwnerStreamInterface({
                       <span className="text-muted-foreground">({messages.length})</span>
                     ) : null}
                   </TabsTrigger>
+                  <TabsTrigger value="private" className="flex-1 text-xs gap-1">
+                    <Lock className="w-3.5 h-3.5" />
+                    Private
+                  </TabsTrigger>
                   {isStreamOwner && (
                     <TabsTrigger value="cameras" className="flex-1 text-xs gap-1">
                       <Camera className="w-3.5 h-3.5" />
@@ -1468,6 +1534,14 @@ function OwnerStreamInterface({
                 </div>
               </form>
             </CardContent>
+              </TabsContent>
+
+              {/* Private tab — admin / host / cohost / super_user shared */}
+              <TabsContent
+                value="private"
+                className="flex-1 min-h-0 flex flex-col mt-0 px-3 pb-3 pt-2 overflow-hidden data-[state=active]:flex"
+              >
+                <PrivateMessagesPanel streamId={stream.id} host={host} />
               </TabsContent>
             </Tabs>
           </Card>
