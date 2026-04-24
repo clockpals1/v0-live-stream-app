@@ -26,6 +26,7 @@ import {
   RefreshCw,
   MessageCircle,
   Send,
+  AlertCircle,
 } from "lucide-react";
 
 interface Participant {
@@ -269,7 +270,23 @@ export function CohostStreamInterface({ participant, stream, displayName }: Coho
             </p>
 
             {error && (
-              <p className="text-xs text-destructive mb-3">{error}</p>
+              <div className="mb-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-destructive mb-2">{error}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={reconnectCamera}
+                      className="h-7 text-xs gap-1.5"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Retry Camera Access
+                    </Button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Controls */}

@@ -69,11 +69,44 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
       mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
       mediaStreamRef.current = null;
 
-      const constraints: MediaStreamConstraints = {
-        ...HOST_MEDIA_CONSTRAINTS,
-        video: { ...(HOST_MEDIA_CONSTRAINTS.video as MediaTrackConstraints), facingMode },
-      };
-      let stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Progressive fallback: try ideal constraints first, then simpler ones for compatibility
+      const attempts: MediaStreamConstraints[] = [
+        // Attempt 1: Ideal quality with full audio processing
+        {
+          video: { ...(HOST_MEDIA_CONSTRAINTS.video as MediaTrackConstraints), facingMode },
+          audio: HOST_MEDIA_CONSTRAINTS.audio,
+        },
+        // Attempt 2: Lower resolution, basic audio
+        {
+          video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: true,
+        },
+        // Attempt 3: Bare minimum — any camera, any mic
+        { video: true, audio: true },
+      ];
+
+      let stream: MediaStream | null = null;
+      let lastError: any = null;
+
+      for (let i = 0; i < attempts.length; i++) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(attempts[i]);
+          console.log(`[cohost] Media initialized with constraint level ${i}`);
+          break;
+        } catch (err) {
+          console.warn(`[cohost] getUserMedia attempt ${i} failed:`, err);
+          lastError = err;
+          if (i === attempts.length - 1) {
+            setError("Failed to access camera/microphone. Please check permissions and reload.");
+            throw err;
+          }
+        }
+      }
+
+      if (!stream) {
+        setError("Failed to access camera/microphone. Please check permissions and reload.");
+        throw lastError || new Error("Could not initialize media");
+      }
 
       // On iOS/Android, combined video+audio getUserMedia can silently succeed but
       // return a video-only stream when the mic wasn't pre-permitted. Attempt a
@@ -84,10 +117,11 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
           const audioStream = await navigator.mediaDevices.getUserMedia({
             audio: HOST_MEDIA_CONSTRAINTS.audio,
           });
-          audioStream.getAudioTracks().forEach((t) => stream.addTrack(t));
+          audioStream.getAudioTracks().forEach((t) => stream!.addTrack(t));
           console.log("[cohost] Audio track added via separate capture");
         } catch (audioErr) {
           console.warn("[cohost] Could not capture audio separately:", audioErr);
+          // Continue without audio rather than failing completely
         }
       }
 
@@ -118,7 +152,7 @@ export function useCohostStream({ participantId, streamId }: UseCohostStreamProp
 
       return stream;
     } catch (err) {
-      setError("Failed to access camera/microphone. Please check permissions.");
+      // Error already set in fallback loop above
       throw err;
     }
   }, [updateStatus]);
