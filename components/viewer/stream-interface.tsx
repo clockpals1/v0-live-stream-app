@@ -162,14 +162,29 @@ export function ViewerStreamInterface({
   // Auto-unmute when: the name dialog has been dismissed (user interacted) AND
   // the remote stream is connected. Browsers allow setting video.muted=false at
   // any time after the first user gesture — only video.play() is gesture-gated.
-  // Note: We only unmute here, not call play(). The srcObject effect handles playback.
+  // NOTE: play() MUST be called directly inside the button click handler (user gesture).
+  // Calling play() here in an effect is NOT a valid gesture on iOS Safari.
   useEffect(() => {
     if (!showNameDialog && remoteStream && videoRef.current && !hasManuallyMutedRef.current) {
       console.log('[Viewer] Auto-unmuting after dialog dismissed');
       videoRef.current.muted = false;
       setIsMuted(false);
+      // DO NOT call play() here — it must happen in the button click gesture handler
     }
   }, [showNameDialog, remoteStream]);
+
+  // ---- Gesture-context play helper ----
+  // iOS Safari requires play() to be called DIRECTLY in a user gesture handler.
+  // This helper is called synchronously inside button onClick handlers.
+  const playVideoInGesture = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    console.log('[Viewer] playVideoInGesture called in user gesture');
+    v.muted = false;
+    setIsMuted(false);
+    hasManuallyMutedRef.current = false;
+    v.play().catch(e => console.log('[Viewer] Gesture play() failed:', e));
+  }, []);
 
   const shareLink =
     typeof window !== "undefined"
@@ -185,16 +200,10 @@ export function ViewerStreamInterface({
     if (remoteStream) {
       console.log('[Viewer] Setting video stream:', remoteStream.id, remoteStream.getVideoTracks().length, remoteStream.getAudioTracks().length);
 
-      // ---- Event listeners (attached HERE because video element is conditionally rendered) ----
+      // ---- Event listeners for diagnostics only — play() MUST happen in gesture handler ----
       const onLoadStart = () => console.log('[Viewer] Video event: loadstart');
-      const onLoadedMetadata = () => {
-        console.log('[Viewer] Video event: loadedmetadata');
-        videoElement.play().catch(e => console.log('[Viewer] play() in loadedmetadata:', e));
-      };
-      const onCanPlay = () => {
-        console.log('[Viewer] Video event: canplay');
-        videoElement.play().catch(e => console.log('[Viewer] play() in canplay:', e));
-      };
+      const onLoadedMetadata = () => console.log('[Viewer] Video event: loadedmetadata');
+      const onCanPlay = () => console.log('[Viewer] Video event: canplay');
       const onPlaying = () => console.log('[Viewer] Video event: playing');
       const onError = (e: Event) => console.error('[Viewer] Video event: error', e);
       const onStalled = () => console.log('[Viewer] Video event: stalled');
@@ -211,21 +220,8 @@ export function ViewerStreamInterface({
       // Set the stream
       videoElement.srcObject = remoteStream;
       console.log('[Viewer] srcObject set');
-
-      // Immediate play attempts
-      const tryPlay = () => {
-        if (videoElement && videoElement.srcObject) {
-          videoElement.play().catch(e => console.log('[Viewer] play() attempt failed:', e));
-        }
-      };
-      tryPlay();
-      setTimeout(tryPlay, 100);
-      setTimeout(() => {
-        if (videoElement && videoElement.srcObject && videoElement.paused) {
-          console.log('[Viewer] Video still paused, retrying play()');
-          tryPlay();
-        }
-      }, 500);
+      // NOTE: Do NOT call play() here — iOS Safari requires it in a user gesture.
+      // The button click handler calls playVideoInGesture() which handles play().
 
       return () => {
         videoElement.removeEventListener('loadstart', onLoadStart);
@@ -391,18 +387,17 @@ export function ViewerStreamInterface({
       setHasJoined(true);
       setShowNameDialog(false);
       console.log('[Viewer] Successfully joined stream with name:', viewerName);
-      
-      // Immediately update viewer count after joining
-      setTimeout(() => {
-        const currentCount = viewerCount;
-        setViewerCount(currentCount + 1);
-        console.log('[Viewer] Incremented viewer count to:', currentCount + 1);
-      }, 500);
+
+      // CRITICAL: Call play() directly in the user gesture context (button click).
+      // iOS Safari requires play() to be called synchronously inside the click handler.
+      playVideoInGesture();
     } catch (error) {
       console.error('[Viewer] Exception joining stream:', error);
       // Still allow local join even if database fails
       setHasJoined(true);
       setShowNameDialog(false);
+      // CRITICAL: Gesture context still valid — attempt play even on DB failure
+      playVideoInGesture();
     }
   };
 
@@ -1233,7 +1228,13 @@ export function ViewerStreamInterface({
               Enter your name to join the chat and interact with others
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={(e) => { e.preventDefault(); joinStream(); }}>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            // CRITICAL: play() must be called synchronously in the gesture handler.
+            // joinStream() is async — after await, the browser may exit gesture context.
+            playVideoInGesture();
+            joinStream();
+          }}>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="name">Your Name</Label>
@@ -1252,6 +1253,10 @@ export function ViewerStreamInterface({
                 variant="outline"
                 className="flex-1"
                 onClick={async () => {
+                  // CRITICAL: play() MUST be called synchronously BEFORE any await.
+                  // iOS Safari exits gesture context after the first await.
+                  playVideoInGesture();
+
                   const guestName = "Guest";
                   setViewerName(guestName);
                   try {
