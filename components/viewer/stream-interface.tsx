@@ -556,8 +556,11 @@ export function ViewerStreamInterface({
       // If srcObject is null, do NOT call play() here — it would throw.
       // The remoteStream effect will handle play() as soon as the stream arrives.
     }
-    // Stay muted until playback actually starts; remoteStream effect will flip this.
-    setIsMuted(true);
+    // IMPORTANT: Do NOT call setIsMuted(true) here. The DOM sync effect
+    // (`video.muted = isMuted`) would then race the remoteStream effect's
+    // play().then() unmute and the video could get re-muted mid-transition.
+    // We rely on the DOM-level video.muted=true we set above; React state
+    // (isMuted) is flipped to false inside play().then() when playback starts.
 
     if (typeof window !== "undefined") localStorage.setItem("viewerName", name.trim());
 
@@ -1084,7 +1087,12 @@ export function ViewerStreamInterface({
                   className={`relative bg-black ${isFullscreen ? "fixed inset-0 z-50 w-screen h-screen" : "aspect-video w-full"}`}
                 >
                   {/* Video element is rendered here ALWAYS so the ref never goes stale.
-                      getVideoContent() renders overlays and states on top of it. */}
+                      getVideoContent() renders overlays and states on top of it.
+                      NOTE: do NOT gate the display style on hostVideoEnabled — it can
+                      be momentarily false/undefined right after connection while tracks
+                      settle, which would hide the <video> and lose the gesture context
+                      needed for auto-unmute. The "camera off" UI is handled as an
+                      overlay inside getVideoContent() when tracks are truly absent. */}
                   <video
                     ref={videoRef}
                     autoPlay
@@ -1092,7 +1100,7 @@ export function ViewerStreamInterface({
                     muted={isMuted}
                     controls={false}
                     className="absolute inset-0 w-full h-full object-contain"
-                    style={{ display: (isStreamLive && isConnected && remoteStream && hostVideoEnabled) ? undefined : "none" }}
+                    style={{ display: (isStreamLive && isConnected && remoteStream) ? undefined : "none" }}
                   />
                   {getVideoContent()}
                   {/* Host-controlled overlay — rendered on top of video, below controls badge */}
