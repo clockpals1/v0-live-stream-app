@@ -5,25 +5,72 @@
  * Cloudflare's built-in `cloudflare:sockets` module. Targeted at the
  * Insider Circle broadcast endpoint, so it implements the smallest
  * subset that works against every common managed SMTP relay (SendGrid,
- * Brevo, Mailgun, Postmark, AWS SES, Gmail/Workspace, Zoho, etc.):
+ * Brevo, Mailgun, Postmark, AWS SES, Gmail/Workspace, Zoho, isunday.me,
+ * etc.):
  *
  *   - Implicit TLS on port 465 (startTLS=false)
  *   - STARTTLS on submission port 587/25 (startTLS=true)
  *   - AUTH PLAIN (default)
  *   - One MAIL FROM / RCPT TO / DATA per call
  *
- * Why hand-rolled instead of a library: importing third-party SMTP
- * packages can break OpenNext's bundling because of the way
- * `cloudflare:sockets` interacts with esbuild's module resolution.
- * Touching the Workers built-in directly avoids that entire class of
- * build failure.
+ * ─── Why the dynamic import? ────────────────────────────────────────
+ *
+ * `cloudflare:sockets` is a virtual built-in module that only exists at
+ * runtime inside a Workers/Pages environment. The bundle pipeline for
+ * this project is Next.js (Turbopack) → OpenNext → esbuild, and the
+ * static `import` form gets transformed into a Turbopack chunk like
+ *   `__turbopack_require__("cloudflare:sockets")`
+ * which OpenNext's downstream esbuild then cannot resolve, causing the
+ * build to fail with "Could not resolve 'cloudflare:sockets'".
+ *
+ * The fix is to hide the module specifier from every static-analysis
+ * pass by going through `new Function("return import(...)")`. At
+ * runtime, the Workers runtime sees the bare specifier and resolves it
+ * to the built-in module. At build time, every bundler sees only a
+ * Function constructor with a string argument and leaves it alone.
+ *
+ * This is the same trick used by Next.js itself for some of its
+ * dynamic Edge runtime imports.
  */
 
-// `cloudflare:sockets` is a virtual built-in module that only exists at
-// runtime inside a Workers/Pages environment. The OpenNext bundler is
-// aware of it and marks it external automatically — it will NOT try to
-// resolve it on disk during build.
-import { connect, type Socket } from "cloudflare:sockets";
+// ─── Local types matching the cloudflare:sockets surface we use ─────
+//
+// We keep these inline rather than `import type { Socket } from "cloudflare:sockets"`
+// because some bundler configurations have been observed to retain even
+// type-only imports of virtual modules in their output graph. Inline
+// types are 100% bundler-invisible.
+
+interface CfSocket {
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<Uint8Array>;
+  close(): Promise<void>;
+  startTls(): CfSocket;
+}
+
+interface CfSocketsModule {
+  connect(
+    address: { hostname: string; port: number },
+    options?: { secureTransport?: "on" | "off" | "starttls"; allowHalfOpen?: boolean },
+  ): CfSocket;
+}
+
+let cachedConnect: CfSocketsModule["connect"] | null = null;
+
+async function getConnect(): Promise<CfSocketsModule["connect"]> {
+  if (cachedConnect) return cachedConnect;
+  // Function-constructor dynamic import: invisible to Turbopack, esbuild,
+  // webpack, and every other static analyser. The specifier is never
+  // a string literal in the source AST; it's a runtime argument.
+  const importDynamic = new Function(
+    "spec",
+    "return import(spec)",
+  ) as (spec: string) => Promise<CfSocketsModule>;
+  const mod = await importDynamic("cloudflare:sockets");
+  cachedConnect = mod.connect;
+  return cachedConnect;
+}
+
+// ────────────────────────────────────────────────────────────────────
 
 export interface SmtpConfig {
   host: string;
@@ -43,7 +90,7 @@ export interface SmtpMessage {
 }
 
 export class SmtpClient {
-  private socket: Socket | null = null;
+  private socket: CfSocket | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private buffer = "";
@@ -54,6 +101,7 @@ export class SmtpClient {
 
   async connect(): Promise<void> {
     const { host, port, implicitTls, username, password } = this.config;
+    const connect = await getConnect();
 
     this.socket = connect(
       { hostname: host, port },
@@ -205,7 +253,7 @@ export class SmtpClient {
   }
 
   private safeHelo(host: string): string {
-    // EHLO arg should be a domain or IP. Fall back to host if anything weird.
+    // EHLO arg should be a domain or IP. Fall back to "client" for anything weird.
     return /^[a-zA-Z0-9.\-]+$/.test(host) ? host : "client";
   }
 }
