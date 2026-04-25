@@ -37,16 +37,17 @@ export default function HomePage() {
 
   // Catch auth-email landings that fell back to the bare Site URL.
   // Supabase strips redirect_to silently if it doesn't match the allow list,
-  // and dumps the user at "/?code=...". Without this guard, the user sees the
-  // marketing page with a dangling ?code= and no way to complete password
-  // reset or signup confirmation. Forward to /auth/post-auth which exchanges
-  // the code and routes to the right destination based on user metadata.
+  // and dumps the user at "/?code=..." or "/?token_hash=...&type=...". Without
+  // this guard, the user sees the marketing page with junk in the URL and no
+  // way to complete password reset or signup confirmation. Forward to
+  // /auth/post-auth which verifies the params and routes to the right page.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
-    if (code) {
-      router.replace(`/auth/post-auth?code=${encodeURIComponent(code)}`);
+    const hasAuthParams =
+      params.get("code") || params.get("token_hash");
+    if (hasAuthParams) {
+      router.replace(`/auth/post-auth?${params.toString()}`);
     }
   }, [router]);
 

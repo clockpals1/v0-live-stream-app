@@ -44,6 +44,12 @@ export default function PostAuthPage() {
   useEffect(() => {
     let cancelled = false;
     const supabase = createClient();
+    // Snapshot the ?type= BEFORE exchange — exchangeCodeFromUrl strips
+    // verification params from the URL on success.
+    const urlType =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("type")
+        : null;
     (async () => {
       const result = await exchangeCodeFromUrl(supabase);
       if (cancelled) return;
@@ -64,7 +70,19 @@ export default function PostAuthPage() {
 
       setStage("routing");
 
-      // Decide where to send them based on user metadata.
+      // Prefer the explicit ?type= param (snapshotted before exchange) —
+      // it's an unambiguous signal of intent for token_hash emails.
+      if (urlType === "signup" || urlType === "invite" || urlType === "email_change") {
+        router.replace("/auth/confirmed");
+        return;
+      }
+      if (urlType === "recovery") {
+        router.replace("/auth/reset-password");
+        return;
+      }
+
+      // Fallback heuristic for PKCE / legacy emails without a type hint:
+      // a freshly-confirmed email_confirmed_at means signup just happened.
       const { data } = await supabase.auth.getUser();
       const user = data.user;
       if (!user) {
@@ -80,12 +98,8 @@ export default function PostAuthPage() {
       const justConfirmed = confirmedAt > 0 && now - confirmedAt < FIVE_MIN;
 
       if (justConfirmed) {
-        // Signup confirmation flow.
         router.replace("/auth/confirmed");
       } else {
-        // Older account → assume password recovery (the only other PKCE
-        // email-link flow we send). The reset-password page treats an
-        // existing valid session as "ready" and shows the form.
         router.replace("/auth/reset-password");
       }
     })();
