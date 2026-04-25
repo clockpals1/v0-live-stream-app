@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { exchangeCodeFromUrl } from "@/lib/auth/exchange-code";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,24 +23,21 @@ import { Radio, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
  * FLOW
  * ----
  * 1. User clicks "Send Reset Link" on /auth/forgot-password.
- * 2. Supabase emails them a link of the form
- *      https://<project>.supabase.co/auth/v1/verify?token=...&type=recovery
- *        &redirect_to=https://live.isunday.me/auth/callback?next=/auth/reset-password
- * 3. Clicking the link verifies the token and bounces them to
- *      /auth/callback?code=<auth_code>&next=/auth/reset-password
- * 4. /auth/callback exchanges the code for a session, then redirects here.
- * 5. By the time this page mounts, supabase.auth.getUser() returns the user
- *    in a recovery session. We can call updateUser({ password }).
+ * 2. Supabase emails a link that ultimately lands here as
+ *      /auth/reset-password?code=<pkce_code>
+ * 3. On mount we exchange the code for a recovery session.
+ * 4. Once the session is established, supabase.auth.updateUser({ password })
+ *    works against the authenticated client.
+ *
+ * Each auth-email landing page exchanges its own code (rather than going
+ * through /auth/callback) because Supabase's redirect_to allow list strips
+ * any query-string mismatch. Path-only redirect_to URLs survive consistently.
  *
  * RESILIENCE
  * ----------
- * If the user lands on this page WITHOUT going through /auth/callback (stale
- * link, copy-pasted URL, link clicked twice, etc.) there is no session and
- * updateUser() would fail with "Auth session missing!" — a confusing error.
- *
- * On mount we proactively check for a session and, if missing, render a
- * clear "this link has expired" state with a button to request a new email.
- * No more silent failures on submit.
+ * - No code in URL + no existing session → "link expired" state.
+ * - Code in URL but exchange fails (used / expired / invalid) → same state.
+ * - Code in URL and exchange succeeds OR session already present → form.
  */
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -52,19 +50,21 @@ export default function ResetPasswordPage() {
   >("checking");
   const router = useRouter();
 
-  // Verify a recovery session exists before showing the form. Without this,
-  // a stale or already-used link silently breaks updateUser() at submit time.
+  // Exchange ?code= for a session if present, then verify a session exists.
   useEffect(() => {
     let cancelled = false;
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data, error }) => {
+    (async () => {
+      const result = await exchangeCodeFromUrl(supabase);
       if (cancelled) return;
-      if (error || !data.user) {
-        setSessionState("missing");
-      } else {
+      if (result.status === "ok" || result.status === "already_authed") {
         setSessionState("ready");
+        return;
       }
-    });
+      // no_code / expired / error all map to the same UX:
+      // "this reset link is no longer valid, request a new one".
+      setSessionState("missing");
+    })();
     return () => {
       cancelled = true;
     };

@@ -33,7 +33,12 @@ export default function SignupPage() {
         // Always use the canonical site URL (NEXT_PUBLIC_APP_URL) so the
         // confirmation email points at production even if the user signed
         // up from a preview/staging build or local dev.
-        emailRedirectTo: authRedirect("/auth/callback"),
+        //
+        // Point directly at /auth/confirmed — that page exchanges the
+        // ?code= itself and renders a clean success/error UI. Going via
+        // /auth/callback is unreliable because Supabase strips redirect_to
+        // when it doesn't match the dashboard allow list exactly.
+        emailRedirectTo: authRedirect("/auth/confirmed"),
         data: {
           display_name: displayName,
         },

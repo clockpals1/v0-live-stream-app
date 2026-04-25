@@ -24,13 +24,16 @@ export default function ForgotPasswordPage() {
     const supabase = createClient();
     // Always use the canonical site URL (NEXT_PUBLIC_APP_URL) so the email
     // link points at production even if the user clicked "Forgot password"
-    // from a preview/staging build. Route through /auth/callback first —
-    // that route exchanges the PKCE code for a session, then redirects to
-    // /auth/reset-password where the user can submit the new password
-    // against an authenticated client. Skipping the callback was the cause
-    // of "Auth session missing!" on submit.
+    // from a preview/staging build.
+    //
+    // We point redirect_to directly at /auth/reset-password (no /auth/callback
+    // hop, no query string). The reset-password page exchanges its own
+    // ?code= on mount. This is more reliable than going through /auth/callback
+    // because Supabase's "Redirect URLs" allow list silently strips any URL
+    // that doesn't match exactly — query strings in particular are fragile.
+    // Path-only redirect_to URLs are far more robust to allow-list mismatches.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: authRedirect("/auth/callback?next=/auth/reset-password"),
+      redirectTo: authRedirect("/auth/reset-password"),
     });
 
     if (error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,21 @@ import {
 export default function HomePage() {
   const [roomCode, setRoomCode] = useState("");
   const router = useRouter();
+
+  // Catch auth-email landings that fell back to the bare Site URL.
+  // Supabase strips redirect_to silently if it doesn't match the allow list,
+  // and dumps the user at "/?code=...". Without this guard, the user sees the
+  // marketing page with a dangling ?code= and no way to complete password
+  // reset or signup confirmation. Forward to /auth/post-auth which exchanges
+  // the code and routes to the right destination based on user metadata.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    if (code) {
+      router.replace(`/auth/post-auth?code=${encodeURIComponent(code)}`);
+    }
+  }, [router]);
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
