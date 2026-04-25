@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { authRedirect } from "@/lib/auth/site-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,9 +30,10 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo:
-          process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
-          `${window.location.origin}/auth/callback`,
+        // Always use the canonical site URL (NEXT_PUBLIC_APP_URL) so the
+        // confirmation email points at production even if the user signed
+        // up from a preview/staging build or local dev.
+        emailRedirectTo: authRedirect("/auth/callback"),
         data: {
           display_name: displayName,
         },

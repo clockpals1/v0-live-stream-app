@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { authRedirect } from "@/lib/auth/site-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,10 +22,15 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     const supabase = createClient();
+    // Always use the canonical site URL (NEXT_PUBLIC_APP_URL) so the email
+    // link points at production even if the user clicked "Forgot password"
+    // from a preview/staging build. Route through /auth/callback first —
+    // that route exchanges the PKCE code for a session, then redirects to
+    // /auth/reset-password where the user can submit the new password
+    // against an authenticated client. Skipping the callback was the cause
+    // of "Auth session missing!" on submit.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo:
-        process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
-        `${window.location.origin}/auth/reset-password`,
+      redirectTo: authRedirect("/auth/callback?next=/auth/reset-password"),
     });
 
     if (error) {
