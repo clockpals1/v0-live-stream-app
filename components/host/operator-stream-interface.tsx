@@ -46,6 +46,7 @@ import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import { PrivateMessagesPanel } from "@/components/stream/private-messages-panel";
 import { OperatorAudioPanel } from "@/components/host/operator/operator-audio-panel";
 import { OperatorChatPanel } from "@/components/host/operator/operator-chat-panel";
+import { persistDisplayState } from "@/lib/display-state";
 import {
   Radio,
   Users,
@@ -240,21 +241,24 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
       } catch (err) {
         console.error("[op] broadcast overlay failed:", err);
       }
-      try {
-        await supabase
-          .from("streams")
-          .update({
-            overlay_active: payload.active,
-            overlay_message: payload.message,
-            overlay_background: payload.background,
-            overlay_image_url: payload.imageUrl,
-          })
-          .eq("id", stream.id);
-      } catch (err) {
-        console.error("[op] persist overlay failed:", err);
+      // Authoritative server-side persistence — bypasses any RLS / column
+      // grant edge case so a late-joining viewer always rehydrates the same
+      // state in-flight viewers received via broadcast. This is the root
+      // cause fix for the "refreshing viewer loses overlay" bug.
+      const result = await persistDisplayState(stream.id, {
+        overlay: {
+          active: payload.active,
+          message: payload.message,
+          background: payload.background,
+          imageUrl: payload.imageUrl,
+        },
+      });
+      if (!result.ok) {
+        console.error("[op] persist overlay failed:", result.error);
+        toast.error("Overlay not saved (refreshing viewers may not see it): " + result.error);
       }
     },
-    [overlayBg, stream.id, supabase],
+    [overlayBg, stream.id],
   );
 
   const showOverlay = () => {
@@ -294,21 +298,20 @@ export function OperatorStreamInterface({ stream: initialStream, host, accessMod
       } catch (err) {
         console.error("[op] broadcast ticker failed:", err);
       }
-      try {
-        await supabase
-          .from("streams")
-          .update({
-            ticker_active: payload.active,
-            ticker_message: payload.message,
-            ticker_speed: payload.speed,
-            ticker_style: payload.style,
-          })
-          .eq("id", stream.id);
-      } catch (err) {
-        console.error("[op] persist ticker failed:", err);
+      const result = await persistDisplayState(stream.id, {
+        ticker: {
+          active: payload.active,
+          message: payload.message,
+          speed: payload.speed,
+          style: payload.style,
+        },
+      });
+      if (!result.ok) {
+        console.error("[op] persist ticker failed:", result.error);
+        toast.error("Ticker not saved (refreshing viewers may not see it): " + result.error);
       }
     },
-    [stream.id, supabase],
+    [stream.id],
   );
 
   const startTicker = () => {

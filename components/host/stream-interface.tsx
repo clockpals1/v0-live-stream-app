@@ -28,6 +28,7 @@ import {
   OPERATOR_COMMAND_EVENT,
   type OperatorCommandEnvelope,
 } from "@/lib/stream-ops";
+import { persistDisplayState } from "@/lib/display-state";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
 import {
@@ -460,18 +461,20 @@ function OwnerStreamInterface({
     } catch (err) {
       console.error("[Host] Failed to broadcast overlay:", err);
     }
-    try {
-      await supabase
-        .from("streams")
-        .update({
-          overlay_active: payload.active,
-          overlay_message: payload.message,
-          overlay_background: payload.background,
-          overlay_image_url: payload.imageUrl,
-        })
-        .eq("id", stream.id);
-    } catch (err) {
-      console.error("[Host] Failed to persist overlay:", err);
+    // Authoritative persistence via the server endpoint. Service-role write
+    // bypasses any RLS / column-grant edge case, so refreshing viewers
+    // always rehydrate the same state in-flight viewers see via broadcast.
+    const result = await persistDisplayState(stream.id, {
+      overlay: {
+        active: payload.active,
+        message: payload.message,
+        background: payload.background,
+        imageUrl: payload.imageUrl,
+      },
+    });
+    if (!result.ok) {
+      console.error("[Host] Failed to persist overlay:", result.error);
+      toast.error("Overlay not saved (refreshing viewers may not see it): " + result.error);
     }
   };
 
@@ -561,18 +564,17 @@ function OwnerStreamInterface({
     } catch (err) {
       console.error("[Host] Failed to broadcast ticker:", err);
     }
-    try {
-      await supabase
-        .from("streams")
-        .update({
-          ticker_active: payload.active,
-          ticker_message: payload.message,
-          ticker_speed: payload.speed,
-          ticker_style: payload.style,
-        })
-        .eq("id", stream.id);
-    } catch (err) {
-      console.error("[Host] Failed to persist ticker:", err);
+    const result = await persistDisplayState(stream.id, {
+      ticker: {
+        active: payload.active,
+        message: payload.message,
+        speed: payload.speed,
+        style: payload.style,
+      },
+    });
+    if (!result.ok) {
+      console.error("[Host] Failed to persist ticker:", result.error);
+      toast.error("Ticker not saved (refreshing viewers may not see it): " + result.error);
     }
   };
 

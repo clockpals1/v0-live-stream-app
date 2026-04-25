@@ -88,6 +88,18 @@ export function OperatorAudioPanel({ streamId, isStreamLive, operatorName, chann
   const [progress, setProgress] = useState(0);
   const [sending, setSending] = useState<string | null>(null); // op id currently dispatching
 
+  // ── Operator's OWN browser microphone (local — separate from the remote
+  // command that controls the host's mic above). This lets the operator
+  // mute / unmute their own input device for things like talking over a
+  // separate voice channel (Discord / Zoom) or recording voice notes,
+  // without interfering with the broadcast itself. The operator's mic is
+  // NOT pushed to viewers — only the host publishes audio to peers.
+  const localMicStreamRef = useRef<MediaStream | null>(null);
+  const [localMicReady, setLocalMicReady] = useState(false);
+  const [localMicMuted, setLocalMicMuted] = useState(true); // default: muted until user clicks
+  const [localMicError, setLocalMicError] = useState<string | null>(null);
+  const [localMicBusy, setLocalMicBusy] = useState(false);
+
   // ── Load + subscribe to live state from DB ──────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +209,75 @@ export function OperatorAudioPanel({ streamId, isStreamLive, operatorName, chann
     }
   };
 
+  // ── Operator's OWN microphone (local browser only) ───────────────────────
+  // First click opens the OS permission prompt and acquires the device.
+  // Subsequent toggles just flip MediaStreamTrack.enabled — no re-prompt,
+  // no track stop / restart, no glitch. We deliberately START muted so the
+  // operator hears no surprise echo if their headphones are off the head.
+  const toggleLocalMic = useCallback(async () => {
+    setLocalMicError(null);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setLocalMicError("Microphone API is not available in this browser.");
+      return;
+    }
+
+    setLocalMicBusy(true);
+    try {
+      // Lazy-acquire the device on the first toggle.
+      if (!localMicStreamRef.current) {
+        const ms = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+        // Start muted — explicit toggle by the user is what flips it on.
+        ms.getAudioTracks().forEach((t) => (t.enabled = false));
+        localMicStreamRef.current = ms;
+        setLocalMicReady(true);
+        setLocalMicMuted(true);
+        // Now perform the toggle the user just clicked.
+      }
+
+      const tracks = localMicStreamRef.current.getAudioTracks();
+      if (tracks.length === 0) {
+        setLocalMicError("No microphone tracks available on the captured stream.");
+        return;
+      }
+
+      const next = !tracks[0].enabled;
+      tracks.forEach((t) => (t.enabled = next));
+      setLocalMicMuted(!next);
+      toast.success(next ? "Your mic is now ON (local only)" : "Your mic is now OFF");
+    } catch (err: any) {
+      console.error("[operator-audio] local mic toggle failed:", err);
+      const msg =
+        err?.name === "NotAllowedError"
+          ? "Microphone permission was blocked. Allow it in your browser site settings to use this toggle."
+          : err?.message ?? "Could not access the microphone.";
+      setLocalMicError(msg);
+      toast.error(msg);
+    } finally {
+      setLocalMicBusy(false);
+    }
+  }, []);
+
+  // Stop the device when the panel unmounts so we don't leave the indicator
+  // light on / the OS busy state stuck after the operator navigates away.
+  useEffect(() => {
+    return () => {
+      const ms = localMicStreamRef.current;
+      if (ms) {
+        ms.getTracks().forEach((t) => {
+          try { t.stop(); } catch { /* ignore */ }
+        });
+        localMicStreamRef.current = null;
+      }
+    };
+  }, []);
+
   // ── Music upload ────────────────────────────────────────────────────────
   const doUpload = async (file: File) => {
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -300,7 +381,66 @@ export function OperatorAudioPanel({ streamId, isStreamLive, operatorName, chann
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {/* ── Mic control ── */}
+        {/* ── Operator's OWN microphone (local browser only — does NOT
+             reach viewers; only the host publishes audio over WebRTC). ── */}
+        <div className="flex items-center gap-3 p-3 rounded-md border border-border bg-muted/10">
+          <div
+            className={`w-10 h-10 rounded-full flex items-center justify-center ${
+              localMicReady && !localMicMuted
+                ? "bg-emerald-500/15 text-emerald-400"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {localMicReady && !localMicMuted ? (
+              <Mic className="w-5 h-5" />
+            ) : (
+              <MicOff className="w-5 h-5" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground flex items-center gap-1.5 flex-wrap">
+              Your microphone
+              <Badge
+                variant="outline"
+                className="text-[9px] h-4 px-1.5 border-border text-muted-foreground"
+              >
+                LOCAL
+              </Badge>
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {!localMicReady
+                ? "Click to enable your mic (will request permission)."
+                : localMicMuted
+                ? "Off — your mic is muted on this device."
+                : "On — your mic is active locally. Viewers do NOT hear it."}
+            </p>
+            {localMicError && (
+              <p className="text-[11px] text-red-400 mt-0.5">{localMicError}</p>
+            )}
+          </div>
+          <Button
+            size="sm"
+            variant={localMicReady && !localMicMuted ? "secondary" : "default"}
+            onClick={toggleLocalMic}
+            disabled={localMicBusy}
+            title={
+              localMicReady && !localMicMuted
+                ? "Mute your local microphone"
+                : "Turn on your local microphone"
+            }
+          >
+            {localMicBusy ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : localMicReady && !localMicMuted ? (
+              <MicOff className="w-3.5 h-3.5 mr-1.5" />
+            ) : (
+              <Mic className="w-3.5 h-3.5 mr-1.5" />
+            )}
+            {localMicReady && !localMicMuted ? "Turn off" : "Turn on"}
+          </Button>
+        </div>
+
+        {/* ── Host microphone (remote command — actual broadcast audio) ── */}
         <div className="flex items-center gap-3 p-3 rounded-md border border-border bg-muted/20">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
             state.micMuted ? "bg-red-500/15 text-red-400" : "bg-emerald-500/15 text-emerald-400"
@@ -308,8 +448,14 @@ export function OperatorAudioPanel({ streamId, isStreamLive, operatorName, chann
             {state.micMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground">
+            <p className="text-sm font-medium text-foreground flex items-center gap-1.5 flex-wrap">
               Host microphone
+              <Badge
+                variant="outline"
+                className="text-[9px] h-4 px-1.5 border-amber-500/40 text-amber-500"
+              >
+                ON AIR
+              </Badge>
             </p>
             <p className="text-[11px] text-muted-foreground">
               {state.micMuted ? "Currently muted — viewers can't hear the host" : "Live — viewers hear the host"}
