@@ -239,21 +239,32 @@ export function SlideshowPanel({ streamId, chatChannelRef }: SlideshowPanelProps
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium flex items-center gap-2">
-          <Images className="w-4 h-4" />
-          Image Slideshow
-          {active && (
-            <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
-              LIVE
-            </Badge>
-          )}
-          {slides.length > 0 && (
-            <span className="text-[11px] text-muted-foreground ml-auto">
-              {slides.length} slide{slides.length === 1 ? "" : "s"}
-            </span>
-          )}
-        </CardTitle>
+      <CardHeader className="pb-3 border-b">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+              <Images className="w-4 h-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-sm font-semibold">Image Slideshow</CardTitle>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Cycle through still images viewers see in place of your camera.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {slides.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                {slides.length} slide{slides.length === 1 ? "" : "s"}
+              </span>
+            )}
+            {active && (
+              <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
+                LIVE
+              </Badge>
+            )}
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {/* Add a slide */}

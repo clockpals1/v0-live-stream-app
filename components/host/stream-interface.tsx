@@ -862,25 +862,35 @@ function OwnerStreamInterface({
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" asChild>
+      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="ghost" size="sm" asChild className="h-8 -ml-2 px-2">
               <Link href="/host/dashboard">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
+                <ArrowLeft className="w-4 h-4 mr-1.5" />
+                <span className="hidden sm:inline">Back</span>
               </Link>
             </Button>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <Radio className="w-4 h-4 text-primary-foreground" />
+            <div className="h-5 w-px bg-border hidden sm:block" />
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center shrink-0">
+                <Radio className="w-3.5 h-3.5 text-primary-foreground" />
               </div>
-              <span className="font-bold text-foreground">
+              <span className="font-semibold text-foreground hidden md:inline">
                 Isunday Stream Live
               </span>
             </div>
+            <div className="h-5 w-px bg-border" />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden sm:inline">
+                Room
+              </span>
+              <code className="text-xs font-mono font-semibold text-foreground bg-muted px-2 py-0.5 rounded">
+                {stream.room_code}
+              </code>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 shrink-0">
             {(isAdmin || isStreamOwner) && (
               <StreamOperatorsDialog
                 streamId={stream.id}
@@ -888,27 +898,27 @@ function OwnerStreamInterface({
               />
             )}
             {isStreaming && !isPaused && (
-              <Badge className="bg-red-500 text-white animate-pulse">
-                <Circle className="w-2 h-2 mr-1 fill-current" />
+              <Badge className="bg-red-500 text-white animate-pulse gap-1.5 h-6 px-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-white" />
                 LIVE
               </Badge>
             )}
             {isStreaming && isPaused && (
-              <Badge className="bg-orange-500 text-white">
-                <Pause className="w-2 h-2 mr-1" />
+              <Badge className="bg-orange-500 text-white gap-1 h-6 px-2">
+                <Pause className="w-2.5 h-2.5" />
                 PAUSED
               </Badge>
             )}
             {isRecording && (
-              <Badge variant="outline" className="text-red-500 border-red-500">
-                <Circle className="w-2 h-2 mr-1 fill-red-500" />
+              <Badge variant="outline" className="text-red-500 border-red-500 gap-1 h-6 px-2">
+                <Circle className="w-2 h-2 fill-red-500" />
                 REC
               </Badge>
             )}
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Users className="w-4 h-4" />
-              <span>
-                {connectedViewers}/{viewerCount} connected
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground border border-border rounded-md h-6 px-2">
+              <Users className="w-3.5 h-3.5" />
+              <span className="tabular-nums text-xs font-medium">
+                {connectedViewers}<span className="text-muted-foreground/60">/{viewerCount}</span>
               </span>
             </div>
           </div>
@@ -1081,17 +1091,18 @@ function OwnerStreamInterface({
               </CardContent>
             </Card>
 
-            {/* Stream Controls */}
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h1 className="text-xl font-semibold text-foreground">
+            {/* Stage Controls — visually fused to the video card above */}
+            <Card className="-mt-4 rounded-t-none border-t-0">
+              <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl font-semibold text-foreground truncate">
                   {stream.title}
                 </h1>
-                <p className="text-sm text-muted-foreground">
-                  Room: {stream.room_code} - Max {MAX_VIEWERS} viewers
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Up to {MAX_VIEWERS} viewers · Room <code className="font-mono">{stream.room_code}</code>
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
                 {stream.status === "ended" ? (
                   <>
                     {/* Restart in place — same room_code, same watch URL,
@@ -1164,47 +1175,62 @@ function OwnerStreamInterface({
                   <Button
                     onClick={handleStartStream}
                     disabled={!mediaInitialized}
+                    size="lg"
+                    className="bg-red-500 hover:bg-red-600 text-white gap-2 shadow-md shadow-red-500/20"
                   >
-                    <Circle className="w-4 h-4 mr-2 fill-current" />
+                    <Circle className="w-4 h-4 fill-current" />
                     Go Live
                   </Button>
                 )}
               </div>
-            </div>
-
-            {/* Share Link */}
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={shareLink}
-                    readOnly
-                    className="font-mono text-sm"
-                  />
-                  <Button variant="outline" onClick={copyShareLink}>
-                    <Copy className="w-4 h-4 mr-2" />
-                    {copied ? "Copied!" : "Copy"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Share this link with viewers to join your stream (up to{" "}
-                  {MAX_VIEWERS} viewers)
-                </p>
               </CardContent>
             </Card>
 
+            {/* Share Link — slim info strip, this is a one-shot action */}
+            <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
+              <Copy className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0 hidden sm:inline">
+                Viewer link
+              </span>
+              <Input
+                value={shareLink}
+                readOnly
+                className="font-mono text-xs h-7 border-0 bg-transparent shadow-none focus-visible:ring-0 px-1"
+              />
+              <Button variant="outline" size="sm" onClick={copyShareLink} className="h-7 shrink-0">
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+
+            {/* ── Producer Tools ─────────────────────────────────────────── */}
+            <div className="flex items-center gap-2 pt-2">
+              <span className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+                Producer Tools
+              </span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
             {/* Overlay Control — announcements / title cards / pause screens */}
             <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Megaphone className="w-4 h-4" />
-                  Stream Overlay
+              <CardHeader className="pb-3 border-b">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                      <Megaphone className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle className="text-sm font-semibold">Stream Overlay</CardTitle>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Full-screen image, text, or music shown over your video.
+                      </p>
+                    </div>
+                  </div>
                   {overlayActive && (
-                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
+                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5 shrink-0">
                       LIVE ON SCREEN
                     </Badge>
                   )}
-                </CardTitle>
+                </div>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <Input
@@ -1315,16 +1341,25 @@ function OwnerStreamInterface({
 
             {/* Ticker Control — scrolling news-style crawl under the video */}
             <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Tv className="w-4 h-4" />
-                  Stream Ticker
+              <CardHeader className="pb-3 border-b">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                      <Tv className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle className="text-sm font-semibold">Stream Ticker</CardTitle>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Breaking-news style crawl across the bottom of viewers&apos; screens.
+                      </p>
+                    </div>
+                  </div>
                   {tickerActive && (
-                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
+                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5 shrink-0">
                       SCROLLING
                     </Badge>
                   )}
-                </CardTitle>
+                </div>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <textarea
@@ -1425,13 +1460,23 @@ function OwnerStreamInterface({
             {/* Connected Viewers */}
             {viewers.length > 0 && (
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    Connected Viewers ({connectedViewers})
-                  </CardTitle>
+                <CardHeader className="pb-3 border-b">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+                        <Users className="w-4 h-4 text-primary" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm font-semibold">Connected Viewers</CardTitle>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Audience currently joined to your stream.
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="secondary" className="tabular-nums">{connectedViewers}</Badge>
+                  </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-4">
                   <div className="flex flex-wrap gap-2">
                     {viewers.map((viewer) => (
                       <Badge
@@ -1453,8 +1498,10 @@ function OwnerStreamInterface({
             )}
           </div>
 
-          {/* Right Sidebar: Chat + Director Panel */}
-          <Card className="lg:col-span-1 flex flex-col h-[600px] overflow-hidden">
+          {/* Right Sidebar: Chat + Director Panel — sticky on desktop so the
+              host can keep an eye on chat/cameras while scrolling through
+              the Producer Tools below. */}
+          <Card className="lg:col-span-1 flex flex-col overflow-hidden h-[calc(100vh-7rem)] lg:sticky lg:top-20 lg:self-start">
             <Tabs
               defaultValue="chat"
               className="flex flex-col h-full"
