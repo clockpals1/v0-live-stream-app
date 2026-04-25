@@ -84,7 +84,9 @@ export async function POST(request: Request) {
       {
         error:
           "Email sending is not configured. Ask the site owner to set " +
-          "RESEND_API_KEY and RESEND_FROM in the deployment environment.",
+          "either SMTP_* env vars (SMTP_HOST, SMTP_PORT, SMTP_USER, " +
+          "SMTP_PASS, SMTP_FROM) or Resend env vars (RESEND_API_KEY, " +
+          "RESEND_FROM) in the deployment environment.",
         configured: false,
       },
       { status: 503 },

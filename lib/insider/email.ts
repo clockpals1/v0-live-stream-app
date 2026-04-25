@@ -1,15 +1,33 @@
 /**
- * Resend wrapper for Insider Circle broadcasts.
+ * Insider Circle email transport.
  *
- * Why the lazy import: the Resend package pulls in node:stream; importing
- * it at module top would crash the Cloudflare worker bundle on routes
- * that never send mail. We construct the client only inside sendBatch().
+ * Supports two backends, picked by environment variables. SMTP is checked
+ * first because most production deployments already have an SMTP relay
+ * paid for (the same one Supabase Auth uses). Resend is the fallback.
  *
- * Edge-runtime safe: the underlying SDK calls fetch() against the public
- * Resend REST API — no Node-only APIs are used.
+ *   ┌─────────────────────────────┬─────────────────────────────────────┐
+ *   │ Required env vars           │ Backend used                        │
+ *   ├─────────────────────────────┼─────────────────────────────────────┤
+ *   │ SMTP_HOST + SMTP_PORT +     │ Direct SMTP via worker-mailer       │
+ *   │ SMTP_USER + SMTP_PASS +     │ (uses Cloudflare's connect() API,   │
+ *   │ SMTP_FROM                   │ runs on Workers and Node alike)     │
+ *   ├─────────────────────────────┼─────────────────────────────────────┤
+ *   │ RESEND_API_KEY +            │ Resend HTTPS REST API               │
+ *   │ RESEND_FROM                 │                                     │
+ *   └─────────────────────────────┴─────────────────────────────────────┘
+ *
+ * Both paths surface per-recipient errors so the broadcast endpoint can
+ * record partial-success state in `host_broadcasts.failed_count`.
+ *
+ * NOTE on Supabase SMTP: the SMTP credentials you configure inside
+ * Supabase Auth are NOT reachable from application code — Supabase only
+ * uses them for transactional auth emails (signup confirmations, magic
+ * links, password resets). To reuse the same SMTP for app-sent emails
+ * you must copy the same HOST/PORT/USER/PASS/FROM into the Cloudflare
+ * Pages env vars under SMTP_*.
  */
 
-const RESEND_BATCH_LIMIT = 100; // Resend's documented batch ceiling
+const RESEND_BATCH_LIMIT = 100;
 
 export interface BatchPayloadItem {
   to: string;
@@ -23,29 +41,142 @@ export interface SendResult {
   errors: Array<{ email: string; reason: string }>;
 }
 
+export type EmailBackend = "smtp" | "resend" | null;
+
 export class EmailNotConfiguredError extends Error {
   constructor() {
     super(
-      "Email sending is not configured. Set RESEND_API_KEY and RESEND_FROM " +
-        "in your environment, then redeploy.",
+      "Email sending is not configured. Set either SMTP_* env vars " +
+        "(SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM) or " +
+        "Resend env vars (RESEND_API_KEY, RESEND_FROM), then redeploy.",
     );
     this.name = "EmailNotConfiguredError";
   }
 }
 
+/**
+ * Returns which backend will be used, or null if neither is fully
+ * configured. Used by the broadcast endpoint to short-circuit with a
+ * clear setup-required message before doing any DB work.
+ */
+export function detectBackend(): EmailBackend {
+  if (
+    process.env.SMTP_HOST &&
+    process.env.SMTP_PORT &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS &&
+    process.env.SMTP_FROM
+  ) {
+    return "smtp";
+  }
+  if (process.env.RESEND_API_KEY && process.env.RESEND_FROM) {
+    return "resend";
+  }
+  return null;
+}
+
 export function isEmailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM);
+  return detectBackend() !== null;
 }
 
 /**
- * Send a fan-out batch via Resend's /emails/batch endpoint. Handles
- * Resend's per-request 100-message ceiling by chunking. Errors per
- * message are surfaced individually so the caller can record partial
- * success rather than aborting the whole broadcast.
+ * Send a fan-out batch. Routes to whichever backend is configured.
  */
 export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> {
-  if (!isEmailConfigured()) throw new EmailNotConfiguredError();
+  const backend = detectBackend();
+  if (!backend) throw new EmailNotConfiguredError();
 
+  if (backend === "smtp") return sendBatchSmtp(items);
+  return sendBatchResend(items);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// SMTP backend (preferred — reuses the user's existing relay)
+// ────────────────────────────────────────────────────────────────────────
+
+async function sendBatchSmtp(items: BatchPayloadItem[]): Promise<SendResult> {
+  // Lazy import: keeps the package out of the bundle for Resend-only users
+  // and avoids any module-level side effects on cold starts.
+  const { WorkerMailer } = await import("worker-mailer");
+
+  const host = process.env.SMTP_HOST!;
+  const port = Number(process.env.SMTP_PORT!);
+  const username = process.env.SMTP_USER!;
+  const password = process.env.SMTP_PASS!;
+  const from = process.env.SMTP_FROM!;
+  // Most managed SMTP relays (SendGrid 587, Brevo 587, Mailgun 587, AWS SES 587)
+  // accept STARTTLS on submission ports. Implicit TLS is on 465.
+  // We auto-pick from port unless SMTP_SECURE is set explicitly.
+  const explicit = process.env.SMTP_SECURE?.toLowerCase();
+  const secure: boolean =
+    explicit === "true"
+      ? true
+      : explicit === "false"
+        ? false
+        : port === 465; // implicit TLS for 465, STARTTLS for everything else
+  const credentials =
+    (process.env.SMTP_AUTH?.toLowerCase() as "plain" | "login" | undefined) ||
+    "plain";
+
+  let sent = 0;
+  let failed = 0;
+  const errors: Array<{ email: string; reason: string }> = [];
+
+  // Open a single connection and send sequentially. SMTP submission
+  // services typically rate-limit per-connection but allow many messages
+  // per session, so this is the most efficient pattern.
+  let mailer: InstanceType<typeof WorkerMailer> | null = null;
+  try {
+    mailer = await WorkerMailer.connect({
+      host,
+      port,
+      secure,
+      credentials: { username, password, authType: credentials },
+    });
+
+    for (const it of items) {
+      try {
+        await mailer.send({
+          from,
+          to: it.to,
+          subject: it.subject,
+          html: it.html,
+        });
+        sent++;
+      } catch (err: unknown) {
+        failed++;
+        errors.push({
+          email: it.to,
+          reason: err instanceof Error ? err.message : "SMTP send failed",
+        });
+      }
+    }
+  } catch (err: unknown) {
+    // Couldn't even open the connection — every recipient fails the same way.
+    const reason =
+      err instanceof Error
+        ? `SMTP connect failed: ${err.message}`
+        : "SMTP connect failed";
+    for (const it of items.slice(sent)) {
+      failed++;
+      errors.push({ email: it.to, reason });
+    }
+  } finally {
+    try {
+      await mailer?.close();
+    } catch {
+      // ignore close errors
+    }
+  }
+
+  return { sent, failed, errors };
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Resend backend (fallback)
+// ────────────────────────────────────────────────────────────────────────
+
+async function sendBatchResend(items: BatchPayloadItem[]): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY!;
   const from = process.env.RESEND_FROM!;
 
@@ -53,7 +184,6 @@ export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> 
   let failed = 0;
   const errors: Array<{ email: string; reason: string }> = [];
 
-  // Chunk by Resend batch limit
   for (let i = 0; i < items.length; i += RESEND_BATCH_LIMIT) {
     const chunk = items.slice(i, i + RESEND_BATCH_LIMIT);
     const body = chunk.map((it) => ({
@@ -75,11 +205,12 @@ export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> 
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        // Whole chunk failed — count each address as failed with the
-        // top-level error so the host gets useful diagnostic info.
         for (const it of chunk) {
           failed++;
-          errors.push({ email: it.to, reason: `HTTP ${res.status}: ${text.slice(0, 200)}` });
+          errors.push({
+            email: it.to,
+            reason: `HTTP ${res.status}: ${text.slice(0, 200)}`,
+          });
         }
         continue;
       }
@@ -88,7 +219,6 @@ export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> 
         | { data?: Array<{ id?: string; error?: { message?: string } }> }
         | null;
 
-      // Resend batch returns one entry per submitted message, in order.
       const data = json?.data ?? [];
       for (let j = 0; j < chunk.length; j++) {
         const entry = data[j];
@@ -103,7 +233,6 @@ export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> 
         }
       }
     } catch (err: unknown) {
-      // Whole-chunk network failure
       const reason = err instanceof Error ? err.message : "Network error";
       for (const it of chunk) {
         failed++;
@@ -115,15 +244,16 @@ export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> 
   return { sent, failed, errors };
 }
 
-/**
- * Build the public unsubscribe URL for a subscriber token. Reads the
- * deployment's app origin from APP_URL (preferred) or NEXT_PUBLIC_APP_URL
- * (fallback). Both should be set at build/deploy time.
- */
+// ────────────────────────────────────────────────────────────────────────
+// Shared helpers
+// ────────────────────────────────────────────────────────────────────────
+
 export function unsubscribeUrl(token: string): string {
   const base =
     process.env.APP_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
     "https://live.isunday.me";
-  return `${base.replace(/\/+$/, "")}/api/insider/unsubscribe?token=${encodeURIComponent(token)}`;
+  return `${base.replace(/\/+$/, "")}/api/insider/unsubscribe?token=${encodeURIComponent(
+    token,
+  )}`;
 }
