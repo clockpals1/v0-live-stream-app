@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
+import { InsiderCircleSection } from "@/components/host/insider-circle-section";
 import {
   Radio,
   Video,
@@ -1222,6 +1223,13 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             </div>
           </div>
         </div>
+
+        {/* Insider Circle \u2014 host's private subscriber list + email composer.
+            Hidden for cohost-only roles since they don't own a list of their
+            own subscribers; the list belongs to whichever host invited them. */}
+        {canCreateStreams && host && (
+          <InsiderCircleSection hostName={host.display_name || host.email || "Host"} />
+        )}
       </main>
 
       {/* Emergency Panel Dialog */}

@@ -9,6 +9,7 @@ import { useViewportHeight } from "@/lib/hooks/use-viewport-height";
 import { StreamOverlay, type OverlayBackground } from "@/components/stream/stream-overlay";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { StreamSlideshow } from "@/components/stream/stream-slideshow";
+import { InsiderCircleSubscribe } from "@/components/viewer/insider-circle-subscribe";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,7 @@ interface Stream {
   started_at: string | null;
   ended_at: string | null;
   active_participant_id?: string | null;
+  host_id?: string | null;
 }
 
 interface ChatMessage {
@@ -1566,6 +1568,18 @@ export function ViewerStreamInterface({
                 </form>
               </CardContent>
             </Card>
+
+            {/* Insider Circle subscribe \u2014 viewer-facing email signup. Lives
+                under the chat panel because that's where engaged viewers
+                already are. Hidden when host_id is missing (anon-fetched
+                stream rows where the host couldn't be resolved). */}
+            {stream.host_id && (
+              <InsiderCircleSubscribe
+                hostId={stream.host_id}
+                hostName={hostName}
+                roomCode={stream.room_code}
+              />
+            )}
           </div>
         </main>
       </div>
