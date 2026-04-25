@@ -39,6 +39,7 @@ import {
   CalendarClock,
   MapPin,
   ShieldCheck,
+  RefreshCw,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -1099,21 +1100,38 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                         </div>
                         
                         <div className="flex items-center gap-2">
-                          {stream.status !== "ended" && (
-                            <Button asChild size="sm" className="shrink-0">
-                              <Link href={`/host/stream/${stream.room_code}`}>
-                                {stream.status === "live" ? (
-                                  <>
-                                    <Square className="w-4 h-4 mr-1" />
-                                    Manage
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="w-4 h-4 mr-1" />
-                                    Start
-                                  </>
-                                )}
-                              </Link>
+                          <Button asChild size="sm" className="shrink-0">
+                            <Link href={`/host/stream/${stream.room_code}`}>
+                              {stream.status === "live" ? (
+                                <>
+                                  <Square className="w-4 h-4 mr-1" />
+                                  Manage
+                                </>
+                              ) : stream.status === "ended" ? (
+                                <>
+                                  {/* Same room_code -> same watch URL stays
+                                      valid. Host clicks this to land back in
+                                      the room and restart from there. */}
+                                  <RefreshCw className="w-4 h-4 mr-1" />
+                                  Go Live Again
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-4 h-4 mr-1" />
+                                  Start
+                                </>
+                              )}
+                            </Link>
+                          </Button>
+                          {stream.status === "ended" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => copyShareLink(stream.room_code)}
+                              title="Copy viewer link (still valid after restart)"
+                              className="shrink-0"
+                            >
+                              <Copy className="w-4 h-4" />
                             </Button>
                           )}
                           

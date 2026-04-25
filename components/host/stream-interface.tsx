@@ -787,6 +787,44 @@ function OwnerStreamInterface({
     setStream((prev) => ({ ...prev, status: "live" }));
   };
 
+  // Restart an ENDED stream in place — same row, same room_code, same watch URL,
+  // same host URL. We reset only the lifecycle columns (status -> 'waiting',
+  // clear started_at / ended_at, zero viewer_count). recording_url is left
+  // alone so any previously-uploaded recording stays downloadable; the next
+  // `Go Live` press goes through the normal handleStartStream / startStream
+  // flow which will repopulate started_at and broadcast `stream-start` to any
+  // viewers reconnecting on the same URL.
+  const handleRestartStream = async () => {
+    if (stream.status !== "ended") return; // only meaningful from the ended state
+    try {
+      const { error } = await supabase
+        .from("streams")
+        .update({
+          status: "waiting",
+          started_at: null,
+          ended_at: null,
+          viewer_count: 0,
+        })
+        .eq("id", stream.id);
+      if (error) {
+        console.error("[v0] Restart failed:", error);
+        toast.error("Couldn't restart the stream: " + error.message);
+        return;
+      }
+      setStream((prev) => ({
+        ...prev,
+        status: "waiting",
+        started_at: null,
+        ended_at: null,
+        viewer_count: 0,
+      }));
+      toast.success("Stream restarted — the room is live again. Click 'Go Live' when you're ready.");
+    } catch (err: any) {
+      console.error("[v0] Restart error:", err);
+      toast.error("Couldn't restart the stream.");
+    }
+  };
+
   const connectedViewers = viewers.filter((v) => v.connected).length;
   const isAdmin = resolveRole(host) === "admin";
 
@@ -1024,6 +1062,16 @@ function OwnerStreamInterface({
               <div className="flex items-center gap-2">
                 {stream.status === "ended" ? (
                   <>
+                    {/* Restart in place — same room_code, same watch URL,
+                        same host URL. Viewers refreshing /watch/{room_code}
+                        will see the stream re-appear once the host clicks
+                        Go Live again. */}
+                    {(isStreamOwner || isAdmin) && (
+                      <Button onClick={handleRestartStream}>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Restart Stream
+                      </Button>
+                    )}
                     {hasRecording && (
                       <Button variant="outline" onClick={downloadRecording}>
                         <Download className="w-4 h-4 mr-2" />
