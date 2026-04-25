@@ -7,9 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Radio,
-  Video,
-  Users,
-  MessageCircle,
   Download,
   Share2,
   ArrowRight,
@@ -193,65 +190,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── Features ─────────────────────────────────────────────────────── */}
-      <section
-        id="features"
-        className="border-y border-border/60 bg-muted/40 px-4 py-16 sm:py-20"
-      >
-        <div className="mx-auto max-w-6xl">
-          <div className="mx-auto mb-10 max-w-2xl text-center sm:mb-14">
-            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-              Everything you need to go live
-            </h2>
-            <p className="mt-3 text-pretty text-muted-foreground">
-              Phone-first broadcasting with all the controls a real production
-              needs — and none of the complexity.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              {
-                Icon: Video,
-                title: "Phone streaming",
-                body:
-                  "Stream from your phone's camera and mic in one tap. Front / rear switch, mute, and pause built in.",
-              },
-              {
-                Icon: Users,
-                title: "Global viewers",
-                body:
-                  "Share a single link — anyone can watch in any modern browser. No app installs, no friction.",
-              },
-              {
-                Icon: MessageCircle,
-                title: "Live chat",
-                body:
-                  "Real-time chat between host, super-users, and viewers. Pin messages and broadcast tickers.",
-              },
-              {
-                Icon: Download,
-                title: "Auto recording",
-                body:
-                  "Every stream is captured automatically — download the file or share the playback link later.",
-              },
-            ].map(({ Icon, title, body }) => (
-              <div
-                key={title}
-                className="group rounded-2xl border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
-              >
-                <div className="mb-4 inline-grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <h3 className="mb-1.5 text-base font-semibold">{title}</h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {body}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
       {/* ── How it works ─────────────────────────────────────────────────── */}
       <section className="px-4 py-16 sm:py-20">
