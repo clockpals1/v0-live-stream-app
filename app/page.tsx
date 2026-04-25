@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Radio,
   Video,
@@ -14,206 +13,351 @@ import {
   Download,
   Share2,
   ArrowRight,
-  Sparkles,
+  PlayCircle,
+  Wifi,
+  ShieldCheck,
+  Smartphone,
 } from "lucide-react";
 
+/**
+ * Landing page — public homepage at "/".
+ *
+ * Design goals:
+ *   - Mobile-first: every section stacks vertically on small screens with
+ *     comfortable 44pt+ touch targets. The hero collapses cleanly without
+ *     horizontal scroll on a 360px viewport.
+ *   - Modern: subtle radial gradient + grid backdrop in the hero, glass
+ *     header with backdrop-blur, hover-lift on feature cards.
+ *   - Live-feel: pulsing red LIVE pill at the top of the hero (respects
+ *     prefers-reduced-motion via Tailwind's motion-safe variant).
+ *   - Zero new dependencies. Uses existing theme tokens (--primary,
+ *     --accent, --live, --muted) from globals.css.
+ *   - All routes preserved: /auth/login, /auth/signup, /watch/[roomCode].
+ */
 export default function HomePage() {
   const [roomCode, setRoomCode] = useState("");
   const router = useRouter();
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (roomCode.trim()) {
-      router.push(`/watch/${roomCode.trim()}`);
-    }
+    const code = roomCode.trim();
+    if (code) router.push(`/watch/${code}`);
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <Radio className="w-5 h-5 text-primary-foreground" />
+    <div className="min-h-screen bg-background text-foreground">
+      {/* ── Sticky glass header ──────────────────────────────────────────── */}
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:py-4">
+          <Link href="/" className="flex items-center gap-2 min-w-0">
+            <div className="grid h-9 w-9 flex-none place-items-center rounded-xl bg-primary shadow-sm shadow-primary/30">
+              <Radio className="h-4.5 w-4.5 text-primary-foreground" />
             </div>
-            <span className="text-xl font-bold text-foreground">Isunday Stream Live</span>
+            <span className="truncate text-base font-bold tracking-tight sm:text-lg">
+              Isunday Stream Live
+            </span>
+          </Link>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
+              <Link href="/auth/signup">Become a host</Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/auth/login">Host login</Link>
+            </Button>
           </div>
-          <Button asChild>
-            <Link href="/auth/login">
-              Host Login
-            </Link>
-          </Button>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="py-20 px-4">
-        <div className="container mx-auto max-w-4xl text-center">
-          <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium mb-6">
-            <Sparkles className="w-4 h-4" />
-            Live Streaming Made Simple
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden">
+        {/* Soft brand glow + subtle grid backdrop. Both are CSS-only so they
+            scale crisply on any viewport and add no JS / image weight. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -z-10"
+          style={{
+            background:
+              "radial-gradient(60% 60% at 50% 0%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 70%), radial-gradient(40% 40% at 100% 100%, color-mix(in oklch, var(--accent) 14%, transparent) 0%, transparent 70%)",
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -z-10 opacity-[0.05] [mask-image:radial-gradient(60%_60%_at_50%_30%,#000,transparent)]"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+          }}
+        />
+
+        <div className="mx-auto max-w-5xl px-4 py-14 text-center sm:py-20">
+          {/* Pulsing LIVE pill */}
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--live)]/30 bg-[var(--live)]/10 px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wider text-[var(--live)]">
+            <span className="relative flex h-2 w-2">
+              <span className="motion-safe:absolute motion-safe:inline-flex motion-safe:h-full motion-safe:w-full motion-safe:animate-ping motion-safe:rounded-full motion-safe:bg-[var(--live)] motion-safe:opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--live)]" />
+            </span>
+            Live streaming, made effortless
           </div>
-          <h1 className="text-4xl md:text-6xl font-bold text-foreground mb-6 text-balance">
-            Stream Your Events to the World
+
+          <h1 className="text-balance text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+            Broadcast your event{" "}
+            <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              from anywhere
+            </span>
           </h1>
-          <p className="text-lg text-muted-foreground mb-10 max-w-2xl mx-auto text-pretty">
-            Broadcast live from your phone to viewers anywhere. Easy setup, real-time chat, 
-            and automatic recording. Perfect for events, meetings, and live sessions.
+          <p className="mx-auto mt-5 max-w-2xl text-pretty text-base text-muted-foreground sm:text-lg">
+            Stream straight from your phone with one tap. Real-time chat,
+            multi-host control, automatic recording, and a viewer link
+            anyone can open in a browser.
           </p>
 
-          {/* Join Stream Form */}
-          <Card className="max-w-md mx-auto">
-            <CardHeader>
-              <CardTitle>Join a Stream</CardTitle>
-              <CardDescription>
-                Enter a room code to watch a live stream
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleJoin} className="flex items-center gap-2">
-                <Input
-                  placeholder="Enter room code"
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value)}
-                  className="font-mono"
-                />
-                <Button type="submit" disabled={!roomCode.trim()}>
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="py-16 px-4 bg-muted/50">
-        <div className="container mx-auto max-w-6xl">
-          <h2 className="text-3xl font-bold text-foreground text-center mb-12">
-            Everything You Need to Go Live
-          </h2>
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
-                  <Video className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-2">Phone Streaming</h3>
-                <p className="text-sm text-muted-foreground">
-                  Stream directly from your phone camera and microphone with one tap
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6">
-                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
-                  <Users className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-2">Global Viewers</h3>
-                <p className="text-sm text-muted-foreground">
-                  Share a simple link for viewers to join from anywhere in the world
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6">
-                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
-                  <MessageCircle className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-2">Live Chat</h3>
-                <p className="text-sm text-muted-foreground">
-                  Real-time chat between host and viewers for interactive sessions
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="pt-6">
-                <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
-                  <Download className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-2">Auto Recording</h3>
-                <p className="text-sm text-muted-foreground">
-                  Streams are automatically recorded for download or sharing later
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works */}
-      <section className="py-16 px-4">
-        <div className="container mx-auto max-w-4xl">
-          <h2 className="text-3xl font-bold text-foreground text-center mb-12">
-            How It Works
-          </h2>
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="w-12 h-12 bg-primary text-primary-foreground rounded-full flex items-center justify-center mx-auto mb-4 text-xl font-bold">
-                1
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Create a Stream</h3>
-              <p className="text-sm text-muted-foreground">
-                Log in as a host and create a new stream with a custom title
-              </p>
-            </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-primary text-primary-foreground rounded-full flex items-center justify-center mx-auto mb-4 text-xl font-bold">
-                2
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Share the Link</h3>
-              <p className="text-sm text-muted-foreground">
-                Copy your unique room link and share it with your audience
-              </p>
-            </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-primary text-primary-foreground rounded-full flex items-center justify-center mx-auto mb-4 text-xl font-bold">
-                3
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Go Live</h3>
-              <p className="text-sm text-muted-foreground">
-                Hit the Go Live button and start broadcasting to your viewers
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-16 px-4 bg-primary">
-        <div className="container mx-auto max-w-4xl text-center">
-          <h2 className="text-3xl font-bold text-primary-foreground mb-4">
-            Ready to Start Streaming?
-          </h2>
-          <p className="text-primary-foreground/80 mb-8">
-            Create your account and start your first live stream in minutes
-          </p>
-          <div className="flex items-center justify-center gap-4">
-            <Button variant="secondary" size="lg" asChild>
+          {/* Primary actions — stacked on mobile, side-by-side from sm: */}
+          <div className="mx-auto mt-8 flex max-w-md flex-col items-stretch gap-3 sm:max-w-none sm:flex-row sm:justify-center">
+            <Button asChild size="lg" className="h-12 px-6 text-base">
               <Link href="/auth/signup">
-                <Share2 className="w-4 h-4 mr-2" />
-                Become a Host
+                <PlayCircle className="mr-2 h-5 w-5" />
+                Start your stream
               </Link>
+            </Button>
+            <Button
+              asChild
+              variant="outline"
+              size="lg"
+              className="h-12 px-6 text-base"
+            >
+              <Link href="/auth/login">
+                Already a host? Log in
+              </Link>
+            </Button>
+          </div>
+
+          {/* Join-as-viewer card. Pinned beneath the hero CTAs so the most
+              common public action — pasting a room code — is one tap away
+              even on a small phone. */}
+          <div className="mx-auto mt-10 max-w-md rounded-2xl border border-border bg-card p-4 text-left shadow-sm sm:mt-14">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-semibold">Got a room code?</p>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Watch a stream
+              </span>
+            </div>
+            <form
+              onSubmit={handleJoin}
+              className="flex items-center gap-2"
+              aria-label="Join a stream by room code"
+            >
+              <Input
+                inputMode="text"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                placeholder="ENTER-CODE"
+                value={roomCode}
+                onChange={(e) => setRoomCode(e.target.value)}
+                className="h-11 flex-1 font-mono text-base tracking-widest uppercase"
+                aria-label="Room code"
+              />
+              <Button
+                type="submit"
+                size="lg"
+                className="h-11 px-4"
+                disabled={!roomCode.trim()}
+              >
+                Join
+                <ArrowRight className="ml-1.5 h-4 w-4" />
+              </Button>
+            </form>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              No account needed to watch — just open the link the host shared.
+            </p>
+          </div>
+
+          {/* Trust strip */}
+          <ul className="mx-auto mt-10 grid max-w-2xl grid-cols-2 gap-3 text-left sm:grid-cols-4 sm:gap-4">
+            {[
+              { Icon: Smartphone, label: "Works on phones" },
+              { Icon: Wifi, label: "Low-latency WebRTC" },
+              { Icon: ShieldCheck, label: "Private rooms" },
+              { Icon: Download, label: "Auto-recorded" },
+            ].map(({ Icon, label }) => (
+              <li
+                key={label}
+                className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-xs font-medium text-muted-foreground"
+              >
+                <Icon className="h-4 w-4 flex-none text-primary" />
+                <span className="truncate">{label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* ── Features ─────────────────────────────────────────────────────── */}
+      <section
+        id="features"
+        className="border-y border-border/60 bg-muted/40 px-4 py-16 sm:py-20"
+      >
+        <div className="mx-auto max-w-6xl">
+          <div className="mx-auto mb-10 max-w-2xl text-center sm:mb-14">
+            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+              Everything you need to go live
+            </h2>
+            <p className="mt-3 text-pretty text-muted-foreground">
+              Phone-first broadcasting with all the controls a real production
+              needs — and none of the complexity.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                Icon: Video,
+                title: "Phone streaming",
+                body:
+                  "Stream from your phone's camera and mic in one tap. Front / rear switch, mute, and pause built in.",
+              },
+              {
+                Icon: Users,
+                title: "Global viewers",
+                body:
+                  "Share a single link — anyone can watch in any modern browser. No app installs, no friction.",
+              },
+              {
+                Icon: MessageCircle,
+                title: "Live chat",
+                body:
+                  "Real-time chat between host, super-users, and viewers. Pin messages and broadcast tickers.",
+              },
+              {
+                Icon: Download,
+                title: "Auto recording",
+                body:
+                  "Every stream is captured automatically — download the file or share the playback link later.",
+              },
+            ].map(({ Icon, title, body }) => (
+              <div
+                key={title}
+                className="group rounded-2xl border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+              >
+                <div className="mb-4 inline-grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="mb-1.5 text-base font-semibold">{title}</h3>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {body}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── How it works ─────────────────────────────────────────────────── */}
+      <section className="px-4 py-16 sm:py-20">
+        <div className="mx-auto max-w-5xl">
+          <div className="mx-auto mb-10 max-w-2xl text-center sm:mb-14">
+            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+              Three steps to live
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              From sign-up to broadcast in under a minute.
+            </p>
+          </div>
+
+          {/* Vertical timeline on mobile, horizontal cards on tablet+. The
+              connecting line on desktop is drawn with an absolutely-positioned
+              gradient bar; on mobile we just stack. */}
+          <ol className="relative grid grid-cols-1 gap-6 md:grid-cols-3 md:gap-4">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-6 top-6 hidden h-[2px] w-[calc(100%-3rem)] -translate-y-1/2 bg-gradient-to-r from-primary/40 via-accent/40 to-primary/0 md:block"
+            />
+            {[
+              {
+                title: "Create a stream",
+                body: "Log in as a host and spin up a stream with a title and a private room code.",
+              },
+              {
+                title: "Share the link",
+                body: "Copy your viewer link or QR — anyone with it can watch from any device.",
+              },
+              {
+                title: "Go live",
+                body: "Tap Go Live and start broadcasting. Recording starts automatically.",
+              },
+            ].map((step, i) => (
+              <li
+                key={step.title}
+                className="relative flex gap-4 rounded-2xl border border-border bg-card p-5 md:flex-col md:gap-3 md:p-6"
+              >
+                <div className="grid h-12 w-12 flex-none place-items-center rounded-full bg-primary text-base font-bold text-primary-foreground shadow-sm shadow-primary/30">
+                  {i + 1}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold sm:text-lg">{step.title}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    {step.body}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* ── Final CTA ────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden px-4 py-16 sm:py-20">
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10 bg-gradient-to-br from-primary via-primary to-accent"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -z-10 opacity-25 mix-blend-overlay"
+          style={{
+            backgroundImage:
+              "radial-gradient(50% 60% at 0% 0%, rgba(255,255,255,0.6), transparent 70%), radial-gradient(40% 50% at 100% 100%, rgba(0,0,0,0.5), transparent 70%)",
+          }}
+        />
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="text-balance text-3xl font-extrabold tracking-tight text-primary-foreground sm:text-4xl">
+            Ready when you are.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-pretty text-primary-foreground/85">
+            Create your host account and your first stream is live in minutes.
+            No credit card, no studio gear — just a phone and a story.
+          </p>
+          <div className="mt-7 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+            <Button asChild size="lg" variant="secondary" className="h-12 px-6 text-base">
+              <Link href="/auth/signup">
+                <Share2 className="mr-2 h-5 w-5" />
+                Become a host
+              </Link>
+            </Button>
+            <Button
+              asChild
+              size="lg"
+              variant="ghost"
+              className="h-12 px-6 text-base text-primary-foreground hover:bg-white/10 hover:text-primary-foreground"
+            >
+              <Link href="/auth/login">I already have an account</Link>
             </Button>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-border py-8 px-4">
-        <div className="container mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      {/* ── Footer ───────────────────────────────────────────────────────── */}
+      <footer className="border-t border-border bg-background px-4 py-8">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-center sm:flex-row sm:text-left">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <Radio className="w-4 h-4 text-primary-foreground" />
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary">
+              <Radio className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-bold text-foreground">Isunday Stream Live</span>
+            <span className="font-bold">Isunday Stream Live</span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Built with Next.js, Supabase, and WebRTC
+          <p className="text-xs text-muted-foreground sm:text-sm">
+            © {new Date().getFullYear()} Isunday Stream Live · Built with Next.js, Supabase &amp; WebRTC
           </p>
         </div>
       </footer>

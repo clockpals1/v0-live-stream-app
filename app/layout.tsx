@@ -36,8 +36,15 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-background">
-      <body className="font-sans antialiased">
+    // suppressHydrationWarning is intentional here: browser extensions
+    // (Grammarly, Loom, ColorZilla, dark-mode helpers, password managers,
+    // etc.) commonly inject attributes / inline styles onto <html> and
+    // <body> before React hydrates, producing a console "hydration mismatch"
+    // diff like style={{zIndex:0}}. Next.js recommends this exact opt-out
+    // for elements known to be touched outside React's control:
+    // https://nextjs.org/docs/messages/react-hydration-error
+    <html lang="en" className="bg-background" suppressHydrationWarning>
+      <body className="font-sans antialiased" suppressHydrationWarning>
         {children}
         <Toaster position="top-right" richColors closeButton />
         {process.env.VERCEL && <Analytics />}
