@@ -157,6 +157,7 @@ function roleIcon(role: Role) {
 export function AdminPanel({ currentUserId }: AdminPanelProps) {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [roleSavingId, setRoleSavingId] = useState<string | null>(null);
@@ -188,13 +189,23 @@ export function AdminPanel({ currentUserId }: AdminPanelProps) {
 
   const loadHosts = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch("/api/admin/hosts");
-      if (!res.ok) throw new Error("Failed to load users");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          data?.error ||
+          `Server returned ${res.status} ${res.statusText || ""}`.trim();
+        setLoadError(msg);
+        // Don't toast here — the inline error card is more actionable.
+        return;
+      }
       setHosts(data.hosts || []);
-    } catch {
-      toast.error("Failed to load users");
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Network error while loading users";
+      setLoadError(msg);
     } finally {
       setLoading(false);
     }
@@ -511,7 +522,9 @@ export function AdminPanel({ currentUserId }: AdminPanelProps) {
           </CardHeader>
 
           <CardContent className="p-0">
-            {loading ? (
+            {loadError && !loading ? (
+              <ErrorState message={loadError} onRetry={loadHosts} />
+            ) : loading ? (
               <ListingSkeleton />
             ) : hosts.length === 0 ? (
               <EmptyState
@@ -712,6 +725,38 @@ function ListingSkeleton() {
           <Skeleton className="h-8 w-8 rounded" />
         </div>
       ))}
+    </div>
+  );
+}
+
+function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-6 py-14">
+      <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+        <ShieldCheck className="w-6 h-6 text-destructive" />
+      </div>
+      <p className="font-medium text-foreground">Couldn&apos;t load users</p>
+      <p className="text-sm text-muted-foreground mt-1 max-w-md break-words">
+        {message}
+      </p>
+      <div className="mt-4 flex gap-2">
+        <Button variant="outline" onClick={onRetry}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Try again
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground mt-4 max-w-md">
+        If this keeps happening, check that{" "}
+        <code className="px-1 py-0.5 bg-muted rounded">SUPABASE_SERVICE_ROLE_KEY</code>{" "}
+        is set as an encrypted environment variable for the Production environment
+        on Cloudflare Pages, then redeploy.
+      </p>
     </div>
   );
 }
