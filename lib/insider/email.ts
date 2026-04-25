@@ -95,48 +95,43 @@ export async function sendBatch(items: BatchPayloadItem[]): Promise<SendResult> 
 // ────────────────────────────────────────────────────────────────────────
 
 async function sendBatchSmtp(items: BatchPayloadItem[]): Promise<SendResult> {
-  // Lazy import: keeps the package out of the bundle for Resend-only users
-  // and avoids any module-level side effects on cold starts.
-  const { WorkerMailer } = await import("worker-mailer");
+  // Lazy import keeps cloudflare:sockets out of any bundle path that
+  // doesn't actually use SMTP (for instance, the subscribe/unsubscribe
+  // endpoints). The smtp-client module only depends on cloudflare:sockets
+  // which OpenNext recognises natively as an external Workers built-in.
+  const { SmtpClient } = await import("./smtp-client");
 
   const host = process.env.SMTP_HOST!;
   const port = Number(process.env.SMTP_PORT!);
   const username = process.env.SMTP_USER!;
   const password = process.env.SMTP_PASS!;
   const from = process.env.SMTP_FROM!;
-  // Most managed SMTP relays (SendGrid 587, Brevo 587, Mailgun 587, AWS SES 587)
-  // accept STARTTLS on submission ports. Implicit TLS is on 465.
-  // We auto-pick from port unless SMTP_SECURE is set explicitly.
+  // Most managed SMTP relays (SendGrid 587, Brevo 587, Mailgun 587,
+  // AWS SES 587) accept STARTTLS on submission ports. Implicit TLS is
+  // on 465. Auto-pick from port unless SMTP_SECURE is set explicitly.
   const explicit = process.env.SMTP_SECURE?.toLowerCase();
-  const secure: boolean =
+  const implicitTls: boolean =
     explicit === "true"
       ? true
       : explicit === "false"
         ? false
-        : port === 465; // implicit TLS for 465, STARTTLS for everything else
-  const credentials =
-    (process.env.SMTP_AUTH?.toLowerCase() as "plain" | "login" | undefined) ||
-    "plain";
+        : port === 465;
 
   let sent = 0;
   let failed = 0;
   const errors: Array<{ email: string; reason: string }> = [];
 
-  // Open a single connection and send sequentially. SMTP submission
-  // services typically rate-limit per-connection but allow many messages
-  // per session, so this is the most efficient pattern.
-  let mailer: InstanceType<typeof WorkerMailer> | null = null;
+  // Open a single connection and send sequentially. Submission services
+  // generally allow many messages per session, so this is the cheapest
+  // approach. If a single send fails we keep the connection open and
+  // continue with the next recipient.
+  const client = new SmtpClient({ host, port, username, password, implicitTls });
   try {
-    mailer = await WorkerMailer.connect({
-      host,
-      port,
-      secure,
-      credentials: { username, password, authType: credentials },
-    });
+    await client.connect();
 
     for (const it of items) {
       try {
-        await mailer.send({
+        await client.send({
           from,
           to: it.to,
           subject: it.subject,
@@ -152,7 +147,7 @@ async function sendBatchSmtp(items: BatchPayloadItem[]): Promise<SendResult> {
       }
     }
   } catch (err: unknown) {
-    // Couldn't even open the connection — every recipient fails the same way.
+    // Connect or auth failure \u2014 every remaining recipient fails the same way.
     const reason =
       err instanceof Error
         ? `SMTP connect failed: ${err.message}`
@@ -162,11 +157,7 @@ async function sendBatchSmtp(items: BatchPayloadItem[]): Promise<SendResult> {
       errors.push({ email: it.to, reason });
     }
   } finally {
-    try {
-      await mailer?.close();
-    } catch {
-      // ignore close errors
-    }
+    await client.quit().catch(() => undefined);
   }
 
   return { sent, failed, errors };

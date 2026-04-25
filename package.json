@@ -68,10 +68,10 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^3.3.1",
     "vaul": "^1.1.2",
-    "worker-mailer": "^1.2.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260425.1",
     "@opennextjs/cloudflare": "^1.19.3",
     "@tailwindcss/postcss": "^4.2.0",
     "@types/node": "^22",
