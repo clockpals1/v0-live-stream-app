@@ -1,0 +1,53 @@
+-- ===========================================================================
+--  HOTFIX B — bridge the viewers.name vs viewers.viewer_name mismatch.
+--
+--  The current production table has column `viewer_name`. The client code
+--  posts payload `{ stream_id, name, joined_at }`. Postgres returns
+--  42703 "column \"name\" does not exist" → 400 in the browser.
+--
+--  Two non-destructive ways to bridge this:
+--
+--   1. (RECOMMENDED for mid-event)  Rename viewer_name -> name. This is
+--      the column the rest of the app expects. The rename is metadata-only,
+--      no data movement, completes in milliseconds. Existing reads against
+--      `viewer_name` will then break, so verify nothing else uses that
+--      name first (search shows the codebase uses `.name` everywhere).
+--
+--   2. (FALLBACK)  Add `name` as a plain column that mirrors `viewer_name`
+--      via a trigger. Keeps both names alive. Heavier, only do this if
+--      something else in the DB references viewer_name and you can't
+--      rename safely.
+-- ===========================================================================
+
+-- ---- Option 1: rename viewer_name -> name (recommended) ------------------
+-- Uncomment to apply:
+--
+-- ALTER TABLE viewers RENAME COLUMN viewer_name TO name;
+--
+-- Verify:
+-- SELECT column_name FROM information_schema.columns
+--   WHERE table_schema = 'public' AND table_name = 'viewers'
+--   ORDER BY ordinal_position;
+
+
+-- ---- Option 2: keep both names alive (fallback) --------------------------
+-- Uncomment to apply:
+--
+-- ALTER TABLE viewers ADD COLUMN IF NOT EXISTS name text;
+-- UPDATE viewers SET name = viewer_name WHERE name IS NULL;
+-- ALTER TABLE viewers ALTER COLUMN name SET NOT NULL;
+-- 
+-- CREATE OR REPLACE FUNCTION sync_viewers_name() RETURNS TRIGGER AS $$
+-- BEGIN
+--   IF NEW.name IS NOT NULL AND NEW.viewer_name IS NULL THEN
+--     NEW.viewer_name := NEW.name;
+--   ELSIF NEW.viewer_name IS NOT NULL AND NEW.name IS NULL THEN
+--     NEW.name := NEW.viewer_name;
+--   END IF;
+--   RETURN NEW;
+-- END $$ LANGUAGE plpgsql;
+-- 
+-- DROP TRIGGER IF EXISTS sync_viewers_name_trg ON viewers;
+-- CREATE TRIGGER sync_viewers_name_trg
+--   BEFORE INSERT OR UPDATE ON viewers
+--   FOR EACH ROW EXECUTE FUNCTION sync_viewers_name();

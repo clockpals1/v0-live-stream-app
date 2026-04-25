@@ -86,6 +86,11 @@ export function ViewerStreamInterface({
   const [copied, setCopied] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
+  // True when we attached a remote stream but the browser refused autoplay
+  // with sound (typical on refresh / late-join with no user gesture yet).
+  // When true, the prominent "Tap to enable audio" prompt is rendered and a
+  // single click/tap recovers playback.
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Video fit mode: 'contain' (letterbox, never crops) vs 'cover' (fills container,
@@ -134,6 +139,13 @@ export function ViewerStreamInterface({
   const hasUserGestureRef = useRef(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Dedicated audio sink. The <video> element is permanently muted so
+  // muted-autoplay is always allowed (universally permitted by browsers).
+  // The <audio> element below carries sound and is the one whose `muted`
+  // attribute reflects React `isMuted` state. Decoupling them prevents the
+  // common WebRTC bug where audio silently dies after srcObject churn during
+  // ICE recovery — the audio element survives video-element re-binds.
+  const audioRef = useRef<HTMLAudioElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasManuallyMutedRef = useRef(false);
@@ -206,31 +218,65 @@ export function ViewerStreamInterface({
     if (connectingSeconds >= 60) window.location.reload();
   }, [connectingSeconds]);
 
-  // ─── Attach remoteStream to video element ─────────────────────────────────
-  // Assigns srcObject and always calls play(). Muted-autoplay is universally
-  // allowed by every browser, so this is safe even without a user gesture.
-  // CRITICAL: we do NOT touch `video.muted` here — mute state is owned by
-  // the `isMuted` React state + its sync effect. If the user unmuted inside
-  // their gesture (join dialog / Tap-to-unmute), that state persists and the
-  // new stream plays with audio. If they have not unmuted, it plays muted
-  // and the "Tap to unmute" overlay is shown.
+  // ─── Attach remoteStream to video + dedicated audio element ──────────────
+  // Pattern: <video> is permanently muted so its play() never blocks. A
+  // dedicated <audio> sink carries sound and is what survives autoplay
+  // policy. On every remoteStream (re)assignment we:
+  //   1. Bind the same MediaStream to both elements (their `srcObject`).
+  //   2. Always call video.play() — muted-autoplay is universally allowed.
+  //   3. If the user has expressed intent to hear sound (isMuted=false),
+  //      try audio.play(). If the browser refuses, set audioBlocked=true so
+  //      the prominent "Tap to enable audio" prompt is rendered.
+  //   4. If the user is still muted (isMuted=true) we still try to start
+  //      the audio element MUTED so there is a live element ready — when
+  //      they later unmute we just flip .muted=false rather than starting
+  //      a fresh play() (which can fail on iOS outside a gesture window).
   useEffect(() => {
     const video = videoRef.current;
+    const audio = audioRef.current;
     if (!video) return;
 
     if (remoteStream) {
       console.log("[Viewer] Attaching remote stream:", remoteStream.id);
+      // Bind the SAME MediaStream to both elements. Browsers happily
+      // duplicate playback sinks; we silence the video by hard-muting it.
       video.srcObject = remoteStream;
+      if (audio) audio.srcObject = remoteStream;
+
+      video.muted = true; // hardcoded — video element NEVER produces sound
       video.play().catch((err) => {
-        // Only way play() fails on a muted video is an edge-case browser
-        // restriction. Force muted state so the Tap-to-unmute overlay appears.
-        console.log("[Viewer] play() blocked after srcObject set:", err);
-        setIsMuted(true);
+        // Even muted video can be blocked in rare embed/iframe cases.
+        console.log("[Viewer] video.play() blocked:", err);
       });
+
+      if (audio) {
+        // Match audio.muted to React state. If isMuted=true the play() is
+        // allowed everywhere (muted-autoplay). If isMuted=false we are
+        // gambling on a recent user gesture; on failure we surface the prompt.
+        audio.muted = isMuted;
+        audio.play()
+          .then(() => {
+            // Successful playback — clear any stale block flag.
+            if (audioBlocked) setAudioBlocked(false);
+          })
+          .catch((err) => {
+            console.log(
+              "[Viewer] audio.play() blocked — autoplay-with-sound denied:",
+              err
+            );
+            // Block flag is only meaningful when the user actually wants sound.
+            if (!audio.muted) setAudioBlocked(true);
+          });
+      }
     } else {
-      console.log("[Viewer] Clearing video stream");
+      console.log("[Viewer] Clearing video + audio streams");
       video.srcObject = null;
+      if (audio) audio.srcObject = null;
+      setAudioBlocked(false);
     }
+  // intentionally exclude isMuted/audioBlocked: this effect is about
+  // (re)binding the stream; mute state is reconciled by the sync-mute effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteStream]);
 
   // ─── Video element event handlers ────────────────────────────────────────
@@ -275,9 +321,19 @@ export function ViewerStreamInterface({
   }, [attemptPlay]);
 
   // ─── Sync muted state to DOM ──────────────────────────────────────────────
+  // The <video> element stays permanently muted (sound is in the <audio>
+  // element). When the user unmutes we ALSO call audio.play() inside their
+  // gesture in the click handler — this effect just keeps the DOM property
+  // in sync if state changes outside a click (e.g. toggleMute, programmatic).
   useEffect(() => {
-    if (videoRef.current) videoRef.current.muted = isMuted;
-  }, [isMuted]);
+    if (videoRef.current) videoRef.current.muted = true;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.muted = isMuted;
+      // Once unmuted by any path, the prompt is no longer needed.
+      if (!isMuted && audioBlocked) setAudioBlocked(false);
+    }
+  }, [isMuted, audioBlocked]);
 
   const shareLink =
     typeof window !== "undefined"
@@ -549,8 +605,19 @@ export function ViewerStreamInterface({
     const handleVisibility = () => {
       if (document.visibilityState === "visible" && stream.status === "live") {
         requestWakeLock();
+        // Resume both elements. Audio.play() outside a gesture is allowed
+        // here only because the user already gestured earlier this session
+        // (hasUserGestureRef.current === true) — browsers honor a
+        // recent-gesture window for tab-resume.
         if (videoRef.current?.paused && hasUserGestureRef.current) {
           videoRef.current.play().catch(() => {});
+        }
+        const audio = audioRef.current;
+        if (audio?.paused && hasUserGestureRef.current && !isMuted) {
+          audio.play().catch((err) => {
+            console.log("[Viewer] audio resume on visibility blocked:", err);
+            setAudioBlocked(true);
+          });
         }
       }
     };
@@ -679,25 +746,30 @@ export function ViewerStreamInterface({
     hasUserGestureRef.current = true;
 
     const video = videoRef.current;
-    if (video && !hasManuallyMutedRef.current) {
-      // Unmute + play synchronously inside the gesture. Both the DOM write
-      // and the play() call happen before any await, so iOS considers this
-      // a valid gesture-initiated unmute.
-      video.muted = false;
+    const audio = audioRef.current;
+    if (!hasManuallyMutedRef.current) {
+      // Unmute + play both elements SYNCHRONOUSLY inside the gesture.
+      // iOS Safari disallows unmute outside a gesture, so the DOM writes
+      // and play() calls must happen before any await.
       setIsMuted(false);
-      if (video.srcObject) {
-        video.play().catch((err) => {
-          // Rare: play() with audio rejected. Fall back to muted playback;
-          // the Tap-to-unmute overlay will let the user try again.
-          console.log("[Viewer] play() during join rejected:", err);
-          if (videoRef.current) videoRef.current.muted = true;
-          setIsMuted(true);
-        });
+      setAudioBlocked(false);
+      if (video) {
+        video.muted = true; // video stays silent — audio element handles sound
+        if (video.srcObject) video.play().catch(() => {});
       }
-      // If srcObject isn't set yet, the remoteStream effect will call play()
-      // when it arrives. By then `video.muted === false` (from above) so the
-      // stream plays with audio — within the recent-gesture window that
-      // every browser honors for several seconds.
+      if (audio) {
+        audio.muted = false;
+        if (audio.srcObject) {
+          audio.play().catch((err) => {
+            // Extremely rare inside a real gesture, but possible (focus race).
+            console.log("[Viewer] audio.play() during join rejected:", err);
+            setAudioBlocked(true);
+          });
+        }
+        // If srcObject isn't set yet, the remoteStream attach effect will
+        // call audio.play() when it arrives — within the recent-gesture
+        // window that every browser honors for several seconds.
+      }
     }
 
     if (typeof window !== "undefined") localStorage.setItem("viewerName", name.trim());
@@ -779,13 +851,24 @@ export function ViewerStreamInterface({
 
   const toggleMute = () => {
     const video = videoRef.current;
+    const audio = audioRef.current;
     const newMuted = !isMuted;
     hasManuallyMutedRef.current = newMuted;
+    hasUserGestureRef.current = true;
     setIsMuted(newMuted);
-    if (video) {
-      video.muted = newMuted;
-      // Calling play() inside onClick is a gesture — iOS allows unmuting here.
-      if (!newMuted) video.play().catch(() => {});
+    setAudioBlocked(false);
+    // Video stays muted always; audio element is the one we toggle.
+    if (video) video.muted = true;
+    if (audio) {
+      audio.muted = newMuted;
+      // Calling play() inside onClick is a real gesture — every browser
+      // allows audio playback here, including iOS Safari.
+      if (!newMuted) {
+        audio.play().catch((err) => {
+          console.log("[Viewer] audio.play() in toggleMute rejected:", err);
+          setAudioBlocked(true);
+        });
+      }
     }
   };
 
@@ -960,21 +1043,44 @@ export function ViewerStreamInterface({
             </div>
           </div>
 
-          {/* Unmute overlay */}
-          {isMuted && isConnected && remoteStream && (
-            <div className="absolute inset-0 flex items-end justify-center pb-20 pointer-events-none z-10">
+          {/* Audio-recovery prompt.
+              Two trigger conditions:
+                A. isMuted === true (user has not yet expressed intent to hear)
+                B. audioBlocked === true (autoplay-with-sound was refused)
+              Both resolve via the same one-tap handler that plays the
+              dedicated <audio> sink inside a fresh user-gesture stack frame. */}
+          {(isMuted || audioBlocked) && isConnected && remoteStream && (
+            <div className="absolute inset-0 flex items-end justify-center pb-20 sm:pb-24 pointer-events-none z-10">
               <button
-                className="pointer-events-auto flex items-center gap-2 bg-black/70 hover:bg-black/90 text-white text-sm font-medium px-4 py-2 rounded-full border border-white/20 backdrop-blur-sm"
+                aria-label={audioBlocked ? "Tap to enable audio" : "Tap to unmute"}
+                className={`pointer-events-auto flex items-center gap-2 text-white font-semibold px-5 py-3 rounded-full border shadow-lg backdrop-blur-md transition-transform active:scale-95 ${
+                  audioBlocked
+                    ? "bg-red-600/90 hover:bg-red-600 border-red-300/40 text-base animate-pulse"
+                    : "bg-black/75 hover:bg-black/90 border-white/20 text-sm"
+                }`}
                 onClick={() => {
                   hasManuallyMutedRef.current = false;
                   hasUserGestureRef.current = true;
                   setIsMuted(false);
+                  setAudioBlocked(false);
                   const video = videoRef.current;
-                  if (video) { video.muted = false; video.play().catch(() => {}); }
+                  const audio = audioRef.current;
+                  if (video) {
+                    video.muted = true; // permanent — sound goes through audio el
+                    video.play().catch(() => {});
+                  }
+                  if (audio) {
+                    audio.muted = false;
+                    audio.play().catch((err) => {
+                      // Truly stuck — leave the flag so we keep prompting.
+                      console.log("[Viewer] audio.play() in prompt rejected:", err);
+                      setAudioBlocked(true);
+                    });
+                  }
                 }}
               >
-                <VolumeX className="w-4 h-4 text-red-400" />
-                Tap to unmute
+                <VolumeX className={`${audioBlocked ? "w-5 h-5" : "w-4 h-4"} text-red-300`} />
+                {audioBlocked ? "Tap to enable audio" : "Tap to unmute"}
               </button>
             </div>
           )}
@@ -1306,7 +1412,7 @@ export function ViewerStreamInterface({
                     ref={videoRef}
                     autoPlay
                     playsInline
-                    muted={isMuted}
+                    muted /* permanent — see audio element below */
                     controls={false}
                     className={`absolute inset-0 w-full h-full ${
                       fitMode === "cover" ? "object-cover" : "object-contain"
@@ -1319,6 +1425,17 @@ export function ViewerStreamInterface({
                       transform: "translateZ(0)",
                       backfaceVisibility: "hidden",
                     }}
+                  />
+                  {/* Dedicated audio sink. The same MediaStream is bound to
+                      both <video> (silent) and this <audio> element so audio
+                      survives any video-element re-binds during ICE recovery.
+                      Hidden but kept in the DOM so the ref is always live. */}
+                  <audio
+                    ref={audioRef}
+                    autoPlay
+                    playsInline
+                    aria-hidden="true"
+                    style={{ display: "none" }}
                   />
                   {getVideoContent()}
                   {/* Host-controlled image slideshow — z-20, above video, below
