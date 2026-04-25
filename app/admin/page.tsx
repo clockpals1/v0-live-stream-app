@@ -53,17 +53,7 @@ export default async function AdminPage() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <ShieldCheck className="w-6 h-6 text-primary" />
-            Host Management
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Create and manage host accounts that can access the streaming dashboard.
-          </p>
-        </div>
-
+      <main className="container mx-auto px-4 py-8 max-w-6xl">
         <AdminPanel currentUserId={user.id} />
       </main>
     </div>
