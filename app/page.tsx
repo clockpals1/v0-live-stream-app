@@ -357,7 +357,7 @@ export default function HomePage() {
             <span className="font-bold">Isunday Stream Live</span>
           </div>
           <p className="text-xs text-muted-foreground sm:text-sm">
-            © {new Date().getFullYear()} Isunday Stream Live · Built with Next.js, Supabase &amp; WebRTC
+            © {new Date().getFullYear()} Isunday Stream Live
           </p>
         </div>
       </footer>
