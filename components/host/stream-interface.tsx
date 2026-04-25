@@ -30,6 +30,14 @@ import {
 } from "@/lib/stream-ops";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
+// ─── Section-replay subsystem (feature-flag-gated, additive only) ──────────
+// All of the imports below are NO-OP costs when REPLAY_ENABLED is false:
+// the hook returns an empty object, the panel never renders. We import them
+// unconditionally so the bundle is self-contained and there is no dynamic
+// import failure mode at runtime.
+import { ReplayPanel } from "@/components/host/replay-panel";
+import { useSectionRecorder } from "@/lib/replay/use-section-recorder";
+import { REPLAY_ENABLED } from "@/lib/replay/config";
 import {
   Radio,
   Video,
@@ -61,6 +69,7 @@ import {
   EyeOff,
   Tv,
   Lock,
+  Film,
 } from "lucide-react";
 
 interface Stream {
@@ -211,6 +220,17 @@ function OwnerStreamInterface({
     // Control-room by default: admin can manage/monitor without auto-publishing
     // their camera. Host explicitly clicks "Go On-Air" to publish.
     controlRoomMode: true,
+  });
+
+  // ─── Section-replay recorder (feature-flag-gated, parallel pipeline) ────
+  // This hook runs its own MediaRecorder against the same mediaStream. When
+  // REPLAY_ENABLED is false it short-circuits to a no-op, so the live path
+  // is bit-identical to before this file was touched. Failures in the
+  // recorder are isolated and never surface to the WebRTC pipeline.
+  const sectionRecorder = useSectionRecorder({
+    enabled: REPLAY_ENABLED,
+    mediaStream: mediaStream ?? null,
+    isLive: isStreaming,
   });
 
   // Fallback receiver: connects to the active co-host when the warm pool hasn't
@@ -775,6 +795,18 @@ function OwnerStreamInterface({
   };
 
   const handleEndStream = async () => {
+    // Finalise any in-flight section FIRST so the last segment lands in the
+    // replay panel before the live machinery tears down. Wrapped in a
+    // try/catch so a recorder hiccup cannot block the user from ending the
+    // live — that is the most important path on this page.
+    if (REPLAY_ENABLED) {
+      try {
+        await sectionRecorder.finaliseAndStop();
+      } catch (err) {
+        console.error("[Replay] finaliseAndStop during end stream failed:", err);
+        // Swallow — proceed to end the live stream regardless.
+      }
+    }
     const hadRecording = await stopStream();
     setStream((prev) => ({ ...prev, status: "ended" }));
     if (hadRecording) {
@@ -1454,8 +1486,38 @@ function OwnerStreamInterface({
                       Cameras
                     </TabsTrigger>
                   )}
+                  {/* Replay tab — only mounted when REPLAY_ENABLED is true at
+                      build time AND the viewer is the stream owner. Hidden
+                      otherwise so non-flagged builds are visually identical. */}
+                  {REPLAY_ENABLED && isStreamOwner && (
+                    <TabsTrigger value="replay" className="flex-1 text-xs gap-1">
+                      <Film className="w-3.5 h-3.5" />
+                      Replay
+                      {sectionRecorder.sections.length > 0 && (
+                        <span className="text-muted-foreground">
+                          ({sectionRecorder.sections.length})
+                        </span>
+                      )}
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
+
+              {/* Replay Tab — section recordings + local export. Mount only
+                  when the feature flag is on and the user is the owner. */}
+              {REPLAY_ENABLED && isStreamOwner && (
+                <TabsContent
+                  value="replay"
+                  className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col"
+                >
+                  <ReplayPanel
+                    recorder={sectionRecorder}
+                    isLive={isStreaming}
+                    roomCode={stream.room_code}
+                    streamTitle={stream.title}
+                  />
+                </TabsContent>
+              )}
 
               {/* Cameras Tab — Director Panel */}
               {isStreamOwner && (
