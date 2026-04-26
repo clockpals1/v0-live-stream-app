@@ -5,8 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Tooltip,
   TooltipContent,
@@ -14,20 +14,29 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { Eye, EyeOff, KeyRound, Save, RefreshCw } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  KeyRound,
+  Save,
+  RefreshCw,
+  Check,
+  Circle,
+  Info,
+} from "lucide-react";
 import type { RedactedBillingConfig } from "@/lib/billing/config";
+import { cn } from "@/lib/utils";
 
 /**
  * Admin panel — Stripe API keys + mode toggle.
  *
- * Behaviour
- * - Loads /api/admin/billing/config and renders a redacted view.
- * - Each key field shows a masked indicator like `sk_…XXXX` when set.
- * - Editing a field marks it dirty; clicking Save sends only changed
- *   fields. An empty saved value clears the slot.
- * - The mode is a segmented control (Test | Live). Switching to a mode
- *   whose secret key is empty is disabled in the UI (the server would
- *   400 anyway, by design).
+ * Fields are grouped into a tabbed Test / Live editor. Each field shows
+ * its own status pill so admins know what's saved without diffing
+ * against memory. Mode switching uses a segmented control disabled per-
+ * option when the target mode lacks a secret key — eliminating the
+ * 400-from-the-server class of error entirely. If something does go
+ * wrong, errors render inline at the top of the panel rather than as a
+ * toast that vanishes.
  */
 
 type FieldName =
@@ -49,20 +58,20 @@ interface FieldDef {
 const TEST_FIELDS: FieldDef[] = [
   {
     name: "stripe_test_secret_key",
-    label: "Test secret key",
+    label: "Secret key",
     hint: "Server-side only. Used by Checkout and the Customer Portal.",
     placeholder: "sk_test_…",
     mask: true,
   },
   {
     name: "stripe_test_publishable_key",
-    label: "Test publishable key",
+    label: "Publishable key",
     hint: "Safe for the browser. Used to render Stripe Elements.",
     placeholder: "pk_test_…",
   },
   {
     name: "stripe_test_webhook_secret",
-    label: "Test webhook secret",
+    label: "Webhook secret",
     hint: "From the Stripe webhook endpoint. Verifies incoming events.",
     placeholder: "whsec_…",
     mask: true,
@@ -72,20 +81,20 @@ const TEST_FIELDS: FieldDef[] = [
 const LIVE_FIELDS: FieldDef[] = [
   {
     name: "stripe_live_secret_key",
-    label: "Live secret key",
+    label: "Secret key",
     hint: "Server-side only. Used by Checkout and the Customer Portal.",
     placeholder: "sk_live_…",
     mask: true,
   },
   {
     name: "stripe_live_publishable_key",
-    label: "Live publishable key",
+    label: "Publishable key",
     hint: "Safe for the browser. Used to render Stripe Elements.",
     placeholder: "pk_live_…",
   },
   {
     name: "stripe_live_webhook_secret",
-    label: "Live webhook secret",
+    label: "Webhook secret",
     hint: "From the Stripe webhook endpoint. Verifies incoming events.",
     placeholder: "whsec_…",
     mask: true,
@@ -103,17 +112,14 @@ export function StripeConfigPanel({
   const [drafts, setDrafts] = useState<Partial<Record<FieldName, string>>>({});
   const [reveal, setReveal] = useState<Partial<Record<FieldName, boolean>>>({});
   const [pending, startTransition] = useTransition();
-  // Active tab follows the active mode by default; user can switch
-  // independently to peek at the inactive set.
   const [tab, setTab] = useState<"test" | "live">(initial.stripe_mode);
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => setConfig(initial), [initial]);
 
   const isDirty = Object.keys(drafts).length > 0;
   const testHasSecret = config.stripe_test_secret_key_set;
   const liveHasSecret = config.stripe_live_secret_key_set;
-  // Will the post-save state still allow switching to that mode? Counts
-  // pending drafts so the toggle reflects the user's intent.
   const willHaveTestSecret =
     drafts.stripe_test_secret_key === undefined
       ? testHasSecret
@@ -124,6 +130,7 @@ export function StripeConfigPanel({
       : !!drafts.stripe_live_secret_key;
 
   async function patchConfig(body: Record<string, unknown>) {
+    setInlineError(null);
     const res = await fetch("/api/admin/billing/config", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -145,21 +152,36 @@ export function StripeConfigPanel({
         setDrafts({});
         toast.success("Stripe configuration saved.");
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Save failed.");
+        const msg = e instanceof Error ? e.message : "Save failed.";
+        setInlineError(msg);
+        toast.error(msg);
       }
     });
   }
 
   function setMode(target: "test" | "live") {
     if (target === config.stripe_mode) return;
-    if (target === "live" && !liveHasSecret) return;
-    if (target === "test" && !testHasSecret) return;
+    if (target === "live" && !liveHasSecret) {
+      setInlineError(
+        "The live secret key is empty. Save it first, then switch modes.",
+      );
+      setTab("live");
+      return;
+    }
+    if (target === "test" && !testHasSecret) {
+      setInlineError(
+        "The test secret key is empty. Save it first, then switch modes.",
+      );
+      setTab("test");
+      return;
+    }
     startTransition(async () => {
       try {
         await patchConfig({ stripe_mode: target });
         toast.success(`Switched to ${target.toUpperCase()} mode.`);
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Could not switch mode.");
+        const msg = e instanceof Error ? e.message : "Could not switch mode.";
+        setInlineError(msg);
       }
     });
   }
@@ -175,25 +197,37 @@ export function StripeConfigPanel({
     const draft = drafts[field.name];
     const showReveal = reveal[field.name] ?? false;
     const inputType = field.mask && !showReveal ? "password" : "text";
-    const status =
-      draft === ""
-        ? "Will clear on save."
-        : draft && draft !== ""
-          ? "Pending save."
-          : isSet
-            ? "Saved."
-            : "Not set.";
+    const willClear = draft === "";
+    const willChange = draft !== undefined && draft !== "";
+    const dirty = draft !== undefined;
+
     return (
-      <div key={field.name} className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
+      <div key={field.name} className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
           <Label htmlFor={field.name} className="text-sm font-medium">
             {field.label}
           </Label>
-          {isSet ? (
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              {tail ? `…${tail}` : "saved"}
-            </Badge>
-          ) : null}
+          <StatusPill
+            tone={
+              willChange
+                ? "pending"
+                : willClear
+                  ? "warning"
+                  : isSet
+                    ? "ok"
+                    : "muted"
+            }
+          >
+            {willChange
+              ? "Pending"
+              : willClear
+                ? "Will clear"
+                : isSet
+                  ? tail
+                    ? `…${tail}`
+                    : "Saved"
+                  : "Not set"}
+          </StatusPill>
         </div>
         <div className="flex gap-2">
           <Input
@@ -204,7 +238,10 @@ export function StripeConfigPanel({
             onChange={(e) =>
               setDrafts((p) => ({ ...p, [field.name]: e.target.value }))
             }
-            className="font-mono text-sm"
+            className={cn(
+              "font-mono text-sm",
+              dirty && "border-amber-400 focus-visible:ring-amber-300/50 dark:border-amber-500/60",
+            )}
             autoComplete="off"
             spellCheck={false}
           />
@@ -222,18 +259,9 @@ export function StripeConfigPanel({
             </Button>
           ) : null}
         </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground">{field.hint}</span>
-          <span
-            className={
-              draft !== undefined && draft !== ""
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
-            }
-          >
-            {status}
-          </span>
-        </div>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {field.hint}
+        </p>
       </div>
     );
   }
@@ -241,14 +269,14 @@ export function StripeConfigPanel({
   return (
     <TooltipProvider delayDuration={150}>
       <Card>
-        <CardHeader className="space-y-1.5 pb-4">
+        <CardHeader className="space-y-4 border-b border-border bg-muted/20 pb-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <KeyRound className="h-4 w-4" />
                 Stripe configuration
               </CardTitle>
-              <CardDescription className="mt-1">
+              <CardDescription className="mt-1 max-w-prose">
                 Manage test and live API credentials. The active mode determines
                 which key set is used for Checkout, the Customer Portal, and
                 webhook verification.
@@ -257,86 +285,70 @@ export function StripeConfigPanel({
           </div>
 
           {/* Mode segmented control */}
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Active mode
             </span>
             <div
               role="radiogroup"
               aria-label="Active Stripe mode"
-              className="inline-flex h-9 items-center gap-1 rounded-lg border border-border bg-muted/40 p-1"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-border bg-background p-1 shadow-sm"
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={config.stripe_mode === "test"}
-                    disabled={pending || !testHasSecret}
-                    onClick={() => setMode("test")}
-                    className={
-                      "rounded-md px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
-                      (config.stripe_mode === "test"
-                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                        : "text-muted-foreground hover:bg-muted")
-                    }
-                  >
-                    TEST
-                  </button>
-                </TooltipTrigger>
-                {!testHasSecret ? (
-                  <TooltipContent>Add a test secret key first.</TooltipContent>
-                ) : null}
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={config.stripe_mode === "live"}
-                    disabled={pending || !liveHasSecret}
-                    onClick={() => setMode("live")}
-                    className={
-                      "rounded-md px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
-                      (config.stripe_mode === "live"
-                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                        : "text-muted-foreground hover:bg-muted")
-                    }
-                  >
-                    LIVE
-                  </button>
-                </TooltipTrigger>
-                {!liveHasSecret ? (
-                  <TooltipContent>Add a live secret key first.</TooltipContent>
-                ) : null}
-              </Tooltip>
+              <ModeButton
+                mode="test"
+                active={config.stripe_mode === "test"}
+                hasKey={testHasSecret}
+                disabled={pending}
+                onClick={() => setMode("test")}
+              />
+              <ModeButton
+                mode="live"
+                active={config.stripe_mode === "live"}
+                hasKey={liveHasSecret}
+                disabled={pending}
+                onClick={() => setMode("live")}
+              />
             </div>
             {pending ? (
-              <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              <RefreshCw className="ml-1 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            ) : null}
+            {!liveHasSecret ? (
+              <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Info className="h-3 w-3" />
+                Add a live secret key to enable Live mode
+              </span>
             ) : null}
           </div>
+
+          {inlineError ? (
+            <Alert variant="destructive" className="py-2">
+              <AlertDescription className="text-xs">
+                {inlineError}
+              </AlertDescription>
+            </Alert>
+          ) : null}
         </CardHeader>
 
-        <CardContent>
+        <CardContent className="pt-5">
           <Tabs value={tab} onValueChange={(v) => setTab(v as "test" | "live")}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="test" className="gap-1.5">
+            <TabsList className="mb-5 grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="test" className="gap-2">
+                <span
+                  className={cn(
+                    "inline-block h-1.5 w-1.5 rounded-full",
+                    willHaveTestSecret ? "bg-emerald-500" : "bg-muted-foreground/40",
+                  )}
+                />
                 Test keys
-                <span
-                  className={
-                    "inline-block h-1.5 w-1.5 rounded-full " +
-                    (willHaveTestSecret ? "bg-emerald-500" : "bg-muted-foreground/40")
-                  }
-                />
               </TabsTrigger>
-              <TabsTrigger value="live" className="gap-1.5">
-                Live keys
+              <TabsTrigger value="live" className="gap-2">
                 <span
-                  className={
-                    "inline-block h-1.5 w-1.5 rounded-full " +
-                    (willHaveLiveSecret ? "bg-emerald-500" : "bg-muted-foreground/40")
-                  }
+                  className={cn(
+                    "inline-block h-1.5 w-1.5 rounded-full",
+                    willHaveLiveSecret ? "bg-emerald-500" : "bg-muted-foreground/40",
+                  )}
                 />
+                Live keys
               </TabsTrigger>
             </TabsList>
             <TabsContent value="test" className="space-y-5">
@@ -351,7 +363,10 @@ export function StripeConfigPanel({
             {isDirty ? (
               <Button
                 variant="ghost"
-                onClick={() => setDrafts({})}
+                onClick={() => {
+                  setDrafts({});
+                  setInlineError(null);
+                }}
                 disabled={pending}
               >
                 Discard
@@ -365,5 +380,92 @@ export function StripeConfigPanel({
         </CardContent>
       </Card>
     </TooltipProvider>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+function ModeButton({
+  mode,
+  active,
+  hasKey,
+  disabled,
+  onClick,
+}: {
+  mode: "test" | "live";
+  active: boolean;
+  hasKey: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const label = mode.toUpperCase();
+  const tone =
+    mode === "live"
+      ? "data-[active=true]:bg-emerald-500/15 data-[active=true]:text-emerald-700 dark:data-[active=true]:text-emerald-300"
+      : "data-[active=true]:bg-amber-500/15 data-[active=true]:text-amber-700 dark:data-[active=true]:text-amber-300";
+
+  const button = (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      data-active={active}
+      disabled={disabled || (!active && !hasKey)}
+      onClick={onClick}
+      className={cn(
+        "rounded-md px-3 py-1 text-xs font-semibold tracking-wide transition",
+        "disabled:cursor-not-allowed disabled:opacity-40",
+        "hover:bg-muted",
+        tone,
+        !active && hasKey && "text-muted-foreground",
+      )}
+    >
+      {active ? <Check className="mr-1 inline-block h-3 w-3" /> : null}
+      {label}
+    </button>
+  );
+
+  if (!hasKey && !active) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent>
+          Add a {mode} secret key first to enable {label} mode.
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+  return button;
+}
+
+function StatusPill({
+  tone,
+  children,
+}: {
+  tone: "ok" | "muted" | "pending" | "warning";
+  children: React.ReactNode;
+}) {
+  const cls =
+    tone === "ok"
+      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      : tone === "pending"
+        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+        : tone === "warning"
+          ? "bg-rose-500/10 text-rose-700 dark:text-rose-300"
+          : "bg-muted text-muted-foreground";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px]",
+        cls,
+      )}
+    >
+      {tone === "ok" ? (
+        <Check className="h-2.5 w-2.5" />
+      ) : tone === "muted" ? (
+        <Circle className="h-2 w-2" />
+      ) : null}
+      {children}
+    </span>
   );
 }
