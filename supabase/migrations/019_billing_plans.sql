@@ -33,6 +33,21 @@
 --   during testing.
 
 -- ─────────────────────────────────────────────────────────────────────
+-- 0. Shared helper (idempotent — also defined in migration 001).
+--    Re-declared here with CREATE OR REPLACE so this migration is
+--    self-contained and works on databases where 001 was never run or
+--    the helper was dropped.
+-- ─────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─────────────────────────────────────────────────────────────────────
 -- 1. billing_plans
 -- ─────────────────────────────────────────────────────────────────────
 
