@@ -30,6 +30,7 @@ import {
 } from "@/lib/stream-ops";
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
+import { PostStreamDialog } from "@/components/host/post-stream-dialog";
 // ─── Section-replay subsystem (feature-flag-gated, additive only) ──────────
 // All of the imports below are NO-OP costs when REPLAY_ENABLED is false:
 // the hook returns an empty object, the panel never renders. We import them
@@ -173,6 +174,15 @@ function OwnerStreamInterface({
     mixWithMic: boolean;
   }>({ active: false, volume: 0.8, mixWithMic: true });
 
+  // ---- Post-stream archive dialog ----
+  // Opens once handleEndStream resolves with a recording. The blob is
+  // pulled from the host hook via getRecordingBlob() at the moment we
+  // open the dialog, so the user can click "Save to cloud" without us
+  // having to keep the blob in component state.
+  const [postStreamOpen, setPostStreamOpen] = useState(false);
+  const [postStreamBlob, setPostStreamBlob] = useState<Blob | null>(null);
+  const [postStreamDownloaded, setPostStreamDownloaded] = useState(false);
+
   // ---- Ticker state (scrolling news-style crawl below the video) ----
   const [tickerActive, setTickerActive] = useState(false);
   const [tickerMessage, setTickerMessage] = useState("");
@@ -214,6 +224,7 @@ function OwnerStreamInterface({
     isHostOnAir,
     controlRoomMode,
     downloadRecording,
+    getRecordingBlob,
   } = useHostStream({
     streamId: stream.id,
     roomCode: stream.room_code,
@@ -811,6 +822,16 @@ function OwnerStreamInterface({
     setStream((prev) => ({ ...prev, status: "ended" }));
     if (hadRecording) {
       toast.success("Stream ended — recording downloaded to your device.");
+      // Surface the post-stream archive dialog. The hook keeps the
+      // chunks alive after stopStream(), so getRecordingBlob() returns
+      // the same data that was just downloaded — perfect for cloud
+      // upload without needing to re-record.
+      const blob = getRecordingBlob();
+      if (blob) {
+        setPostStreamBlob(blob);
+        setPostStreamDownloaded(true);
+        setPostStreamOpen(true);
+      }
     }
   };
 
@@ -1704,6 +1725,18 @@ function OwnerStreamInterface({
           </Card>
         </div>
       </main>
+
+      {/* Post-stream archive choice — opens after handleEndStream when a
+          recording exists. The local download already happened; this
+          dialog adds the optional cloud-archive flow. */}
+      <PostStreamDialog
+        open={postStreamOpen}
+        onOpenChange={setPostStreamOpen}
+        streamId={stream.id}
+        blob={postStreamBlob}
+        alreadyDownloaded={postStreamDownloaded}
+        onDownloadLocal={downloadRecording}
+      />
     </div>
   );
 }

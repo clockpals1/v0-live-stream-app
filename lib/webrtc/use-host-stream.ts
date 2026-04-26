@@ -847,6 +847,19 @@ export function useHostStream({
     };
   }, []);
 
+  /**
+   * Build a single Blob from the captured chunks. Returns null if
+   * nothing was recorded. Reads from the ref (not the state copy) so
+   * the result is always the freshest possible chunk list, regardless
+   * of React's batched updates. Safe to call multiple times — Blob
+   * construction is cheap and the chunks themselves are kept alive
+   * until the hook unmounts.
+   */
+  const getRecordingBlob = useCallback((): Blob | null => {
+    if (recordedChunksRef.current.length === 0) return null;
+    return new Blob(recordedChunksRef.current, { type: "video/webm" });
+  }, []);
+
   return {
     mediaStream: mediaStreamRef.current,
     initializeMedia,
@@ -873,5 +886,6 @@ export function useHostStream({
     isHostOnAir,
     controlRoomMode,
     downloadRecording,
+    getRecordingBlob,
   };
 }
