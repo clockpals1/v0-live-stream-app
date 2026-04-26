@@ -8,6 +8,15 @@
  *   Instead we mint a presigned PUT URL on the server and let the
  *   browser PUT the blob directly to R2 — no proxy, no size cap.
  *
+ * Why a hand-rolled SigV4 presigner instead of @aws-sdk/client-s3:
+ *   The aws-sdk packages add ~3-4 MB to the Worker bundle, which
+ *   pushed total worker size past Cloudflare's 10 MB compressed
+ *   deploy limit and broke deploys at Phase 3. SigV4 query-string
+ *   presigning for a single PUT/GET is only ~80 lines using the
+ *   Web Crypto API that's already available in the Workers runtime.
+ *   No regional endpoints, no service discovery, no XML parsing —
+ *   we never need any of that for a presign.
+ *
  * Configuration:
  *   Set these as Cloudflare Worker secrets (NOT in DB) so they live
  *   alongside SUPABASE_SERVICE_ROLE_KEY:
@@ -17,18 +26,10 @@
  *     R2_BUCKET             — the bucket name
  *     R2_PUBLIC_URL_BASE    — optional: public hostname for the bucket
  *                             (e.g. https://archives.isunday.me).
- *                             If unset, archives stay private and the
- *                             app will need to mint signed read URLs
- *                             on demand. For Phase 3 we use public URLs
- *                             so playback is a plain <video src=…>.
  *
  * Reads each binding from process.env first, then getCloudflareContext
  * — same dual-source pattern as createAdminClient (lib/supabase/admin.ts).
  */
-
-import { S3Client } from "@aws-sdk/client-s3";
-import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 interface R2Bindings {
   R2_ACCOUNT_ID?: string;
@@ -115,37 +116,6 @@ export function isR2Configured(): boolean {
   }
 }
 
-let _cachedClient:
-  | { endpoint: string; accessKeyId: string; client: S3Client }
-  | null = null;
-
-function getClient(cfg: R2Config): S3Client {
-  if (
-    _cachedClient &&
-    _cachedClient.endpoint === cfg.endpoint &&
-    _cachedClient.accessKeyId === cfg.accessKeyId
-  ) {
-    return _cachedClient.client;
-  }
-  const client = new S3Client({
-    region: "auto",
-    endpoint: cfg.endpoint,
-    credentials: {
-      accessKeyId: cfg.accessKeyId,
-      secretAccessKey: cfg.secretAccessKey,
-    },
-    // Force path-style addressing (R2 doesn't support virtual hosts
-    // for the regional endpoint).
-    forcePathStyle: true,
-  });
-  _cachedClient = {
-    endpoint: cfg.endpoint,
-    accessKeyId: cfg.accessKeyId,
-    client,
-  };
-  return client;
-}
-
 export interface PresignedUploadResult {
   uploadUrl: string;
   /** PUT-time headers the client must send for the signature to verify. */
@@ -163,10 +133,6 @@ export interface PresignedUploadResult {
  * Mint a presigned PUT URL for a browser-direct upload. The URL is
  * valid for 1 hour by default — long enough for slow uplinks on big
  * recordings, short enough that a leaked URL has limited blast radius.
- *
- * The caller is responsible for choosing a unique objectKey. The
- * convention used by /api/streams/[id]/archive/start is:
- *   hosts/{host_id}/streams/{stream_id}/{archive_id}.{ext}
  */
 export async function presignUpload(args: {
   objectKey: string;
@@ -174,22 +140,16 @@ export async function presignUpload(args: {
   expiresInSeconds?: number;
 }): Promise<PresignedUploadResult> {
   const cfg = getR2Config();
-  const client = getClient(cfg);
   const expiresIn = args.expiresInSeconds ?? 3600;
 
-  const command = new PutObjectCommand({
-    Bucket: cfg.bucket,
-    Key: args.objectKey,
-    ContentType: args.contentType,
-  });
-
-  const uploadUrl = await getSignedUrl(client, command, {
+  const uploadUrl = await presignS3({
+    method: "PUT",
+    cfg,
+    objectKey: args.objectKey,
     expiresIn,
-    // signableHeaders: tell presigner that ONLY these headers are part
-    // of the signature. The browser will add the matching values on
-    // PUT and the URL will validate. Other request headers (e.g.
-    // user-agent) won't break verification.
-    signableHeaders: new Set(["host", "content-type"]),
+    // Signing Content-Type means the browser MUST send the same value
+    // on the PUT or R2 will return 403. Mirrors the old SDK behaviour.
+    signedHeaders: { "content-type": args.contentType },
   });
 
   return {
@@ -206,20 +166,174 @@ export async function presignUpload(args: {
 
 /**
  * Mint a short-lived signed GET URL for a private bucket. Used when
- * R2_PUBLIC_URL_BASE is not configured. Phase 3 doesn't call this in
- * any UI yet — it's here for future playback/download flows.
+ * R2_PUBLIC_URL_BASE is not configured.
  */
 export async function presignDownload(args: {
   objectKey: string;
   expiresInSeconds?: number;
 }): Promise<string> {
   const cfg = getR2Config();
-  const client = getClient(cfg);
-  const command = new GetObjectCommand({
-    Bucket: cfg.bucket,
-    Key: args.objectKey,
-  });
-  return getSignedUrl(client, command, {
+  return presignS3({
+    method: "GET",
+    cfg,
+    objectKey: args.objectKey,
     expiresIn: args.expiresInSeconds ?? 3600,
   });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SigV4 query-string presigner (zero-dep, Web Crypto only)
+//
+// Reference: https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+// R2 implements SigV4 verbatim against the cloudflarestorage.com host.
+//
+// Payload hash is the literal string "UNSIGNED-PAYLOAD" — required for
+// query-string presigned PUTs since the body isn't known at sign time.
+// ────────────────────────────────────────────────────────────────────
+
+interface PresignArgs {
+  method: "PUT" | "GET";
+  cfg: R2Config;
+  objectKey: string;
+  expiresIn: number;
+  /** Lowercase header name → value. Will be added to SignedHeaders. */
+  signedHeaders?: Record<string, string>;
+}
+
+async function presignS3(args: PresignArgs): Promise<string> {
+  const { method, cfg, objectKey, expiresIn, signedHeaders = {} } = args;
+
+  // Path-style addressing: /{bucket}/{key}. Each segment of the key
+  // path must be URL-encoded *except* for forward slashes between
+  // segments. Using encodeURIComponent and then restoring "/" gives
+  // S3-compatible canonicalisation.
+  const encodedKey = objectKey
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  const canonicalUri = `/${cfg.bucket}/${encodedKey}`;
+
+  const host = new URL(cfg.endpoint).host;
+
+  // ── ISO 8601 basic format, UTC ────────────────────────────────────
+  // Example: 20260426T231500Z
+  const now = new Date();
+  const amzDate = toAmzDate(now);
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/auto/s3/aws4_request`;
+
+  // ── Canonical headers (always include host) ───────────────────────
+  const headers: Record<string, string> = {
+    host,
+    ...Object.fromEntries(
+      Object.entries(signedHeaders).map(([k, v]) => [k.toLowerCase(), v]),
+    ),
+  };
+  const sortedHeaderNames = Object.keys(headers).sort();
+  const canonicalHeaders =
+    sortedHeaderNames
+      .map((n) => `${n}:${headers[n].trim().replace(/\s+/g, " ")}`)
+      .join("\n") + "\n";
+  const signedHeaderList = sortedHeaderNames.join(";");
+
+  // ── Canonical query string ────────────────────────────────────────
+  // Order matters; S3 wants strict alpha-sorted keys with rfc3986 enc.
+  const queryParams: Record<string, string> = {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": `${cfg.accessKeyId}/${credentialScope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": String(expiresIn),
+    "X-Amz-SignedHeaders": signedHeaderList,
+  };
+  const canonicalQuery = Object.keys(queryParams)
+    .sort()
+    .map(
+      (k) => `${rfc3986(k)}=${rfc3986(queryParams[k])}`,
+    )
+    .join("&");
+
+  // ── Canonical request ─────────────────────────────────────────────
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQuery,
+    canonicalHeaders,
+    signedHeaderList,
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+
+  // ── String to sign ────────────────────────────────────────────────
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest),
+  ].join("\n");
+
+  // ── Derive signing key (per AWS spec) ─────────────────────────────
+  const kDate = await hmac(
+    new TextEncoder().encode("AWS4" + cfg.secretAccessKey),
+    dateStamp,
+  );
+  const kRegion = await hmac(kDate, "auto");
+  const kService = await hmac(kRegion, "s3");
+  const kSigning = await hmac(kService, "aws4_request");
+  const signature = bufToHex(await hmac(kSigning, stringToSign));
+
+  return `${cfg.endpoint}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+}
+
+function toAmzDate(d: Date): string {
+  return d.toISOString().replace(/[:-]|\.\d{3}/g, "");
+}
+
+/**
+ * RFC3986-compliant URI encoding. Different from encodeURIComponent:
+ * we additionally encode "!", "*", "'", "(", ")" — those are reserved
+ * by RFC3986 but left alone by encodeURIComponent. S3 requires the
+ * stricter form.
+ */
+function rfc3986(s: string): string {
+  return encodeURIComponent(s).replace(
+    /[!*'()]/g,
+    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
+  );
+}
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(s),
+  );
+  return bufToHex(new Uint8Array(buf));
+}
+
+async function hmac(
+  key: ArrayBuffer | Uint8Array,
+  data: string,
+): Promise<Uint8Array> {
+  const keyBuf = key instanceof Uint8Array ? key : new Uint8Array(key);
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyBuf,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    new TextEncoder().encode(data),
+  );
+  return new Uint8Array(sig);
+}
+
+function bufToHex(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    const h = bytes[i].toString(16);
+    out += h.length === 1 ? "0" + h : h;
+  }
+  return out;
 }
