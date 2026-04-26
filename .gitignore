@@ -19,3 +19,6 @@ node_modules
 # Cloudflare / OpenNext build output
 .open-next/
 .dev.vars
+
+tail_output.txt
+tail_err.txt
