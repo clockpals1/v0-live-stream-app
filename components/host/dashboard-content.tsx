@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
+import { SubscriptionCard } from "@/components/billing/subscription-card";
 import {
   Radio,
   Video,
@@ -1223,6 +1224,15 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             </div>
           </div>
         </div>
+
+        {/* Subscription card \u2014 plan summary + Upgrade / Manage actions.
+            Same gating as Insider Circle: only users who own streams need
+            their own subscription. */}
+        {canCreateStreams && host && (
+          <div className="mt-8">
+            <SubscriptionCard />
+          </div>
+        )}
 
         {/* Insider Circle \u2014 host's private subscriber list + email composer.
             Hidden for cohost-only roles since they don't own a list of their

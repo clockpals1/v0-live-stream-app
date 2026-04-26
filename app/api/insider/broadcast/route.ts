@@ -7,6 +7,7 @@ import {
   sendBatch,
   unsubscribeUrl,
 } from "@/lib/insider/email";
+import { getPlanForUser, featureEnabled } from "@/lib/billing/plans";
 
 /**
  * POST /api/insider/broadcast
@@ -44,6 +45,31 @@ export async function POST(request: Request) {
 
   if (!host) {
     return NextResponse.json({ error: "Not a registered host" }, { status: 403 });
+  }
+
+  // ─── 1b. Plan gate ──────────────────────────────────────────────────
+  // Insider Circle is a feature that the admin can toggle per plan.
+  // The default 'free' plan ships with insider_circle:true so this
+  // gate is a no-op for existing users until an admin disables it.
+  try {
+    const plan = await getPlanForUser(supabase, user.id);
+    if (!featureEnabled(plan, "insider_circle")) {
+      return NextResponse.json(
+        {
+          error:
+            "Insider Circle broadcasts are not included in your current plan. " +
+            "Upgrade from your dashboard to enable this feature.",
+          code: "feature_not_in_plan",
+          feature: "insider_circle",
+        },
+        { status: 402 },
+      );
+    }
+  } catch (e) {
+    // Don't block on plan-lookup failures — log and continue. The
+    // alternative (failing closed) would break the whole feature for
+    // every host on a transient DB hiccup.
+    console.error("[insider/broadcast] plan lookup failed; allowing:", e);
   }
 
   // ─── 2. Validate input ─────────────────────────────────────────────
