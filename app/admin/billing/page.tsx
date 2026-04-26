@@ -142,10 +142,27 @@ export default async function AdminBillingPage() {
           <ModeBanner mode={initialConfig.stripe_mode} />
         ) : null}
 
-        <PlansEditor />
+        {/* Plans — pricing, features, visibility. Heading sits above the
+            existing PlansEditor card to reinforce the section split when
+            the user scrolls past the stats row. */}
+        <section className="space-y-3 pt-2">
+          <SectionHeading
+            icon={<Layers className="h-4 w-4" />}
+            title="Plans"
+            description="Pricing tiers and feature flags shown to hosts."
+          />
+          <PlansEditor />
+        </section>
 
         {initialConfig ? (
-          <StripeConfigPanel initial={initialConfig} />
+          <section className="space-y-3 pt-2">
+            <SectionHeading
+              icon={<ShieldCheck className="h-4 w-4" />}
+              title="Stripe credentials"
+              description="API keys, webhook secret, and active environment."
+            />
+            <StripeConfigPanel initial={initialConfig} />
+          </section>
         ) : (
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
             Billing configuration row is missing from the database. Apply
@@ -154,6 +171,28 @@ export default async function AdminBillingPage() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function SectionHeading({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-end justify-between gap-3 border-b border-border pb-2">
+      <div>
+        <div className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+          {icon}
+          {title}
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
     </div>
   );
 }

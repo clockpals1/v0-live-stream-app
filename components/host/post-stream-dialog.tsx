@@ -119,6 +119,18 @@ export function PostStreamDialog({
             <Download className="mr-2 h-4 w-4" />
             {alreadyDownloaded ? "Download again" : "Download"}
           </Button>
+          {/* Summary link \u2014 lets the host bookmark or revisit a
+              permanent recap of this stream's cloud + YouTube state. */}
+          <Button
+            variant="outline"
+            asChild
+            className="flex-1 sm:flex-none"
+          >
+            <a href={`/host/streams/${streamId}/summary`}>
+              <ArrowUpRight className="mr-2 h-4 w-4" />
+              View summary
+            </a>
+          </Button>
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}

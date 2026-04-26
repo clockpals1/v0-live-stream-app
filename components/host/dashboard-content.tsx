@@ -16,8 +16,6 @@ import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
-import { SubscriptionCard } from "@/components/billing/subscription-card";
-import { YoutubeConnectCard } from "@/components/host/youtube-connect-card";
 import {
   Radio,
   Video,
@@ -43,6 +41,7 @@ import {
   MapPin,
   ShieldCheck,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -597,6 +596,18 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                   <ShieldCheck className="w-4 h-4 mr-2 text-primary" />
                   <span className="hidden sm:inline">User Management</span>
                   <span className="sm:hidden">Admin</span>
+                </Link>
+              </Button>
+            )}
+
+            {/* Settings — host preferences (subscription, integrations,
+                profile). Available to anyone who can create streams,
+                same gate as the cards we just removed from this body. */}
+            {canCreateStreams && host && (
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/host/settings">
+                  <Settings className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Settings</span>
                 </Link>
               </Button>
             )}
@@ -1157,6 +1168,16 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
 
                               <DropdownMenuSeparator />
 
+                              {/* Summary — permanent recap page; especially
+                                  useful for ended streams to revisit the
+                                  cloud archive / YouTube link. */}
+                              <DropdownMenuItem asChild>
+                                <Link href={`/host/streams/${stream.id}/summary`}>
+                                  <ExternalLink className="w-4 h-4 mr-2" />
+                                  View Summary
+                                </Link>
+                              </DropdownMenuItem>
+
                               <DropdownMenuItem
                                 onClick={() =>
                                   setManageOperatorsFor({ id: stream.id, title: stream.title })
@@ -1226,16 +1247,9 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
           </div>
         </div>
 
-        {/* Subscription + integrations row \u2014 plan summary, YouTube link.
-            Same gating as Insider Circle: only users who own streams need
-            their own subscription / channel link. Stacks on mobile, two
-            columns on >=lg so the dashboard breathes on desktop. */}
-        {canCreateStreams && host && (
-          <div className="mt-8 grid gap-4 lg:grid-cols-2" data-subscription-card>
-            <SubscriptionCard />
-            <YoutubeConnectCard />
-          </div>
-        )}
+        {/* Subscription + integration cards moved to /host/settings to keep
+            the dashboard focused on streams. The header has a Settings
+            link for direct access. */}
 
         {/* Insider Circle \u2014 host's private subscriber list + email composer.
             Hidden for cohost-only roles since they don't own a list of their
