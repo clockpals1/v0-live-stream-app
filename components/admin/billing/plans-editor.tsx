@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,16 +36,20 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Star, StarOff } from "lucide-react";
+import { Plus, Pencil, Trash2, Star, StarOff, Sparkles } from "lucide-react";
 import { FEATURE_KEYS, type BillingPlan, type FeatureKey } from "@/lib/billing/plans";
 
 /**
  * Admin plans editor.
  *
- * Lists every plan, supports create / edit / activate-toggle / set-default /
- * delete. The free plan has its delete + default-toggle paths disabled
- * because the API would 400 on those anyway and showing them would
- * confuse the admin.
+ * UI structure
+ * - Outer Card lists plans as rows with summary chips and quick actions.
+ * - Edit/create dialog groups fields into clear sections (Identity,
+ *   Pricing, Features, Stripe, Visibility) so the form scans top-to-bottom
+ *   without visual ambiguity.
+ *
+ * The free plan has its delete + default-toggle paths disabled because
+ * the API would 400 on those anyway.
  */
 
 const FEATURE_LABELS: Record<FeatureKey, { label: string; help: string }> = {
@@ -54,7 +58,7 @@ const FEATURE_LABELS: Record<FeatureKey, { label: string; help: string }> = {
     help: "Collect subscribers and send rich-HTML broadcast emails.",
   },
   cloud_archive: {
-    label: "Cloud archive (R2)",
+    label: "Cloud archive",
     help: "Save ended streams to Cloudflare R2 storage.",
   },
   youtube_upload: {
@@ -244,58 +248,62 @@ export function PlansEditor() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-base">Plans</CardTitle>
-            <CardDescription>
-              Manage subscription tiers, pricing, and feature access. Create
-              the matching products in Stripe first, then paste the
-              <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">price_</code>
-              ids below.
-            </CardDescription>
-          </div>
-          <Dialog open={creating} onOpenChange={setCreating}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                New plan
-              </Button>
-            </DialogTrigger>
-            <PlanDialog
-              key={creating ? "new" : "closed"}
-              title="Create plan"
-              initial={emptyDraft()}
-              isCreate
-              pending={pending}
-              onSubmit={async (d) => {
-                await handleSave(d);
-                setCreating(false);
-              }}
-              onCancel={() => setCreating(false)}
-            />
-          </Dialog>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 pb-4">
+        <div>
+          <CardTitle className="text-base">Plans</CardTitle>
+          <CardDescription className="mt-1">
+            Subscription tiers, pricing, and feature access. Create matching
+            products in Stripe first, then paste the
+            <code className="mx-1 rounded bg-muted px-1 py-0.5 font-mono text-xs">price_</code>
+            ids on each plan.
+          </CardDescription>
         </div>
+        <Dialog open={creating} onOpenChange={setCreating}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              New plan
+            </Button>
+          </DialogTrigger>
+          <PlanDialog
+            key={creating ? "new" : "closed"}
+            title="Create plan"
+            initial={emptyDraft()}
+            isCreate
+            pending={pending}
+            onSubmit={async (d) => {
+              await handleSave(d);
+              setCreating(false);
+            }}
+            onCancel={() => setCreating(false)}
+          />
+        </Dialog>
       </CardHeader>
-      <CardContent className="space-y-3">
+
+      <CardContent className="space-y-2">
         {loading ? (
-          <div className="text-sm text-muted-foreground">Loading plans…</div>
+          <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            Loading plans…
+          </div>
         ) : plans.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No plans yet.</div>
+          <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            No plans yet. Click <span className="font-medium text-foreground">New plan</span> to add one.
+          </div>
         ) : (
           plans.map((plan) => (
             <div
               key={plan.id}
-              className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border bg-muted/30 p-4"
+              className="group flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 transition hover:border-primary/40"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{plan.name}</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="secondary" className="font-mono text-[10px]">
                     {plan.slug}
                   </Badge>
                   {plan.is_default && (
-                    <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300">
+                    <Badge className="gap-1 bg-amber-500/15 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300">
+                      <Star className="h-3 w-3 fill-current" />
                       Default
                     </Badge>
                   )}
@@ -305,31 +313,40 @@ export function PlansEditor() {
                     </Badge>
                   )}
                 </div>
-                {plan.description && (
-                  <p className="mt-1 text-sm text-muted-foreground">
+                {plan.description ? (
+                  <p className="mt-0.5 truncate text-sm text-muted-foreground">
                     {plan.description}
                   </p>
-                )}
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">
+                ) : null}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-semibold text-foreground">
                     {priceLabel(plan)}
                   </span>
-                  {FEATURE_KEYS.map((k) =>
-                    plan.features?.[k] ? (
-                      <Badge key={k} variant="outline" className="text-xs">
+                  <span className="text-muted-foreground/70">·</span>
+                  {FEATURE_KEYS.filter((k) => plan.features?.[k]).length === 0 ? (
+                    <span className="text-muted-foreground">No features enabled</span>
+                  ) : (
+                    FEATURE_KEYS.filter((k) => plan.features?.[k]).map((k) => (
+                      <Badge key={k} variant="outline" className="font-normal">
+                        <Sparkles className="mr-1 h-2.5 w-2.5" />
                         {FEATURE_LABELS[k].label}
                       </Badge>
-                    ) : null,
+                    ))
                   )}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <Switch
-                  checked={plan.is_active}
-                  onCheckedChange={() => handleToggleActive(plan)}
-                  disabled={pending}
-                  aria-label={plan.is_active ? "Deactivate" : "Activate"}
-                />
+                <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2 py-1">
+                  <Switch
+                    checked={plan.is_active}
+                    onCheckedChange={() => handleToggleActive(plan)}
+                    disabled={pending}
+                    aria-label={plan.is_active ? "Deactivate plan" : "Activate plan"}
+                  />
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {plan.is_active ? "On" : "Off"}
+                  </span>
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -344,7 +361,7 @@ export function PlansEditor() {
                   }
                 >
                   {plan.is_default ? (
-                    <Star className="h-4 w-4 fill-current" />
+                    <Star className="h-4 w-4 fill-current text-amber-500" />
                   ) : (
                     <StarOff className="h-4 w-4" />
                   )}
@@ -354,7 +371,7 @@ export function PlansEditor() {
                   onOpenChange={(o) => setEditing(o ? plan : null)}
                 >
                   <DialogTrigger asChild>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" title="Edit plan">
                       <Pencil className="h-4 w-4" />
                     </Button>
                   </DialogTrigger>
@@ -384,6 +401,7 @@ export function PlansEditor() {
                           ? "The free plan cannot be deleted."
                           : "Delete plan"
                       }
+                      className="text-muted-foreground hover:text-destructive"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -413,6 +431,30 @@ export function PlansEditor() {
   );
 }
 
+// ─── Plan editor dialog ────────────────────────────────────────────────
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <header className="space-y-0.5">
+        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+        {description ? (
+          <p className="text-xs text-muted-foreground">{description}</p>
+        ) : null}
+      </header>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
 function PlanDialog({
   title,
   initial,
@@ -433,103 +475,140 @@ function PlanDialog({
     setDraft((p) => ({ ...p, [k]: v }));
 
   return (
-    <DialogContent className="max-w-2xl">
-      <DialogHeader>
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>
-          Pricing is in cents (e.g. 1900 = $19.00). Stripe price ids are
+    <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden p-0">
+      <DialogHeader className="space-y-1 border-b border-border px-6 py-4">
+        <DialogTitle className="text-base">{title}</DialogTitle>
+        <DialogDescription className="text-xs">
+          Pricing is in cents (e.g. 1900 = $19.00). Stripe price IDs are
           optional in Phase 1; you'll wire them when payments go live.
         </DialogDescription>
       </DialogHeader>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5 sm:col-span-1">
-          <Label htmlFor="plan-name">Display name</Label>
-          <Input
-            id="plan-name"
-            value={draft.name}
-            onChange={(e) => set("name", e.target.value)}
-            placeholder="Pro"
-          />
-        </div>
-        <div className="space-y-1.5 sm:col-span-1">
-          <Label htmlFor="plan-slug">URL slug</Label>
-          <Input
-            id="plan-slug"
-            value={draft.slug}
-            onChange={(e) => set("slug", e.target.value.toLowerCase())}
-            placeholder="pro"
-            disabled={!isCreate}
-          />
-        </div>
-        <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="plan-desc">Description</Label>
-          <Textarea
-            id="plan-desc"
-            value={draft.description}
-            onChange={(e) => set("description", e.target.value)}
-            placeholder="One short sentence describing what this plan unlocks."
-            rows={2}
-          />
-        </div>
+      <div className="max-h-[calc(90vh-9rem)] space-y-7 overflow-y-auto px-6 py-5">
+        {/* IDENTITY ─────────────────────────────────────────────────── */}
+        <Section
+          title="Identity"
+          description="The user-facing name and the URL slug."
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-name">Display name</Label>
+              <Input
+                id="plan-name"
+                value={draft.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Pro"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-slug">Slug</Label>
+              <Input
+                id="plan-slug"
+                value={draft.slug}
+                onChange={(e) => set("slug", e.target.value.toLowerCase())}
+                placeholder="pro"
+                disabled={!isCreate}
+                className="font-mono"
+              />
+              {!isCreate ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Slugs cannot be changed after creation.
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-desc">Description</Label>
+            <Textarea
+              id="plan-desc"
+              value={draft.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="One short sentence describing what this plan unlocks."
+              rows={2}
+            />
+          </div>
+        </Section>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="plan-price">Price (cents)</Label>
-          <Input
-            id="plan-price"
-            type="number"
-            min={0}
-            step={1}
-            value={draft.price_cents}
-            onChange={(e) => set("price_cents", parseInt(e.target.value || "0", 10))}
-          />
-          <p className="text-xs text-muted-foreground">
-            ${(draft.price_cents / 100).toFixed(2)}{" "}
-            {draft.currency.toUpperCase()}
-          </p>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="plan-currency">Currency</Label>
-          <Input
-            id="plan-currency"
-            value={draft.currency}
-            onChange={(e) => set("currency", e.target.value.toLowerCase().slice(0, 3))}
-            placeholder="usd"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="plan-interval">Billing interval</Label>
-          <Select
-            value={draft.billing_interval}
-            onValueChange={(v) => set("billing_interval", v as PlanDraft["billing_interval"])}
-          >
-            <SelectTrigger id="plan-interval">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="month">Monthly</SelectItem>
-              <SelectItem value="year">Yearly</SelectItem>
-              <SelectItem value="one_time">One-time</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="plan-sort">Sort order</Label>
-          <Input
-            id="plan-sort"
-            type="number"
-            value={draft.sort_order}
-            onChange={(e) => set("sort_order", parseInt(e.target.value || "0", 10))}
-          />
-          <p className="text-xs text-muted-foreground">Ascending. Lower shows first.</p>
-        </div>
+        {/* PRICING ──────────────────────────────────────────────────── */}
+        <Section
+          title="Pricing"
+          description="Set the price your hosts will pay through Stripe."
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-1">
+              <Label htmlFor="plan-price">Price (cents)</Label>
+              <Input
+                id="plan-price"
+                type="number"
+                min={0}
+                step={1}
+                value={draft.price_cents}
+                onChange={(e) => set("price_cents", parseInt(e.target.value || "0", 10))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                ${(draft.price_cents / 100).toFixed(2)} {draft.currency.toUpperCase()}
+              </p>
+            </div>
+            <div className="space-y-1.5 sm:col-span-1">
+              <Label htmlFor="plan-currency">Currency</Label>
+              <Input
+                id="plan-currency"
+                value={draft.currency}
+                onChange={(e) =>
+                  set("currency", e.target.value.toLowerCase().slice(0, 3))
+                }
+                placeholder="usd"
+                className="uppercase"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-1">
+              <Label htmlFor="plan-interval">Billing interval</Label>
+              <Select
+                value={draft.billing_interval}
+                onValueChange={(v) =>
+                  set("billing_interval", v as PlanDraft["billing_interval"])
+                }
+              >
+                <SelectTrigger id="plan-interval">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="month">Monthly</SelectItem>
+                  <SelectItem value="year">Yearly</SelectItem>
+                  <SelectItem value="one_time">One-time</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="plan-sort">Sort order</Label>
+            <Input
+              id="plan-sort"
+              type="number"
+              value={draft.sort_order}
+              onChange={(e) =>
+                set("sort_order", parseInt(e.target.value || "0", 10))
+              }
+              className="max-w-[8rem]"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Ascending. Lower numbers show first in the upgrade picker.
+            </p>
+          </div>
+        </Section>
 
-        <div className="space-y-2 sm:col-span-2">
-          <Label className="text-sm">Features</Label>
-          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+        {/* FEATURES ─────────────────────────────────────────────────── */}
+        <Section
+          title="Features"
+          description="What this plan unlocks. Off by default — flip on what's included."
+        >
+          <div className="divide-y divide-border rounded-lg border border-border">
             {FEATURE_KEYS.map((k) => (
-              <div key={k} className="flex items-start justify-between gap-3">
-                <div>
+              <div
+                key={k}
+                className="flex items-center justify-between gap-4 px-3 py-2.5"
+              >
+                <div className="min-w-0">
                   <div className="text-sm font-medium">
                     {FEATURE_LABELS[k].label}
                   </div>
@@ -546,14 +625,17 @@ function PlanDialog({
               </div>
             ))}
           </div>
-        </div>
+        </Section>
 
-        <div className="space-y-1.5 sm:col-span-2">
-          <Label className="text-sm">Stripe price IDs (optional in Phase 1)</Label>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label htmlFor="plan-stripe-test" className="text-xs text-muted-foreground">
-                Test
+        {/* STRIPE ────────────────────────────────────────────────────── */}
+        <Section
+          title="Stripe price IDs"
+          description="Optional in Phase 1. Required once payments are turned on."
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-stripe-test" className="text-xs uppercase tracking-wide text-muted-foreground">
+                Test mode
               </Label>
               <Input
                 id="plan-stripe-test"
@@ -563,9 +645,9 @@ function PlanDialog({
                 className="font-mono text-xs"
               />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="plan-stripe-live" className="text-xs text-muted-foreground">
-                Live
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-stripe-live" className="text-xs uppercase tracking-wide text-muted-foreground">
+                Live mode
               </Label>
               <Input
                 id="plan-stripe-live"
@@ -576,42 +658,49 @@ function PlanDialog({
               />
             </div>
           </div>
-        </div>
+        </Section>
 
-        <div className="flex items-center justify-between rounded-lg border border-border p-3 sm:col-span-2">
-          <div>
-            <div className="text-sm font-medium">Active</div>
-            <div className="text-xs text-muted-foreground">
-              Inactive plans are hidden from the upgrade picker.
+        {/* VISIBILITY ──────────────────────────────────────────────── */}
+        <Section
+          title="Visibility"
+          description="Whether hosts can see and land on this plan."
+        >
+          <div className="divide-y divide-border rounded-lg border border-border">
+            <div className="flex items-center justify-between gap-4 px-3 py-2.5">
+              <div>
+                <div className="text-sm font-medium">Active</div>
+                <div className="text-xs text-muted-foreground">
+                  Inactive plans are hidden from the upgrade picker.
+                </div>
+              </div>
+              <Switch
+                checked={draft.is_active}
+                onCheckedChange={(c) => set("is_active", c)}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4 px-3 py-2.5">
+              <div>
+                <div className="text-sm font-medium">Default for new hosts</div>
+                <div className="text-xs text-muted-foreground">
+                  Only one plan can hold this. Saving will demote the previous default.
+                </div>
+              </div>
+              <Switch
+                checked={draft.is_default}
+                onCheckedChange={(c) => set("is_default", c)}
+                disabled={!draft.is_active}
+              />
             </div>
           </div>
-          <Switch
-            checked={draft.is_active}
-            onCheckedChange={(c) => set("is_active", c)}
-          />
-        </div>
-        <div className="flex items-center justify-between rounded-lg border border-border p-3 sm:col-span-2">
-          <div>
-            <div className="text-sm font-medium">Default for new hosts</div>
-            <div className="text-xs text-muted-foreground">
-              Only one plan can hold this. Saving will demote the previous
-              default automatically.
-            </div>
-          </div>
-          <Switch
-            checked={draft.is_default}
-            onCheckedChange={(c) => set("is_default", c)}
-            disabled={!draft.is_active}
-          />
-        </div>
+        </Section>
       </div>
 
-      <DialogFooter>
+      <DialogFooter className="border-t border-border bg-muted/30 px-6 py-3">
         <Button variant="ghost" onClick={onCancel} disabled={pending}>
           Cancel
         </Button>
         <Button onClick={() => onSubmit(draft)} disabled={pending}>
-          {pending ? "Saving…" : "Save"}
+          {pending ? "Saving…" : "Save plan"}
         </Button>
       </DialogFooter>
     </DialogContent>

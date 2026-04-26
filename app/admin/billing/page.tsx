@@ -3,8 +3,9 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBillingConfig, redactConfig } from "@/lib/billing/config";
+import { listAllPlans } from "@/lib/billing/plans";
 import { Button } from "@/components/ui/button";
-import { Radio, ArrowLeft, CreditCard, ShieldCheck } from "lucide-react";
+import { Radio, ArrowLeft, CreditCard, ShieldCheck, Layers, Users } from "lucide-react";
 import { ModeBanner } from "@/components/admin/billing/mode-banner";
 import { StripeConfigPanel } from "@/components/admin/billing/stripe-config";
 import { PlansEditor } from "@/components/admin/billing/plans-editor";
@@ -13,9 +14,8 @@ import { PlansEditor } from "@/components/admin/billing/plans-editor";
  * /admin/billing — admin Billing dashboard.
  *
  * Server component: gates on admin role, then loads the redacted
- * billing_config server-side so the StripeConfigPanel hydrates without
- * a separate client request. PlansEditor fetches plans client-side
- * (it has its own create/edit/delete state to manage).
+ * billing_config + plans summary server-side so the dashboard hydrates
+ * without flicker. Children components handle their own writes.
  */
 
 export default async function AdminBillingPage() {
@@ -39,17 +39,29 @@ export default async function AdminBillingPage() {
     !!host && (host.role === "admin" || host.is_admin === true);
   if (!isAdmin) redirect("/host/dashboard");
 
-  // Server-side load of redacted config. If billing_config row is
-  // missing for some reason (migration not run), fall through with a
-  // safe default so the page can still render with an empty state.
+  // Server-side load. Falls through gracefully if migration 019 is missing.
   let initialConfig;
+  let planCount = 0;
+  let activePlanCount = 0;
+  let defaultPlanName: string | null = null;
+  let hostsOnPaidPlans = 0;
   try {
     const admin = createAdminClient();
     const cfg = await getBillingConfig(admin);
     initialConfig = redactConfig(cfg);
+    const plans = await listAllPlans(admin);
+    planCount = plans.length;
+    activePlanCount = plans.filter((p) => p.is_active).length;
+    defaultPlanName = plans.find((p) => p.is_default)?.name ?? null;
+    // Count hosts on a non-free plan as a quick reach indicator.
+    const { count } = await admin
+      .from("hosts")
+      .select("id", { count: "exact", head: true })
+      .neq("plan_slug", "free");
+    hostsOnPaidPlans = count ?? 0;
   } catch (e) {
     initialConfig = null;
-    console.error("[admin/billing] failed to load billing_config:", e);
+    console.error("[admin/billing] page load failed:", e);
   }
 
   return (
@@ -78,23 +90,53 @@ export default async function AdminBillingPage() {
       </header>
 
       <main className="container mx-auto max-w-5xl space-y-6 px-4 py-8">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {/* Page header */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Link href="/admin" className="hover:text-foreground">
               Admin
             </Link>
             <span>/</span>
             <span className="text-foreground">Billing</span>
           </div>
-          <h1 className="mt-2 flex items-center gap-2 text-2xl font-semibold">
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <CreditCard className="h-5 w-5" />
             Billing
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Manage subscription plans, Stripe credentials, and the active
             payment environment.
           </p>
         </div>
+
+        {/* Quick-stats row */}
+        {initialConfig ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard
+              icon={<Layers className="h-3.5 w-3.5" />}
+              label="Active plans"
+              value={`${activePlanCount} / ${planCount}`}
+              hint={defaultPlanName ? `Default: ${defaultPlanName}` : "No default plan"}
+            />
+            <StatCard
+              icon={<Users className="h-3.5 w-3.5" />}
+              label="Hosts on paid plans"
+              value={String(hostsOnPaidPlans)}
+              hint="Excludes hosts on the free plan"
+            />
+            <StatCard
+              icon={<CreditCard className="h-3.5 w-3.5" />}
+              label="Payment mode"
+              value={initialConfig.stripe_mode === "live" ? "LIVE" : "TEST"}
+              hint={
+                initialConfig.stripe_mode === "live"
+                  ? "Real charges enabled"
+                  : "Test cards only"
+              }
+              accent={initialConfig.stripe_mode === "live" ? "live" : "test"}
+            />
+          </div>
+        ) : null}
 
         {initialConfig ? (
           <ModeBanner mode={initialConfig.stripe_mode} />
@@ -112,6 +154,41 @@ export default async function AdminBillingPage() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  hint,
+  accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+  accent?: "test" | "live";
+}) {
+  const accentClass =
+    accent === "live"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : accent === "test"
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-foreground";
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {icon}
+        {label}
+      </div>
+      <div className={`mt-1.5 text-2xl font-semibold tracking-tight ${accentClass}`}>
+        {value}
+      </div>
+      {hint ? (
+        <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>
+      ) : null}
     </div>
   );
 }
