@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { presignUpload, getR2Config } from "@/lib/storage/r2";
-import { getPlanForUser, featureEnabled } from "@/lib/billing/plans";
+import { isEntitled } from "@/lib/billing/entitlements";
 
 /**
  * POST /api/streams/[streamId]/archive/start
@@ -62,8 +62,7 @@ export async function POST(
   }
 
   // ─── plan gate ───────────────────────────────────────────────────
-  const plan = await getPlanForUser(supabase, user.id);
-  if (!featureEnabled(plan, "cloud_archive")) {
+  if (!(await isEntitled(supabase, user.id, "cloud_archive"))) {
     return NextResponse.json(
       {
         error:

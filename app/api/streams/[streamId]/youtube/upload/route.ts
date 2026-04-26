@@ -5,7 +5,7 @@ import {
   getValidAccessToken,
   initResumableUpload,
 } from "@/lib/integrations/youtube";
-import { getPlanForUser, featureEnabled } from "@/lib/billing/plans";
+import { isEntitled } from "@/lib/billing/entitlements";
 
 /**
  * POST /api/streams/[streamId]/youtube/upload
@@ -84,8 +84,7 @@ export async function POST(
   }
 
   // ─── plan gate ───────────────────────────────────────────────────
-  const plan = await getPlanForUser(supabase, user.id);
-  if (!featureEnabled(plan, "youtube_upload")) {
+  if (!(await isEntitled(supabase, user.id, "youtube_upload"))) {
     return NextResponse.json(
       {
         error:

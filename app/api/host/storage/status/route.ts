@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { isR2Configured } from "@/lib/storage/r2";
-import { getPlanForUser, featureEnabled } from "@/lib/billing/plans";
+import { isEntitled } from "@/lib/billing/entitlements";
 
 /**
  * GET /api/host/storage/status
@@ -28,15 +28,13 @@ export async function GET() {
 
     // Plan check uses RLS-scoped client; an anon user can't reach here
     // because of the auth check above.
-    const plan = await getPlanForUser(supabase, user.id);
-    const planAllows = featureEnabled(plan, "cloud_archive");
+    const planAllows = await isEntitled(supabase, user.id, "cloud_archive");
 
     return NextResponse.json({
       provider: "r2",
       serverConfigured,
       planAllows,
       available: serverConfigured && planAllows,
-      planSlug: plan?.slug ?? null,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to check storage.";

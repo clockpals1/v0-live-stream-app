@@ -5,10 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getBillingConfig, redactConfig } from "@/lib/billing/config";
 import { listAllPlans } from "@/lib/billing/plans";
 import { Button } from "@/components/ui/button";
-import { Radio, ArrowLeft, CreditCard, ShieldCheck, Layers, Users } from "lucide-react";
+import { Radio, ArrowLeft, CreditCard, ShieldCheck, Layers, Users, Gift } from "lucide-react";
 import { ModeBanner } from "@/components/admin/billing/mode-banner";
 import { StripeConfigPanel } from "@/components/admin/billing/stripe-config";
 import { PlansEditor } from "@/components/admin/billing/plans-editor";
+import { GrantsSection } from "@/components/admin/billing/grants-section";
 
 /**
  * /admin/billing — admin Billing dashboard.
@@ -170,6 +171,19 @@ export default async function AdminBillingPage() {
             editor, then refresh this page.
           </div>
         )}
+
+        {/* Manual grants — admin override path. Visually accented in
+            violet so admins can't confuse it with the regular paid
+            upgrade flow above. Requires migration 022 to be applied;
+            falls through gracefully (empty list) if not. */}
+        <section className="space-y-3 pt-2">
+          <SectionHeading
+            icon={<Gift className="h-4 w-4" />}
+            title="Manual plan grants"
+            description="Override path — grant a paid plan to a host without taking payment. Audited."
+          />
+          <GrantsSection />
+        </section>
       </main>
     </div>
   );

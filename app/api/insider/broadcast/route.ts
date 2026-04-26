@@ -7,7 +7,7 @@ import {
   sendBatch,
   unsubscribeUrl,
 } from "@/lib/insider/email";
-import { getPlanForUser, featureEnabled } from "@/lib/billing/plans";
+import { isEntitled } from "@/lib/billing/entitlements";
 
 /**
  * POST /api/insider/broadcast
@@ -52,8 +52,7 @@ export async function POST(request: Request) {
   // The default 'free' plan ships with insider_circle:true so this
   // gate is a no-op for existing users until an admin disables it.
   try {
-    const plan = await getPlanForUser(supabase, user.id);
-    if (!featureEnabled(plan, "insider_circle")) {
+    if (!(await isEntitled(supabase, user.id, "insider_circle"))) {
       return NextResponse.json(
         {
           error:

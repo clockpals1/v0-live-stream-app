@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { isYoutubeConfigured } from "@/lib/integrations/youtube";
-import { getPlanForUser, featureEnabled } from "@/lib/billing/plans";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 
 /**
  * GET /api/host/integrations/youtube/status
@@ -26,8 +26,9 @@ export async function GET() {
     }
 
     const serverConfigured = isYoutubeConfigured();
-    const plan = await getPlanForUser(supabase, user.id);
-    const planAllows = featureEnabled(plan, "youtube_upload");
+    const eff = await getEffectivePlan(supabase, user.id);
+    const planAllows = eff.isPlatformAdmin
+      || (eff.plan?.features?.youtube_upload === true);
 
     // Look up the host id, then the integration row.
     const { data: host } = await supabase
@@ -68,7 +69,8 @@ export async function GET() {
       planAllows,
       available: serverConfigured && planAllows,
       connected,
-      planSlug: plan?.slug ?? null,
+      planSlug: eff.plan?.slug ?? null,
+      planSource: eff.source,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to load status.";

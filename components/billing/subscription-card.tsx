@@ -17,6 +17,8 @@ import {
   ArrowUpRight,
   Settings,
   AlertTriangle,
+  ShieldCheck,
+  Gift,
 } from "lucide-react";
 import { PlanPickerDialog } from "./plan-picker-dialog";
 import { cn } from "@/lib/utils";
@@ -39,9 +41,23 @@ interface SubShape {
   hasCustomer: boolean;
 }
 
+type EntitlementSource = "admin" | "grant" | "stripe" | "default";
+
+interface GrantShape {
+  id: string;
+  reason: string | null;
+  effectiveAt: string;
+  expiresAt: string | null;
+  grantedByEmail: string | null;
+}
+
 interface ApiResponse {
   plan: PlanShape | null;
   subscription: SubShape | null;
+  /** Where the effective plan came from. */
+  source?: EntitlementSource;
+  /** Active grant, when source === 'grant'. */
+  grant?: GrantShape | null;
   error?: string;
 }
 
@@ -141,8 +157,13 @@ export function SubscriptionCard() {
     return null;
   }
 
-  const { plan, subscription } = data;
+  const { plan, subscription, source, grant } = data;
   const isPaid = plan.price_cents > 0;
+  // Admin bypass and active grants override the upgrade flow — hide
+  // the Stripe-driven CTAs in those cases since they don't apply.
+  const isAdmin = source === "admin";
+  const isGrant = source === "grant";
+  const isOverride = isAdmin || isGrant;
   const status = subscription?.status;
   const periodEnd = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd)
@@ -167,9 +188,13 @@ export function SubscriptionCard() {
         className={cn(
           isPastDue
             ? "border-rose-500/40"
-            : isPaid
-              ? "border-primary/30"
-              : "",
+            : isAdmin
+              ? "border-primary/40"
+              : isGrant
+                ? "border-violet-500/40"
+                : isPaid
+                  ? "border-primary/30"
+                  : "",
         )}
       >
         <CardHeader className="pb-3">
@@ -185,10 +210,48 @@ export function SubscriptionCard() {
                   : "Upgrade to unlock cloud archive, YouTube upload, and more."}
               </CardDescription>
             </div>
-            <PlanBadge isPaid={isPaid} status={status} />
+            <PlanBadge
+              isPaid={isPaid}
+              status={status}
+              source={source}
+            />
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Override callout — explains why upgrade buttons are hidden
+              and gives the host transparency about how they got access. */}
+          {isAdmin && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="text-xs">
+                <div className="font-medium text-foreground">Platform admin access</div>
+                <p className="mt-0.5 text-muted-foreground">
+                  As an admin you have all features unlocked. Plan and
+                  billing don't apply to your account.
+                </p>
+              </div>
+            </div>
+          )}
+          {isGrant && grant && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+              <Gift className="mt-0.5 h-4 w-4 shrink-0 text-violet-500" />
+              <div className="min-w-0 flex-1 text-xs">
+                <div className="font-medium text-foreground">
+                  Granted by an admin
+                </div>
+                <p className="mt-0.5 text-muted-foreground">
+                  {grant.grantedByEmail
+                    ? `${grant.grantedByEmail} `
+                    : "An admin "}
+                  upgraded you to this plan at no charge.
+                  {grant.expiresAt
+                    ? ` Expires ${new Date(grant.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}.`
+                    : " No expiry."}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Plan summary */}
           <div className="flex items-end justify-between gap-3 rounded-lg border border-border bg-muted/30 p-4">
             <div>
@@ -260,7 +323,9 @@ export function SubscriptionCard() {
             </div>
           ) : null}
 
-          {/* Actions */}
+          {/* Actions — hidden for override sources because the host can't
+              upgrade past their granted plan and admins don't pay. */}
+          {isOverride ? null : (
           <div className="flex flex-wrap gap-2">
             {isPaid ? (
               <>
@@ -284,6 +349,7 @@ export function SubscriptionCard() {
               </Button>
             )}
           </div>
+          )}
         </CardContent>
       </Card>
 
@@ -299,10 +365,28 @@ export function SubscriptionCard() {
 function PlanBadge({
   isPaid,
   status,
+  source,
 }: {
   isPaid: boolean;
   status: string | null | undefined;
+  source: EntitlementSource | undefined;
 }) {
+  if (source === "admin") {
+    return (
+      <Badge className="border-0 bg-primary/15 text-primary">
+        <ShieldCheck className="mr-1 h-3 w-3" />
+        Admin
+      </Badge>
+    );
+  }
+  if (source === "grant") {
+    return (
+      <Badge className="border-0 bg-violet-500/15 text-violet-700 dark:text-violet-300">
+        <Gift className="mr-1 h-3 w-3" />
+        Granted
+      </Badge>
+    );
+  }
   if (status === "past_due" || status === "unpaid") {
     return (
       <Badge variant="outline" className="border-rose-500/40 text-rose-600 dark:text-rose-400">

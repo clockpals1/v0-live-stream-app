@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 
 /**
  * GET /api/host/billing/subscription
@@ -57,17 +58,26 @@ export async function GET() {
     }
     const host = hostRow as HostRow;
 
-    const slug = host.plan_slug ?? "free";
-    const { data: plan } = await supabase
-      .from("billing_plans")
-      .select(
-        "id, slug, name, description, price_cents, currency, billing_interval, features",
-      )
-      .eq("slug", slug)
-      .maybeSingle();
+    // Resolve via the entitlement layer so admin bypass + active
+    // manual grants are reflected in the plan returned to the host.
+    const eff = await getEffectivePlan(supabase, user.id);
 
     return NextResponse.json({
-      plan,
+      plan: eff.plan,
+      // Where the plan came from. UI uses this to badge "Granted",
+      // "Platform admin", or hide the upgrade button as appropriate.
+      source: eff.source,
+      // Active grant metadata, when source === 'grant'. Lets the host
+      // see who issued it and when it expires.
+      grant: eff.grant
+        ? {
+            id: eff.grant.id,
+            reason: eff.grant.reason,
+            effectiveAt: eff.grant.effective_at,
+            expiresAt: eff.grant.expires_at,
+            grantedByEmail: eff.grant.granted_by_email,
+          }
+        : null,
       subscription: host.stripe_customer_id
         ? {
             status: host.subscription_status,
