@@ -17,6 +17,7 @@ import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
 import { SubscriptionCard } from "@/components/billing/subscription-card";
+import { YoutubeConnectCard } from "@/components/host/youtube-connect-card";
 import {
   Radio,
   Video,
@@ -1225,12 +1226,14 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
           </div>
         </div>
 
-        {/* Subscription card \u2014 plan summary + Upgrade / Manage actions.
+        {/* Subscription + integrations row \u2014 plan summary, YouTube link.
             Same gating as Insider Circle: only users who own streams need
-            their own subscription. */}
+            their own subscription / channel link. Stacks on mobile, two
+            columns on >=lg so the dashboard breathes on desktop. */}
         {canCreateStreams && host && (
-          <div className="mt-8">
+          <div className="mt-8 grid gap-4 lg:grid-cols-2" data-subscription-card>
             <SubscriptionCard />
+            <YoutubeConnectCard />
           </div>
         )}
 

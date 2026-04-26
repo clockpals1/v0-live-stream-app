@@ -1733,6 +1733,7 @@ function OwnerStreamInterface({
         open={postStreamOpen}
         onOpenChange={setPostStreamOpen}
         streamId={stream.id}
+        streamTitle={stream.title}
         blob={postStreamBlob}
         alreadyDownloaded={postStreamDownloaded}
         onDownloadLocal={downloadRecording}
