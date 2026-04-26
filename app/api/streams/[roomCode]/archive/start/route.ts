@@ -24,9 +24,12 @@ import { isEntitled } from "@/lib/billing/entitlements";
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ streamId: string }> },
+  { params }: { params: Promise<{ roomCode: string }> },
 ) {
-  const { streamId } = await params;
+  // Folder is named [roomCode] for routing-tree consistency with the
+  // sibling /api/streams/[roomCode]/route.ts; the value is actually a
+  // stream UUID at this nested path. We rename it for clarity locally.
+  const { roomCode: streamId } = await params;
   if (!streamId) {
     return NextResponse.json({ error: "Missing streamId." }, { status: 400 });
   }

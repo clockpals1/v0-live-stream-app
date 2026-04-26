@@ -19,9 +19,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ streamId: string }> },
+  { params }: { params: Promise<{ roomCode: string }> },
 ) {
-  const { streamId } = await params;
+  const { roomCode: streamId } = await params;
   if (!streamId) {
     return NextResponse.json({ error: "Missing streamId." }, { status: 400 });
   }

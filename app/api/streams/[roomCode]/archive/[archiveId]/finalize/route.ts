@@ -21,10 +21,10 @@ export async function POST(
   {
     params,
   }: {
-    params: Promise<{ streamId: string; archiveId: string }>;
+    params: Promise<{ roomCode: string; archiveId: string }>;
   },
 ) {
-  const { streamId, archiveId } = await params;
+  const { roomCode: streamId, archiveId } = await params;
   if (!streamId || !archiveId) {
     return NextResponse.json(
       { error: "Missing streamId or archiveId." },

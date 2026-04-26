@@ -1,0 +1,9 @@
+
+ ⛅️ wrangler 4.84.1 (update available 4.85.0)
+─────────────────────────────────────────────
+Successfully created tail, expires at 2026-04-27T05:49:28Z
+Connected to v0-live-stream-app, waiting for logs...
+GET https://live.isunday.me/ - Ok @ 2026-04-26, 7:52:15 p.m.
+  (error) ⨯ Error: You cannot use different slug names for the same dynamic path ('roomCode' !== 'streamId').
+GET https://live.isunday.me/ - Ok @ 2026-04-26, 7:52:15 p.m.
+  (error) ⨯ Error: You cannot use different slug names for the same dynamic path ('roomCode' !== 'streamId').
