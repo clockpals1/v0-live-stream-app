@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AdminPanel } from "@/components/admin/admin-panel";
 import { Button } from "@/components/ui/button";
-import { Radio, ArrowLeft, CreditCard, ShieldCheck } from "lucide-react";
+import { Radio, ArrowLeft, CreditCard, ShieldCheck, Sparkles } from "lucide-react";
 
 export default async function AdminPage() {
   const supabase = await createClient();
@@ -47,6 +47,12 @@ export default async function AdminPage() {
               <Link href="/admin/billing">
                 <CreditCard className="w-4 h-4 mr-1.5" />
                 Billing
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/admin/ai">
+                <Sparkles className="w-4 h-4 mr-1.5" />
+                AI Config
               </Link>
             </Button>
             <Button variant="ghost" size="sm" asChild>

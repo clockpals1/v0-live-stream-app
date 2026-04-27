@@ -1,84 +1,178 @@
 /**
- * AI Provider abstraction — Groq + NVIDIA NIM.
+ * AI Provider abstraction — all supported providers.
  *
- * Both providers expose an OpenAI-compatible /v1/chat/completions endpoint,
- * so the implementation is nearly identical. The only differences are:
- *   - base URL
- *   - API key env variable
- *   - default model names
+ * API keys are loaded from the ai_config DB table (migration 033) via
+ * lib/ai/config.ts. If the table is not yet applied, getApiKey() falls
+ * back to process.env — so existing deployments keep working.
  *
- * PROVIDER SELECTION
- * ------------------
- * Pass provider: "groq" (default) or provider: "nvidia_nim".
- * Groq is preferred for text: fastest latency (~200ms), generous free tier.
- * NVIDIA NIM is used for image prompts / tasks needing Llama 405B quality.
+ * SUPPORTED PROVIDERS
+ * -------------------
+ * Text / LLM (FREE tier):
+ *   groq          — api.groq.com (OpenAI compat)  Llama 3.1 70B, Mixtral
+ *   google_gemini — generativelanguage.googleapis.com (native REST)
+ *   mistral       — api.mistral.ai (OpenAI compat) open-mistral-7b
+ *   together      — api.together.xyz (OpenAI compat) Llama 3.1 70B Turbo
  *
- * FREE TIER LIMITS (as of 2025)
- * ------------------------------
- * Groq:       14,400 req/day, 6,000 tokens/min on llama-3.1-70b-versatile
- * NVIDIA NIM: ~$100 free credits on signup; 40 req/min after credits
+ * Text / LLM (PREMIUM):
+ *   nvidia_nim    — integrate.api.nvidia.com (OpenAI compat) Llama 405B
+ *   openai        — api.openai.com (OpenAI compat) GPT-4o-mini / GPT-4o
  *
- * ENV VARIABLES REQUIRED
- * ----------------------
- * GROQ_API_KEY       — from console.groq.com
- * NVIDIA_API_KEY     — from build.nvidia.com
+ * Image (via HuggingFace Inference API — FREE):
+ *   huggingface   — api-inference.huggingface.co SDXL, FLUX.1, Kandinsky
  *
- * Never throws — returns a discriminated union so callers handle errors
- * without try/catch at the call site.
+ * Image (PREMIUM):
+ *   stability     — api.stability.ai SDXL, SD3
+ *   replicate     — api.replicate.com (any model, pay-per-run)
+ *
+ * Audio / Music (FREE):
+ *   deepgram      — api.deepgram.com nova-2 transcription (free credits)
+ *
+ * NEVER throws — returns a discriminated union.
  */
 
-export type AiProvider = "groq" | "nvidia_nim";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getAiConfig,
+  getApiKey as cfgGetApiKey,
+  getPrimaryProvider,
+  type AiConfig,
+} from "@/lib/ai/config";
+
+export type AiProvider =
+  | "groq"
+  | "nvidia_nim"
+  | "openai"
+  | "google_gemini"
+  | "together"
+  | "mistral"
+  | "huggingface"
+  | "stability"
+  | "replicate"
+  | "deepgram";
 
 export interface AiGenerateOptions {
   systemPrompt: string;
   userPrompt: string;
+  /** Explicit provider override. Omit to use admin-configured primary. */
   provider?: AiProvider;
-  /** Override the default model for the provider. */
+  /** Explicit model override. Omit to use provider default from ai_config. */
   model?: string;
   maxTokens?: number;
   temperature?: number;
+  /** Pass pre-loaded config to avoid extra DB round-trip in batch jobs. */
+  config?: AiConfig | null;
 }
 
 export type AiGenerateResult =
   | { ok: true; content: string; provider: AiProvider; model: string; tokensUsed: number }
   | { ok: false; error: string; provider: AiProvider; model: string };
 
-const PROVIDER_CONFIG: Record<
-  AiProvider,
-  { baseUrl: string; envKey: string; defaultModel: string }
-> = {
+// ─── Provider routing table ───────────────────────────────────────────────
+
+interface ProviderDef {
+  baseUrl: string;
+  /** Key column on AiConfig to fetch default model. */
+  modelKey: keyof AiConfig;
+  /** Which HTTP strategy to use. */
+  style: "openai_compat" | "gemini";
+}
+
+const PROVIDERS: Record<string, ProviderDef> = {
   groq: {
     baseUrl: "https://api.groq.com/openai/v1",
-    envKey: "GROQ_API_KEY",
-    defaultModel: "llama-3.1-70b-versatile",
+    modelKey: "groq_default_model",
+    style: "openai_compat",
   },
   nvidia_nim: {
     baseUrl: "https://integrate.api.nvidia.com/v1",
-    envKey: "NVIDIA_API_KEY",
-    defaultModel: "meta/llama-3.1-70b-instruct",
+    modelKey: "nvidia_default_model",
+    style: "openai_compat",
+  },
+  openai: {
+    baseUrl: "https://api.openai.com/v1",
+    modelKey: "openai_default_model",
+    style: "openai_compat",
+  },
+  together: {
+    baseUrl: "https://api.together.xyz/v1",
+    modelKey: "together_default_model",
+    style: "openai_compat",
+  },
+  mistral: {
+    baseUrl: "https://api.mistral.ai/v1",
+    modelKey: "mistral_default_model",
+    style: "openai_compat",
+  },
+  google_gemini: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    modelKey: "google_gemini_model",
+    style: "gemini",
   },
 };
+
+// ─── Main text generation function ───────────────────────────────────────
 
 export async function generateText(
   opts: AiGenerateOptions,
 ): Promise<AiGenerateResult> {
-  const provider: AiProvider = opts.provider ?? "groq";
-  const cfg = PROVIDER_CONFIG[provider];
-  const model = opts.model ?? cfg.defaultModel;
-  const apiKey = process.env[cfg.envKey];
+  // Load ai_config from DB (or use provided pre-loaded config)
+  let cfg: AiConfig | null = opts.config ?? null;
+  if (cfg === undefined || (cfg === null && !("config" in opts))) {
+    try {
+      const admin = createAdminClient();
+      cfg = await getAiConfig(admin);
+    } catch {
+      cfg = null;
+    }
+  }
 
+  // Resolve provider
+  const provider = (opts.provider ?? getPrimaryProvider(cfg, "text") ?? "groq") as AiProvider;
+  const def = PROVIDERS[provider];
+
+  if (!def) {
+    return { ok: false, error: `Unknown provider: ${provider}`, provider, model: "" };
+  }
+
+  // Resolve API key — DB first, env fallback
+  const apiKey = cfgGetApiKey(cfg, provider);
   if (!apiKey) {
     return {
       ok: false,
-      error: `${cfg.envKey} is not configured. Set it in your environment variables.`,
+      error: `No API key configured for "${provider}". Add it in Admin → AI Configuration.`,
       provider,
-      model,
+      model: "",
     };
   }
 
+  // Resolve model
+  const defaultModel = cfg ? (cfg[def.modelKey] as string) : null;
+  const model = opts.model ?? defaultModel ?? "default";
+
+  if (def.style === "gemini") {
+    return callGemini({ apiKey, model, opts, provider });
+  }
+  return callOpenAiCompat({ apiKey, model, opts, provider, baseUrl: def.baseUrl });
+}
+
+// ─── OpenAI-compatible call ───────────────────────────────────────────────
+
+async function callOpenAiCompat({
+  apiKey,
+  model,
+  opts,
+  provider,
+  baseUrl,
+}: {
+  apiKey: string;
+  model: string;
+  opts: AiGenerateOptions;
+  provider: AiProvider;
+  baseUrl: string;
+}): Promise<AiGenerateResult> {
   let response: Response;
   try {
-    response = await fetch(`${cfg.baseUrl}/chat/completions`, {
+    response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -96,12 +190,7 @@ export async function generateText(
       }),
     });
   } catch (err) {
-    return {
-      ok: false,
-      error: `Network error calling ${provider}: ${String(err)}`,
-      provider,
-      model,
-    };
+    return { ok: false, error: `Network error calling ${provider}: ${String(err)}`, provider, model };
   }
 
   if (!response.ok) {
@@ -109,42 +198,99 @@ export async function generateText(
     try {
       const body = (await response.json()) as { error?: { message?: string } };
       detail = body?.error?.message ?? detail;
-    } catch {
-      // ignore parse error
-    }
+    } catch { /* ignore */ }
     return { ok: false, error: detail, provider, model };
   }
 
-  interface CompletionResponse {
+  interface Completion {
     choices: Array<{ message: { content: string } }>;
     usage?: { total_tokens?: number };
   }
-
-  let data: CompletionResponse;
-  try {
-    data = (await response.json()) as CompletionResponse;
-  } catch {
-    return { ok: false, error: "Invalid JSON response from provider", provider, model };
-  }
+  let data: Completion;
+  try { data = (await response.json()) as Completion; }
+  catch { return { ok: false, error: "Invalid JSON response", provider, model }; }
 
   const content = data.choices?.[0]?.message?.content?.trim() ?? "";
-  if (!content) {
-    return { ok: false, error: "Provider returned empty content", provider, model };
+  if (!content) return { ok: false, error: "Provider returned empty content", provider, model };
+
+  return { ok: true, content, provider, model, tokensUsed: data.usage?.total_tokens ?? 0 };
+}
+
+// ─── Google Gemini native REST call ──────────────────────────────────────
+
+async function callGemini({
+  apiKey,
+  model,
+  opts,
+  provider,
+}: {
+  apiKey: string;
+  model: string;
+  opts: AiGenerateOptions;
+  provider: AiProvider;
+}): Promise<AiGenerateResult> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const body = {
+    systemInstruction: { parts: [{ text: opts.systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: opts.userPrompt }] }],
+    generationConfig: {
+      maxOutputTokens: opts.maxTokens ?? 1024,
+      temperature: opts.temperature ?? 0.7,
+    },
+  };
+
+  let response: Response;
+  try { response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
+  catch (err) { return { ok: false, error: `Network error calling google_gemini: ${String(err)}`, provider, model }; }
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const b = (await response.json()) as { error?: { message?: string } };
+      detail = b?.error?.message ?? detail;
+    } catch { /* ignore */ }
+    return { ok: false, error: detail, provider, model };
   }
+
+  interface GeminiResponse {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: { totalTokenCount?: number };
+  }
+  let data: GeminiResponse;
+  try { data = (await response.json()) as GeminiResponse; }
+  catch { return { ok: false, error: "Invalid JSON response from Gemini", provider, model }; }
+
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+  if (!content) return { ok: false, error: "Gemini returned empty content", provider, model };
 
   return {
     ok: true,
     content,
     provider,
     model,
-    tokensUsed: data.usage?.total_tokens ?? 0,
+    tokensUsed: data.usageMetadata?.totalTokenCount ?? 0,
   };
 }
 
+// ─── Convenience helpers ──────────────────────────────────────────────────
+
 /**
- * Pick a provider automatically based on which API keys are configured.
- * Groq is preferred; falls back to NVIDIA NIM; returns null if neither set.
+ * Return the first available text provider using DB config + env fallback.
+ * Used by the generate API route when no explicit provider is requested.
  */
+export async function getAvailableTextProvider(): Promise<AiProvider | null> {
+  try {
+    const admin = createAdminClient();
+    const cfg = await getAiConfig(admin);
+    return (getPrimaryProvider(cfg, "text") as AiProvider) ?? null;
+  } catch {
+    if (process.env.GROQ_API_KEY) return "groq";
+    if (process.env.NVIDIA_API_KEY) return "nvidia_nim";
+    return null;
+  }
+}
+
+/** @deprecated Use getAvailableTextProvider() instead */
 export function getAvailableProvider(): AiProvider | null {
   if (process.env.GROQ_API_KEY) return "groq";
   if (process.env.NVIDIA_API_KEY) return "nvidia_nim";
