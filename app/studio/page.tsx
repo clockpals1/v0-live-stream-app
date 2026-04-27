@@ -33,13 +33,20 @@ import {
 export default async function StudioOverviewPage() {
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
-  const user = userData?.user!;
+  const user = userData?.user;
+  // Defensive bail. The layout already redirects unauth users to
+  // /auth/login, but server components in App Router render in
+  // parallel with their layout — if we read user.id on undefined here
+  // we throw a TypeError that races the redirect's NEXT_REDIRECT and
+  // surfaces to the global error boundary as "Something broke".
+  // Returning null lets Next.js settle on the layout's redirect cleanly.
+  if (!user) return null;
 
   const { data: host } = await supabase
     .from("hosts")
     .select("id, display_name, email")
     .eq("user_id", user.id)
-    .single();
+    .maybeSingle();
 
   const effective = await getEffectivePlan(supabase, user.id);
   const plan = effective.plan;
