@@ -1,7 +1,8 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
   Card,
@@ -14,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { SubscriptionCard } from "@/components/billing/subscription-card";
@@ -226,27 +229,7 @@ export function SettingsContent({ user, host }: Props) {
 
           {/* ─── Notifications ────────────────── */}
           <TabsContent value="notifications">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Bell className="h-4 w-4" />
-                  Notifications
-                </CardTitle>
-                <CardDescription>
-                  Choose what you'd like to be emailed about.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-center">
-                  <Bell className="mx-auto h-6 w-6 text-muted-foreground" />
-                  <p className="mt-2 text-sm font-medium">Coming soon</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Granular email preferences (new follower, payment receipt,
-                    upload finished, …) will land here.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+            <NotificationsSection />
           </TabsContent>
         </Tabs>
       </main>
@@ -353,6 +336,230 @@ export const SETTINGS_TABS = {
   notifications: "notifications",
   privacy: "privacy",
 } as const;
+
+// ─────────────────────────────────────────────────────────────────────
+// Notifications section
+// ─────────────────────────────────────────────────────────────────────
+
+interface PrefRow {
+  id: string;
+  label: string;
+  description: string;
+  key: string;
+  icon: React.ReactNode;
+  alwaysOn?: boolean;
+}
+
+const PREF_ROWS: PrefRow[] = [
+  {
+    id: "subscriber",
+    key: "subscriber",
+    label: "New subscribers",
+    description: "When someone subscribes to your Insider Circle.",
+    icon: <span className="text-purple-500">👥</span>,
+  },
+  {
+    id: "payment",
+    key: "payment",
+    label: "Payment updates",
+    description: "Successful charges, failed payments, and subscription renewals.",
+    icon: <span className="text-green-500">💳</span>,
+  },
+  {
+    id: "stream",
+    key: "stream",
+    label: "Stream events",
+    description: "When a scheduled stream is about to start or has ended.",
+    icon: <span className="text-red-500">📡</span>,
+  },
+  {
+    id: "archive",
+    key: "archive",
+    label: "Recording ready",
+    description: "When a cloud archive finishes processing and is ready to download.",
+    icon: <span className="text-sky-500">🗄️</span>,
+  },
+  {
+    id: "cohost",
+    key: "cohost",
+    label: "Co-host invitations",
+    description: "When you are invited to co-host another broadcaster's stream.",
+    icon: <span className="text-indigo-500">🎙️</span>,
+  },
+  {
+    id: "replay",
+    key: "replay",
+    label: "Replay published",
+    description: "When a replay you published goes live for viewers.",
+    icon: <span className="text-orange-500">▶️</span>,
+  },
+  {
+    id: "emergency",
+    key: "emergency",
+    label: "Emergency alerts",
+    description: "Viewer-reported technical issues during your live streams.",
+    icon: <span className="text-red-600">🚨</span>,
+    alwaysOn: true,
+  },
+];
+
+function NotificationsSection() {
+  const [prefs, setPrefs] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [original, setOriginal] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    fetch("/api/host/notification-prefs")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.prefs) {
+          setPrefs(json.prefs);
+          setOriginal(json.prefs);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  function toggle(key: string, value: boolean) {
+    setPrefs((p) => ({ ...p, [key]: value }));
+    setDirty(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/host/notification-prefs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prefs),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Save failed.");
+      setOriginal(json.prefs ?? prefs);
+      setDirty(false);
+      toast.success("Notification preferences saved.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function discard() {
+    setPrefs(original);
+    setDirty(false);
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Bell className="h-4 w-4" />
+            In-app notifications
+          </CardTitle>
+          <CardDescription>
+            Control which events trigger a notification in the dashboard bell.
+            Emergency alerts are always delivered for your safety.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pb-2">
+          {loading ? (
+            <div className="space-y-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center justify-between animate-pulse">
+                  <div className="space-y-1.5">
+                    <div className="h-3.5 w-36 rounded bg-muted" />
+                    <div className="h-2.5 w-56 rounded bg-muted" />
+                  </div>
+                  <div className="h-5 w-9 rounded-full bg-muted" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/50">
+              {PREF_ROWS.map((row, i) => {
+                const enabled = row.alwaysOn ? true : (prefs[row.key] ?? true);
+                return (
+                  <li key={row.id} className={i === 0 ? "pb-4" : "py-4"}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span className="mt-0.5 text-base leading-none select-none">
+                          {row.icon}
+                        </span>
+                        <div>
+                          <Label
+                            htmlFor={`notif-${row.key}`}
+                            className="text-sm font-medium cursor-pointer"
+                          >
+                            {row.label}
+                            {row.alwaysOn && (
+                              <Badge
+                                variant="secondary"
+                                className="ml-2 h-4 px-1.5 text-[9px] align-middle"
+                              >
+                                Always on
+                              </Badge>
+                            )}
+                          </Label>
+                          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+                            {row.description}
+                          </p>
+                        </div>
+                      </div>
+                      <Switch
+                        id={`notif-${row.key}`}
+                        checked={enabled}
+                        disabled={row.alwaysOn}
+                        onCheckedChange={(v) => toggle(row.key, v)}
+                        aria-label={row.label}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Browser push notification placeholder */}
+      <Card className="border-dashed">
+        <CardContent className="flex items-start gap-3 py-4">
+          <Bell className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+          <div className="flex-1 text-sm">
+            <p className="font-medium">Browser push notifications</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Get notified even when the dashboard isn&apos;t open. Coming soon.
+            </p>
+          </div>
+          <Badge variant="outline" className="text-[10px] shrink-0">Soon</Badge>
+        </CardContent>
+      </Card>
+
+      {/* Save / Discard */}
+      {dirty && (
+        <div className="flex items-center justify-end gap-2 sticky bottom-4">
+          <div className="flex gap-2 rounded-lg border border-border bg-background shadow-lg px-3 py-2">
+            <Button variant="ghost" size="sm" onClick={discard} disabled={saving}>
+              Discard
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving}>
+              {saving ? (
+                <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Saving…</>
+              ) : (
+                <><Save className="mr-1.5 h-3.5 w-3.5" />Save preferences</>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Privacy section — GDPR data export + account deletion

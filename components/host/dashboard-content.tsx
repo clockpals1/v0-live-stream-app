@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { OnboardingChecklist } from "@/components/host/onboarding-checklist";
+import { NotificationBell } from "@/components/host/notification-bell";
 import { CreatorWorkspaceStrip } from "@/components/host/creator-workspace-strip";
 import { DashboardStatsRow } from "@/components/host/dashboard-stats-row";
 import { RecentReplaysWidget } from "@/components/host/recent-replays-widget";
@@ -37,7 +38,6 @@ import {
   Play,
   Square,
   AlertTriangle,
-  Bell,
   X,
   CalendarClock,
   ShieldCheck,
@@ -680,16 +680,20 @@ export function DashboardContent({
               </Button>
             )}
 
-            {/* Emergency bell */}
+            {/* Notification bell — in-app event feed */}
+            {host && <NotificationBell hostId={host.id} />}
+
+            {/* Emergency bell — red-alert panel for live issues */}
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowEmergencyPanel(true)}
-              className="relative h-8 px-2.5"
+              className="relative h-8 w-8 p-0"
+              title="Emergency alerts"
             >
-              <Bell className="w-4 h-4" />
+              <AlertTriangle className="w-4 h-4 text-muted-foreground" />
               {emergencyMessages.length > 0 && (
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
+                <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full" />
               )}
             </Button>
 
