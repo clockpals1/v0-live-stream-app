@@ -57,6 +57,25 @@ interface Props {
    * mute / restore the host's outgoing mic when `muteMic` is true.
    */
   onClipActiveChange?: (active: boolean, muteMic: boolean) => void;
+  /**
+   * Fired on EVERY clip state change (including caption / url edits).
+   * The host's program preview uses this to render the same clip
+   * overlay viewers see, so the host knows what's actually on screen.
+   */
+  onStateChange?: (state: {
+    active: boolean;
+    url: string | null;
+    caption: string;
+    muteMic: boolean;
+  }) => void;
+  /**
+   * Current stream status from the parent. When the stream transitions
+   * to 'ended' while a clip is playing, we auto-stop the clip — both as
+   * defense (so a stale clip_active=true row can't ghost-play on the
+   * next stream) and as UX (the broadcast is over, the clip should be
+   * over too).
+   */
+  streamStatus?: "waiting" | "live" | "ended";
 }
 
 interface ClipState {
@@ -77,6 +96,8 @@ export function VideoClipPanel({
   streamId,
   chatChannelRef,
   onClipActiveChange,
+  onStateChange,
+  streamStatus,
 }: Props) {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
@@ -121,6 +142,23 @@ export function VideoClipPanel({
       cancelled = true;
     };
   }, [streamId, supabase]);
+
+  // Notify the parent of every state change so the host's program
+  // preview can render the same overlay viewers see. Runs after every
+  // setState — kept in a ref so the effect doesn't depend on a stale
+  // closure of the callback.
+  const onStateChangeRef = useRef(onStateChange);
+  useEffect(() => {
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
+  useEffect(() => {
+    onStateChangeRef.current?.({
+      active: state.active,
+      url: state.url,
+      caption: state.caption,
+      muteMic: state.muteMic,
+    });
+  }, [state.active, state.url, state.caption, state.muteMic]);
 
   // Persist + broadcast helper. We always broadcast the FULL state so a
   // viewer that joins mid-playback can render the clip without a separate
@@ -224,6 +262,23 @@ export function VideoClipPanel({
     await pushState(next);
     onClipActiveChange?.(false, state.muteMic);
   };
+
+  // Auto-stop the clip when the stream transitions to 'ended'. This
+  // guards against a stale clip_active=true row haunting the next
+  // stream (the host's clip would otherwise auto-resume on the next
+  // viewer load). We do NOT clear the URL — the host might want to
+  // re-roll the same clip on the next stream — only the active flag.
+  useEffect(() => {
+    if (streamStatus === "ended" && state.active) {
+      const next: ClipState = { ...state, active: false };
+      setState(next);
+      void pushState(next);
+      onClipActiveChange?.(false, state.muteMic);
+    }
+    // Only watch streamStatus — we don't want this firing on every
+    // unrelated state mutation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamStatus]);
 
   const updateCaption = (v: string) => {
     const trimmed = v.slice(0, 140);

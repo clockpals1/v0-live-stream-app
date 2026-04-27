@@ -182,12 +182,33 @@ export function OperatorStreamInterface({
   );
   const [cohostParticipants, setCohostParticipants] = useState<StreamParticipant[]>([]);
 
+  // ── Clip + slideshow state mirrors ──────────────────────────────────
+  // VideoClipPanel writes and broadcasts this state; we listen for it
+  // on the chat channel so the operator's preview stays in sync with
+  // what viewers see. Also hydrated from DB on mount so an operator
+  // who joins mid-stream sees the active clip/slideshow immediately.
+  const [clipState, setClipState] = useState<{
+    active: boolean;
+    url: string | null;
+    caption: string;
+  }>({ active: false, url: null, caption: "" });
+
+  const [slideshowState, setSlideshowState] = useState<{
+    active: boolean;
+    url: string;
+    caption: string;
+  }>({ active: false, url: "", caption: "" });
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
-  const chatChannelRef = useRef<unknown>(null);
+  // Typed against the Supabase RealtimeChannel because useControlRoomState
+  // is strict about the ref shape; everything else just calls `.send()`
+  // on it which is present on the channel type.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chatChannelRef = useRef<any>(null);
 
   const operatorDisplayName = host.display_name || "Operator";
   const isAdmin = host.is_admin === true;
@@ -224,8 +245,37 @@ export function OperatorStreamInterface({
   const cr = useControlRoomState({
     streamId: stream.id,
     supabase,
-    chatChannelRef: chatChannelRef as React.MutableRefObject<unknown>,
+    chatChannelRef,
   });
+
+  // ── Hydrate clip + slideshow from DB on mount ─────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("streams")
+        .select(
+          "clip_active, clip_url, clip_caption, slideshow_active, slideshow_current_url, slideshow_current_caption",
+        )
+        .eq("id", stream.id)
+        .single();
+      if (cancelled || !data) return;
+      const d = data as any;
+      setClipState({
+        active: !!d.clip_active,
+        url: d.clip_url ?? null,
+        caption: d.clip_caption ?? "",
+      });
+      setSlideshowState({
+        active: !!d.slideshow_active,
+        url: d.slideshow_current_url ?? "",
+        caption: d.slideshow_current_caption ?? "",
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stream.id, supabase]);
 
   // ── Stream row realtime ─────────────────────────────────────────────
   useEffect(() => {
@@ -277,6 +327,24 @@ export function OperatorStreamInterface({
           if (activeTab !== "chat") setUnreadCount((c) => c + 1);
         },
       )
+      // Short-video clip updates — keep the operator preview in sync.
+      .on("broadcast", { event: "stream-clip" }, ({ payload }: any) => {
+        if (!payload) return;
+        setClipState({
+          active: !!payload.active,
+          url: typeof payload.url === "string" && payload.url ? payload.url : null,
+          caption: typeof payload.caption === "string" ? payload.caption : "",
+        });
+      })
+      // Slideshow updates — keep the operator preview in sync.
+      .on("broadcast", { event: "stream-slideshow" }, ({ payload }: any) => {
+        if (!payload) return;
+        setSlideshowState({
+          active: !!payload.active,
+          url: typeof payload.url === "string" ? payload.url : "",
+          caption: typeof payload.caption === "string" ? payload.caption : "",
+        });
+      })
       .subscribe((status: string) => {
         if (status === "SUBSCRIBED") loadMessages();
       });
@@ -460,13 +528,45 @@ export function OperatorStreamInterface({
               />
               <audio ref={audioRef} autoPlay playsInline className="hidden" />
               {/* Re-composite the live decorations the way the viewer sees them. */}
+              <StreamSlideshow
+                active={slideshowState.active}
+                imageUrl={slideshowState.url}
+                caption={slideshowState.caption}
+              />
+              {/* Short-video clip — renders above the slideshow, below overlay.
+                  Muted here so the clip audio doesn't play twice (viewers
+                  hear it through the live feed; operator hears it via the
+                  useSimpleStream <audio> element). */}
+              {clipState.active && clipState.url && (
+                <div
+                  className="absolute inset-0 z-[25] bg-black flex items-center justify-center"
+                  data-operator-clip-overlay
+                >
+                  <video
+                    key={clipState.url}
+                    src={clipState.url}
+                    className="w-full h-full object-contain"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
+                  {clipState.caption && (
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 max-w-[90%] px-4 py-2 rounded-lg bg-black/70 text-white text-sm font-medium backdrop-blur text-center">
+                      {clipState.caption}
+                    </div>
+                  )}
+                  <div className="absolute top-2 right-2 inline-flex items-center gap-1 h-5 px-1.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.12em] bg-emerald-500/90 text-white">
+                    Clip rolling
+                  </div>
+                </div>
+              )}
               <StreamOverlay
                 active={cr.overlay.active}
                 message={cr.overlay.message}
                 background={cr.overlay.background}
                 imageUrl={cr.overlay.imageUrl}
               />
-              <StreamSlideshow active={false} imageUrl="" caption="" />
               <div className="absolute top-2 left-2 flex items-center gap-1.5">
                 <Badge className="bg-black/60 text-white backdrop-blur ring-1 ring-white/10 gap-1.5 h-6 px-2">
                   <Eye className="w-3 h-3" />
@@ -579,6 +679,18 @@ export function OperatorStreamInterface({
                   streamId={stream.id}
                   chatChannelRef={
                     chatChannelRef as React.MutableRefObject<unknown>
+                  }
+                  // streamStatus lets the panel auto-stop a clip when
+                  // the host ends the broadcast — defense against a
+                  // stale clip_active=true row haunting the next session.
+                  streamStatus={stream.status}
+                  // Keep operator's preview in sync with the clip overlay.
+                  onClipStateChange={(s) =>
+                    setClipState({
+                      active: s.active,
+                      url: s.url,
+                      caption: s.caption,
+                    })
                   }
                   // No mic auto-mute callback for operator — they have
                   // no local mic. The clip's own audio plays on the

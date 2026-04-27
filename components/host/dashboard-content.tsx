@@ -47,6 +47,7 @@ import {
   RefreshCw,
   Settings,
   Sparkles,
+  ChevronDown,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -689,6 +690,52 @@ export function DashboardContent({
           />
         )}
 
+        {/* Super-User assignment banner.
+            Mirrors the cohost banner directly below. Appears whenever
+            this user has at least one stream assigned to them as an
+            operator, so the assignment is impossible to miss the moment
+            they land on the dashboard. The amber palette matches the
+            rest of the Super User language used elsewhere
+            (ROLE_LABELS.super_user, the topbar pill, the stream card
+            ring colour). Clicking the chevron scrolls down to the
+            full "Streams You Manage" section so this banner doubles as
+            a jump link. */}
+        {operatorStreams.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              document
+                .getElementById("super-user-streams")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="w-full mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-2 border-amber-500/30 rounded-lg text-left hover:from-amber-500/15 hover:to-orange-500/15 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 bg-amber-500 rounded-full shrink-0">
+                <ShieldCheck className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  You manage {operatorStreams.length} stream
+                  {operatorStreams.length !== 1 ? "s" : ""} as Super User
+                  {operatorStreams.some((p) => p.stream.status === "live") && (
+                    <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">
+                      ● LIVE
+                    </Badge>
+                  )}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
+                  You can edit overlays, ticker, music, media, branding,
+                  scenes, and co-host cameras for{" "}
+                  {operatorStreams.length === 1 ? "this stream" : "these streams"}
+                  . Tap to jump to the list.
+                </p>
+              </div>
+              <ChevronDown className="w-4 h-4 text-amber-600 shrink-0" />
+            </div>
+          </button>
+        )}
+
         {/* Co-hosting Status Banner */}
         {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length > 0 && (
           <div className="mb-6 p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-2 border-purple-500/30 rounded-lg">
@@ -721,7 +768,7 @@ export function DashboardContent({
 
         {/* Super User section — assigned streams are the operator's homepage. */}
         {operatorStreams.length > 0 && (
-          <div className="mb-6">
+          <div id="super-user-streams" className="mb-6">
             <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-amber-500" />
               Streams You Manage

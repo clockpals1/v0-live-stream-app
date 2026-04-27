@@ -178,6 +178,18 @@ function OwnerStreamInterface({
    */
   const audioStateBeforeClipRef = useRef<boolean | null>(null);
 
+  /**
+   * Clip-state mirror — VideoClipPanel emits its full state up via
+   * MediaDeck.onClipStateChange and we keep the latest snapshot here.
+   * The host's program preview reads this to render the same overlay
+   * viewers see, so the host always knows what's actually on screen.
+   */
+  const [clipState, setClipState] = useState<{
+    active: boolean;
+    url: string | null;
+    caption: string;
+  }>({ active: false, url: null, caption: "" });
+
   // Tab state (right rail). Controlled so the post-stream CTA can jump
   // the host to the Replay tab.
   const activeTabRef = useRef("chat");
@@ -702,6 +714,7 @@ function OwnerStreamInterface({
               isDataSaver={isDataSaver}
               videoQuality={videoQuality}
               overlay={cr.overlay}
+              clip={clipState}
               watermarkUrl={cr.branding.watermarkUrl}
               watermarkPosition={cr.branding.watermarkPosition}
               onRotateCamera={rotateCamera}
@@ -784,6 +797,14 @@ function OwnerStreamInterface({
                 <MediaDeck
                   streamId={stream.id}
                   chatChannelRef={chatChannelRef}
+                  streamStatus={stream.status}
+                  onClipStateChange={(s) =>
+                    setClipState({
+                      active: s.active,
+                      url: s.url,
+                      caption: s.caption,
+                    })
+                  }
                   onClipActiveChange={(active, muteMic) => {
                     // Auto-mute the host mic during clip playback so the
                     // clip's own audio fills the space, then restore the

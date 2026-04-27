@@ -1597,7 +1597,13 @@ export function ViewerStreamInterface({
                       playsInline + loop are required: the user already
                       gestured to join the room, so audio is allowed by
                       every browser including iOS Safari. */}
-                  {clip.active && clip.url && (
+                  {/* Defense: only render the clip while the stream is
+                      actually LIVE. The host's stream-interface auto-stops
+                      the clip on stream-end, but a viewer who joins a
+                      stale row (e.g. clip_active=true but the host's tab
+                      crashed before stop) would otherwise see a ghost clip.
+                      Gating here keeps that bug invisible. */}
+                  {clip.active && clip.url && stream.status === "live" && (
                     <div
                       className="absolute inset-0 z-[25] bg-black flex items-center justify-center"
                       data-clip-overlay

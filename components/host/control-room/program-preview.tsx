@@ -28,6 +28,14 @@ interface Props {
   isDataSaver: boolean;
   videoQuality: "auto" | "high" | "medium" | "low";
   overlay: OverlayPreset;
+  /**
+   * Active short-video clip the host has rolled to viewers. When
+   * `active` is true and `url` is set, we render the same full-bleed
+   * <video autoplay loop> overlay viewers see, so the host knows what's
+   * actually on screen. Audio is muted in the host preview to avoid
+   * a feedback loop with the host's mic / monitoring.
+   */
+  clip?: { active: boolean; url: string | null; caption: string } | null;
   watermarkUrl?: string | null;
   watermarkPosition?: "tl" | "tr" | "bl" | "br";
   onRotateCamera: () => void;
@@ -66,6 +74,7 @@ export const ProgramPreview = forwardRef<HTMLVideoElement, Props>(
       isDataSaver,
       videoQuality,
       overlay,
+      clip,
       watermarkUrl,
       watermarkPosition = "tr",
       onRotateCamera,
@@ -144,6 +153,35 @@ export const ProgramPreview = forwardRef<HTMLVideoElement, Props>(
                 alt="Watermark preview"
                 className="h-9 w-auto opacity-85 drop-shadow-[0_2px_8px_rgba(0,0,0,0.55)]"
               />
+            </div>
+          )}
+
+          {/* On-stage video clip — exact mirror of viewer-side. Sits
+              just below the overlay (which is a stronger full takeover)
+              and just above the camera video. Muted in the host preview
+              so the clip's audio doesn't fight the host's monitoring. */}
+          {clip?.active && clip.url && (
+            <div
+              className="absolute inset-0 z-[5] bg-black flex items-center justify-center"
+              data-host-clip-overlay
+            >
+              <video
+                key={clip.url}
+                src={clip.url}
+                className="w-full h-full object-contain"
+                autoPlay
+                loop
+                muted
+                playsInline
+              />
+              {clip.caption && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] px-3 py-1.5 rounded-md bg-black/70 text-white text-xs font-medium backdrop-blur text-center">
+                  {clip.caption}
+                </div>
+              )}
+              <div className="absolute top-2 right-2 inline-flex items-center gap-1 h-5 px-1.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.12em] bg-emerald-500/90 text-white">
+                Clip rolling
+              </div>
             </div>
           )}
 

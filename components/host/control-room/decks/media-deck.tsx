@@ -15,6 +15,23 @@ interface Props {
    * playing" is enabled.
    */
   onClipActiveChange?: (active: boolean, muteMic: boolean) => void;
+  /**
+   * Forwarded to the video-clip panel so the parent can mirror the
+   * full clip state (and render the same overlay viewers see on top
+   * of the program preview).
+   */
+  onClipStateChange?: (state: {
+    active: boolean;
+    url: string | null;
+    caption: string;
+    muteMic: boolean;
+  }) => void;
+  /**
+   * Current stream status. When 'ended', the video-clip panel
+   * auto-stops any active clip so a stale clip_active=true doesn't
+   * carry over to the next session.
+   */
+  streamStatus?: "waiting" | "live" | "ended";
 }
 
 /**
@@ -32,6 +49,8 @@ export function MediaDeck({
   streamId,
   chatChannelRef,
   onClipActiveChange,
+  onClipStateChange,
+  streamStatus,
 }: Props) {
   return (
     <div className="flex flex-col gap-3.5">
@@ -48,6 +67,8 @@ export function MediaDeck({
         streamId={streamId}
         chatChannelRef={chatChannelRef as MutableRefObject<unknown>}
         onClipActiveChange={onClipActiveChange}
+        onStateChange={onClipStateChange}
+        streamStatus={streamStatus}
       />
     </div>
   );
