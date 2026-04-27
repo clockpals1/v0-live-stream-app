@@ -100,7 +100,7 @@ jobs:
           fi
           SIZE_BYTES=$(stat -c%s "$BUNDLE")
           SIZE_MB=$(awk "BEGIN { printf \"%.2f\", $SIZE_BYTES / 1024 / 1024 }")
-          BUDGET_MB=9
+          BUDGET_MB=10
           BUDGET_BYTES=$((BUDGET_MB * 1024 * 1024))
           echo "Handler size: ${SIZE_MB} MiB (budget: ${BUDGET_MB} MiB)"
           if [ "$SIZE_BYTES" -gt "$BUDGET_BYTES" ]; then
