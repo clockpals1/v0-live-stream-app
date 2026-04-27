@@ -6,21 +6,19 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Cloudflare Workers has a 10 MiB compressed bundle limit on the
-  // paid plan (3 MiB on free). Next.js eagerly bundles @vercel/og
-  // (used by `next/og` ImageResponse) even when no route imports it,
-  // costing ~2.2 MiB across resvg.wasm + yoga.wasm + the edge runtime.
-  // We don't generate OG images, so alias the module to a tiny noop
-  // and strip those wasm blobs out of the worker bundle.
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.resolve.alias = {
-        ...(config.resolve.alias || {}),
-        "next/og": false,
-        "@vercel/og": false,
-      };
-    }
-    return config;
+  // Cloudflare Workers caps the worker bundle at 10 MiB compressed on
+  // the paid plan (3 MiB on free). Next.js eagerly bundles @vercel/og
+  // (used by `next/og` ImageResponse) into the server runtime even
+  // when no route imports it — that's ~2.2 MiB of resvg.wasm +
+  // yoga.wasm + edge runtime. We don't generate OG images, so we
+  // alias both module specifiers at the Turbopack level to a tiny
+  // stub. Turbopack is the default bundler from Next 16; webpack
+  // config is rejected.
+  turbopack: {
+    resolveAlias: {
+      "next/og": "./lib/stubs/empty-module.js",
+      "@vercel/og": "./lib/stubs/empty-module.js",
+    },
   },
 };
 
