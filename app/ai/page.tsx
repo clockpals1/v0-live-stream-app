@@ -193,6 +193,7 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
     title:              "Title Variants",
     content_ideas:      "Content Ideas",
     campaign_copy:      "Campaign / Ad",
+    short_video:        "Short Video Project",
     short_video_script: "Short Video Script",
     summary:            "Summary",
   };
@@ -204,19 +205,26 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
     title:              ListOrdered,
     content_ideas:      Lightbulb,
     campaign_copy:      TrendingUp,
+    short_video:        Clapperboard,
     short_video_script: Clapperboard,
     summary:            Sparkles,
   };
 
   const TypeIcon = typeIcons[asset.asset_type] ?? FileText;
+  const isVideoProject = asset.asset_type === "short_video";
 
   return (
-    <Card className="group relative hover:border-primary/40 transition-colors">
+    <Card className={cn(
+      "group relative transition-colors",
+      isVideoProject
+        ? "border-violet-500/30 bg-gradient-to-br from-violet-500/5 to-transparent hover:border-violet-500/50"
+        : "hover:border-primary/40"
+    )}>
       <CardContent className="p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
-            <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <TypeIcon className={cn("h-3.5 w-3.5", isVideoProject ? "text-violet-500" : "text-muted-foreground")} />
+            <span className={cn("text-[11px] font-medium uppercase tracking-wider", isVideoProject ? "text-violet-600 dark:text-violet-400" : "text-muted-foreground")}>
               {typeLabels[asset.asset_type] ?? asset.asset_type}
             </span>
           </div>
@@ -234,6 +242,14 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
           <p className="text-[11px] text-muted-foreground">{ago}</p>
           {asset.is_starred && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
         </div>
+        {isVideoProject && (
+          <div className="mt-3 flex items-center justify-between border-t border-violet-500/20 pt-2.5">
+            <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400">Video Project</span>
+            <a href="/ai" className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
+              Continue <ArrowRight className="h-3 w-3" />
+            </a>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

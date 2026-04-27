@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Sparkles, Copy, Check, Loader2, Star, Video,
   Radio, Megaphone, Layers, Zap, Target,
   TrendingUp, Send, ChevronRight, RotateCcw,
   Hash, FileText, Lightbulb, Clapperboard,
+  ExternalLink, Mic,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -240,6 +241,168 @@ function SectionBox({ section, onCopy, isCopied }: {
   );
 }
 
+function WorkflowAction({
+  icon,
+  label,
+  sublabel,
+  onClick,
+  loading,
+  comingSoon,
+  accent,
+}: {
+  icon: ReactNode;
+  label: string;
+  sublabel?: string;
+  onClick?: () => void;
+  loading?: boolean;
+  comingSoon?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={comingSoon ? undefined : onClick}
+      disabled={!!loading}
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors",
+        accent
+          ? "border-primary/40 bg-primary/5 hover:bg-primary/10"
+          : comingSoon
+          ? "cursor-default border-border/40 bg-muted/20 opacity-50"
+          : "border-border bg-muted/20 hover:bg-muted/40",
+        loading && "cursor-not-allowed opacity-60",
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icon}
+        {comingSoon && (
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+            Soon
+          </span>
+        )}
+      </div>
+      <span className="text-[11px] font-medium leading-snug">{label}</span>
+      {sublabel && <span className="text-[10px] leading-snug text-muted-foreground">{sublabel}</span>}
+    </button>
+  );
+}
+
+function VideoProjectPanel({
+  sections,
+  topic,
+  platform,
+  videoLength,
+  onCopy,
+  copiedLabel,
+  onCopyAll,
+  copiedAll,
+  onAddToQueue,
+  addingToQueue,
+  onReset,
+  starred,
+  onStar,
+}: {
+  sections: OutputSection[];
+  topic: string;
+  platform: Platform;
+  videoLength: string;
+  onCopy: (label: string, content: string) => void;
+  copiedLabel: string | null;
+  onCopyAll: () => void;
+  copiedAll: boolean;
+  onAddToQueue: () => void;
+  addingToQueue: boolean;
+  onReset: () => void;
+  starred: boolean;
+  onStar: () => void;
+}) {
+  const platformLabel = PLATFORM_OPTIONS.find((p) => p.value === platform)?.label ?? platform;
+
+  return (
+    <div className="space-y-3">
+      {/* ── Project identity header ── */}
+      <div className="flex items-start gap-3 rounded-xl border border-violet-500/30 bg-gradient-to-r from-violet-500/10 to-fuchsia-500/5 p-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-500 text-white shadow-sm">
+          <Clapperboard className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold">Short Video Project</span>
+            <Badge className="border-0 bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-300">
+              Script Ready
+            </Badge>
+          </div>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {topic || "Untitled"} · {platformLabel} · {videoLength}s
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onCopyAll}
+            className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-background/80 hover:text-foreground"
+          >
+            {copiedAll ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            {copiedAll ? "Copied" : "Copy all"}
+          </button>
+          <button
+            type="button"
+            onClick={onStar}
+            className={cn(
+              "rounded p-1.5 transition-colors",
+              starred ? "text-amber-500" : "text-muted-foreground hover:bg-background/80 hover:text-foreground",
+            )}
+          >
+            <Star className={cn("h-3.5 w-3.5", starred && "fill-current")} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Script sections ── */}
+      <div className="space-y-2.5">
+        {sections.map((sec) => (
+          <SectionBox key={sec.label} section={sec} onCopy={onCopy} isCopied={copiedLabel === sec.label} />
+        ))}
+      </div>
+
+      {/* ── Continue your workflow ── */}
+      <div className="rounded-xl border border-border bg-background/60 p-4">
+        <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Continue your workflow
+        </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <WorkflowAction
+            icon={<Send className="h-3.5 w-3.5 text-primary" />}
+            label="Add to Queue"
+            sublabel="Schedule for publishing"
+            onClick={onAddToQueue}
+            loading={addingToQueue}
+            accent
+          />
+          <WorkflowAction
+            icon={<ExternalLink className="h-3.5 w-3.5" />}
+            label="Open Studio"
+            sublabel="Edit video projects"
+            onClick={() => window.open("https://studio.isunday.me", "_blank")}
+          />
+          <WorkflowAction
+            icon={<Mic className="h-3.5 w-3.5" />}
+            label="Voiceover"
+            sublabel="AI audio narration"
+            comingSoon
+          />
+          <WorkflowAction
+            icon={<RotateCcw className="h-3.5 w-3.5" />}
+            label="Regenerate"
+            sublabel="New script variant"
+            onClick={onReset}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function GeneratorForm({ hostId: _ }: { hostId: string }) {
@@ -268,9 +431,10 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
   const activeMode    = MODES.find((m) => m.id === modeId)!;
   const activeSubtask = activeMode.subtasks.find((s) => s.task === taskType) ?? activeMode.subtasks[0];
   const ghostSections = GHOST_SECTIONS[taskType] ?? [];
-  const isShortVideo  = modeId === "short_video";
-  const isAdCampaign  = modeId === "ad_campaign";
-  const hasResult     = sections.length > 0 && !loading;
+  const isShortVideo   = modeId === "short_video";
+  const isVideoProject  = isShortVideo && (taskType === "short_video_script" || taskType === "short_video_ad");
+  const isAdCampaign    = modeId === "ad_campaign";
+  const hasResult       = sections.length > 0 && !loading;
 
   function switchMode(mode: ModeDef) {
     setModeId(mode.id);
@@ -526,20 +690,23 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
         </div>
 
         {/* Right: Result Workspace ─────────────────────────────────── */}
-        <div className="lg:col-span-3 flex flex-col rounded-xl border border-border bg-muted/10 overflow-hidden">
-
+        <div className="lg:col-span-3 rounded-xl border border-border bg-muted/10 overflow-hidden">
           {/* Workspace toolbar */}
           <div className="flex items-center justify-between gap-3 border-b border-border bg-background/80 px-4 py-2.5">
             <div className="flex items-center gap-2 min-w-0">
-              <activeSubtask.icon className="h-3.5 w-3.5 shrink-0 text-primary" />
-              <span className="text-sm font-medium truncate">{activeSubtask.label}</span>
+              {isVideoProject && hasResult
+                ? <Clapperboard className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                : <activeSubtask.icon className="h-3.5 w-3.5 shrink-0 text-primary" />}
+              <span className="text-sm font-medium truncate">
+                {isVideoProject && hasResult ? "Short Video Project" : activeSubtask.label}
+              </span>
               {hasResult && (
                 <Badge className="shrink-0 border-0 bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-300">
-                  Ready
+                  {isVideoProject ? "Script Ready" : "Ready"}
                 </Badge>
               )}
             </div>
-            {hasResult && (
+            {hasResult && !isVideoProject && (
               <div className="flex shrink-0 items-center gap-0.5">
                 <button type="button" onClick={copyAll}
                   className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
@@ -548,7 +715,8 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
                 </button>
                 <button type="button"
                   onClick={() => { setStarred(true); toast.success("Saved to library"); }}
-                  className={cn("rounded-md p-1.5 transition-colors", starred ? "text-amber-500" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+                  className={cn(
+                    "rounded-md p-1.5 transition-colors", starred ? "text-amber-500" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
                   <Star className={cn("h-3.5 w-3.5", starred && "fill-current")} />
                 </button>
                 <button type="button" onClick={handleAddToQueue} disabled={addingToQueue}
@@ -563,12 +731,15 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
                 </button>
               </div>
             )}
+            {hasResult && isVideoProject && (
+              <button type="button" title="Start over"
+                onClick={() => { setSections([]); setRawResult(null); setError(null); setStarred(false); }}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-
-          {/* Workspace body */}
-          <div className="flex-1 overflow-y-auto p-4">
-
-            {/* Empty: ghost preview */}
+          <div className="p-4 space-y-3 overflow-y-auto">
             {!sections.length && !loading && !error && (
               <div className="space-y-3">
                 <div className="rounded-lg border border-dashed border-border/60 bg-background/60 px-4 py-3 text-center">
@@ -615,14 +786,32 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
 
             {/* Result: structured sections */}
             {sections.length > 0 && !loading && (
-              <div className="space-y-2.5">
-                {sections.map((sec) => (
-                  <SectionBox
-                    key={sec.label} section={sec}
-                    onCopy={copySection} isCopied={copiedLabel === sec.label}
-                  />
-                ))}
-              </div>
+              isVideoProject ? (
+                <VideoProjectPanel
+                  sections={sections}
+                  topic={topic}
+                  platform={platform}
+                  videoLength={videoLength}
+                  onCopy={copySection}
+                  copiedLabel={copiedLabel}
+                  onCopyAll={copyAll}
+                  copiedAll={copiedAll}
+                  onAddToQueue={handleAddToQueue}
+                  addingToQueue={addingToQueue}
+                  onReset={() => { setSections([]); setRawResult(null); setError(null); setStarred(false); }}
+                  starred={starred}
+                  onStar={() => { setStarred(true); toast.success("Saved to library"); }}
+                />
+              ) : (
+                <div className="space-y-2.5">
+                  {sections.map((sec) => (
+                    <SectionBox
+                      key={sec.label} section={sec}
+                      onCopy={copySection} isCopied={copiedLabel === sec.label}
+                    />
+                  ))}
+                </div>
+              )
             )}
           </div>
         </div>
