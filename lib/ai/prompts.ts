@@ -20,6 +20,9 @@ export type TaskType =
   | "content_ideas"
   | "affiliate_campaign"
   | "short_video_script"
+  | "short_video_ad"
+  | "hook_variants"
+  | "ad_copy_full"
   | "weekly_summary"
   | "post_stream_recap";
 
@@ -45,6 +48,13 @@ export interface BasePromptContext {
   tone?: Tone;
   niche?: string;
   audienceNote?: string;
+  // Short video context
+  videoLength?: string;        // '15' | '30' | '60'
+  monetizationAngle?: string;  // 'organic' | 'product' | 'affiliate' | 'brand'
+  angle?: string;              // creative angle / video style
+  // Campaign / ad context
+  targetAudience?: string;
+  productDescription?: string;
 }
 
 export interface AffiliateContext extends BasePromptContext {
@@ -187,16 +197,95 @@ Topic context: "${ctx.topic}"`;
 // ─── Short Video Script ───────────────────────────────────────────────────────
 
 export function buildShortVideoScriptPrompt(ctx: BasePromptContext) {
-  const systemPrompt = `You are a short-form video script writer for TikTok and Instagram Reels.
-Scripts must be under 60 seconds when read aloud (≈150 words).
-Output format:
-  HOOK (first 3 seconds): One sentence that stops the scroll
-  BODY: 3–4 punchy sentences delivering the value
-  PAYOFF + CTA: One closing line + follow/subscribe prompt
-Tone: ${ctx.tone ?? "energetic"}. Conversational, direct, no stiffness.`;
+  const lengthLabel = ctx.videoLength === '15' ? '15 seconds (≈40 words)'
+    : ctx.videoLength === '30' ? '30 seconds (≈80 words)'
+    : '60 seconds (≈150 words)';
+  const angleNote = ctx.angle ? `Video angle / style: ${ctx.angle}.` : '';
+  const monetNote = ctx.monetizationAngle && ctx.monetizationAngle !== 'organic'
+    ? `Monetization intent: ${ctx.monetizationAngle} — weave this naturally into the CTA.` : '';
 
-  const userPrompt = `Write a 60-second short video script about: "${ctx.topic}"
-${ctx.niche ? `Niche: ${ctx.niche}` : ""}`;
+  const systemPrompt = `You are a short-form video script writer for TikTok, Instagram Reels, and YouTube Shorts.
+Target length: ${lengthLabel}.
+${angleNote} ${monetNote}
+Output format — each section on its own line with label:
+  HOOK (first 3 seconds): One sentence that stops the scroll — make it irresistible
+  CONCEPT: One sentence summary of what this video is really about
+  SCRIPT BODY: The full script body — punchy, conversational, no fluff
+  CTA: Closing call to action (follow / buy / click / comment)
+  CAPTION: A ready-to-post social caption with 2–3 relevant emojis
+Tone: ${ctx.tone ?? 'energetic'}. Write as if speaking directly to camera. No stage directions. No meta-commentary.`;
+
+  const userPrompt = `Write a short video script about: "${ctx.topic}"
+${ctx.niche ? `Creator niche: ${ctx.niche}` : ''}
+${ctx.audienceNote ? `Target audience: ${ctx.audienceNote}` : ''}`;
+
+  return { systemPrompt, userPrompt };
+}
+
+// ─── Short Video Ad ───────────────────────────────────────────────────────────
+
+export function buildShortVideoAdPrompt(ctx: BasePromptContext) {
+  const lengthLabel = ctx.videoLength === '15' ? '15 seconds (≈40 words, hard sell)'
+    : ctx.videoLength === '30' ? '30 seconds (≈80 words, problem + solution)'
+    : '60 seconds (≈150 words, full story arc)';
+  const platform = ctx.platform ?? 'generic';
+
+  const systemPrompt = `You are a performance-focused short-form video ad scriptwriter.
+Target: ${lengthLabel} on ${platform}.
+This is a PAID AD — every word must work toward conversion. Be direct, benefit-first.
+Output format — each section on its own line with label:
+  HOOK (3 seconds): Pattern-interrupt opening that stops the scroll — make it surprising or provocative
+  PROBLEM: One sentence naming the exact pain point your viewer recognises
+  SOLUTION: Your offer as the solution — 1–2 sentences, focus on the outcome
+  PROOF POINT: Social proof or result hook (e.g. "Over 10,000 creators have used this…")
+  CTA: Strong direct call to action — max 8 words, starts with a verb
+  VISUAL DIRECTION: 2–3 sentence direction for what should appear on screen (no stage directions in script above)
+Tone: ${ctx.tone ?? 'energetic'}. No fluff, no hype words, benefit-focused.`;
+
+  const userPrompt = `Write a short video ad for: "${ctx.topic}"
+${ctx.productDescription ? `Product/offer description: ${ctx.productDescription}` : ''}
+${ctx.niche ? `Creator niche / audience: ${ctx.niche}` : ''}
+${ctx.targetAudience ? `Target viewer: ${ctx.targetAudience}` : ''}`;
+
+  return { systemPrompt, userPrompt };
+}
+
+// ─── Hook Variants ────────────────────────────────────────────────────────────
+
+export function buildHookVariantsPrompt(ctx: BasePromptContext) {
+  const systemPrompt = `You are a viral content strategist specialising in scroll-stopping hooks for short-form video.
+Generate exactly 5 different hook approaches for the same concept — each with a distinct psychological angle.
+Output format — one per line with the label:
+  CURIOSITY HOOK: Teases without revealing — makes viewers need to know what happens
+  PAIN HOOK: Names a specific frustration or fear your viewer has right now
+  BENEFIT HOOK: Leads with the concrete outcome or transformation
+  STORY HOOK: Opens a mini personal narrative in one sentence
+  TREND HOOK: Connects to a current trend, cultural moment, or viral format
+Each hook must be under 20 words. Make them genuinely scroll-stopping — not generic.
+Tone: ${ctx.tone ?? 'energetic'}. Platform style: ${ctx.platform ?? 'short-form video'}.`;
+
+  const userPrompt = `Write 5 hook variants for this concept: "${ctx.topic}"
+${ctx.niche ? `Creator niche: ${ctx.niche}` : ''}`;
+
+  return { systemPrompt, userPrompt };
+}
+
+// ─── Full Ad Creative Pack ────────────────────────────────────────────────────
+
+export function buildAdCopyFullPrompt(ctx: BasePromptContext & { productName?: string }) {
+  const systemPrompt = `You are a performance marketing copywriter who creates complete ad creative packs for social media.
+Output a full ad creative pack with these clearly labelled sections:
+  HEADLINE: 3 headline variants (one per line, max 10 words each) — mix urgency, curiosity, benefit
+  BODY COPY: 3–4 sentences driving the core value proposition — benefit-first, no waffle
+  CTA: 3 call-to-action button text variants (2–5 words each)
+  OBJECTION HANDLER: One sentence that pre-empts the main objection
+  SOCIAL PROOF ANGLE: One hook sentence framing a testimonial or case study ad variant
+Tone: ${ctx.tone ?? 'professional'}. Platform: ${ctx.platform ?? 'social media'}. Conversion-focused.`;
+
+  const userPrompt = `Create a full ad creative pack for: "${ctx.topic}"
+${ctx.productDescription ? `Product/offer: ${ctx.productDescription}` : ''}
+${ctx.targetAudience ? `Target audience: ${ctx.targetAudience}` : ''}
+${ctx.niche ? `Creator niche: ${ctx.niche}` : ''}`;
 
   return { systemPrompt, userPrompt };
 }
@@ -238,6 +327,9 @@ export function getPromptForTask(
     case "content_ideas":       return buildContentIdeasPrompt(ctx);
     case "affiliate_campaign":  return buildAffiliateCampaignPrompt(ctx);
     case "short_video_script":  return buildShortVideoScriptPrompt(ctx);
+    case "short_video_ad":      return buildShortVideoAdPrompt(ctx);
+    case "hook_variants":       return buildHookVariantsPrompt(ctx);
+    case "ad_copy_full":        return buildAdCopyFullPrompt(ctx);
     case "weekly_summary":
       if (ctx.periodLabel) return buildWeeklySummaryPrompt(ctx as unknown as SummaryContext);
       return null;

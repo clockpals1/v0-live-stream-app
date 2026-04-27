@@ -207,6 +207,9 @@ function taskTypeToAssetType(taskType: TaskType): string {
     content_ideas: "content_ideas",
     affiliate_campaign: "campaign_copy",
     short_video_script: "short_video_script",
+    short_video_ad: "short_video_script",
+    hook_variants: "campaign_copy",
+    ad_copy_full: "campaign_copy",
     weekly_summary: "summary",
     post_stream_recap: "summary",
   };
@@ -223,6 +226,9 @@ function buildAssetTitle(taskType: TaskType, input: Record<string, unknown>): st
     content_ideas: "Content Ideas",
     affiliate_campaign: "Campaign Copy",
     short_video_script: "Short Video Script",
+    short_video_ad: "Short Video Ad",
+    hook_variants: "Hook Variants",
+    ad_copy_full: "Ad Creative Pack",
     weekly_summary: "Weekly Summary",
     post_stream_recap: "Stream Recap",
   };

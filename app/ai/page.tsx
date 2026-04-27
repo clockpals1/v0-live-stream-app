@@ -16,6 +16,14 @@ import {
   ArrowRight,
   Zap,
   Lock,
+  Send,
+  TrendingUp,
+  Clapperboard,
+  Hash,
+  ListOrdered,
+  Lightbulb,
+  Star,
+  CircleDollarSign,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -104,19 +112,18 @@ async function renderPage() {
         <div>
           <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-violet-700 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300">
             <Sparkles className="h-3 w-3" />
-            AI Studio · content workspace
+            AI Creation Studio
           </div>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            What are we creating today, {firstName}?
+            Create content that converts.
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Scripts, captions, hashtags, titles, and campaign copy — all generated in seconds.
+          <p className="mt-2 text-sm text-muted-foreground max-w-lg">
+            Short video scripts, ad copy, affiliate campaigns, stream content, and social packs — built for real publishing.
           </p>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-xs text-muted-foreground">This month</div>
+        <div className="shrink-0 rounded-xl border border-border bg-muted/30 px-4 py-3 text-center">
           <div className="text-2xl font-semibold tabular-nums">{monthlyCount ?? 0}</div>
-          <div className="text-[11px] text-muted-foreground">generations</div>
+          <div className="text-[11px] text-muted-foreground">generated this month</div>
         </div>
       </div>
 
@@ -150,21 +157,21 @@ async function renderPage() {
             href="/ai/automate"
             icon={Zap}
             label="Automation"
-            blurb="Set up daily ideas and weekly summaries on autopilot."
+            blurb="Daily content ideas and weekly summaries on autopilot."
             tone="violet"
           />
           <HubLink
             href="/ai/publish"
-            icon={ArrowRight}
+            icon={Send}
             label="Publishing Hub"
-            blurb="Schedule and post generated content across platforms."
+            blurb="Schedule and post your generated content across platforms."
             tone="sky"
           />
           <HubLink
             href="/ai/monetize"
-            icon={Sparkles}
+            icon={CircleDollarSign}
             label="Monetization Hub"
-            blurb="Affiliate campaigns and revenue-focused copy packs."
+            blurb="Affiliate campaigns, brand deal copy, and revenue-focused packs."
             tone="amber"
           />
         </div>
@@ -180,22 +187,35 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
   const ago = formatDistanceToNow(new Date(asset.created_at), { addSuffix: true });
 
   const typeLabels: Record<string, string> = {
-    script: "Script",
-    caption: "Caption",
-    hashtags: "Hashtags",
-    title: "Titles",
-    content_ideas: "Ideas",
-    campaign_copy: "Campaign",
-    short_video_script: "Short Video",
-    summary: "Summary",
+    script:             "Stream Script",
+    caption:            "Caption Pack",
+    hashtags:           "Hashtag Pack",
+    title:              "Title Variants",
+    content_ideas:      "Content Ideas",
+    campaign_copy:      "Campaign / Ad",
+    short_video_script: "Short Video Script",
+    summary:            "Summary",
   };
+
+  const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+    script:             FileText,
+    caption:            FileText,
+    hashtags:           Hash,
+    title:              ListOrdered,
+    content_ideas:      Lightbulb,
+    campaign_copy:      TrendingUp,
+    short_video_script: Clapperboard,
+    summary:            Sparkles,
+  };
+
+  const TypeIcon = typeIcons[asset.asset_type] ?? FileText;
 
   return (
     <Card className="group relative hover:border-primary/40 transition-colors">
       <CardContent className="p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
-            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+            <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
               {typeLabels[asset.asset_type] ?? asset.asset_type}
             </span>
@@ -210,7 +230,10 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
           <p className="mb-1 text-sm font-medium leading-snug line-clamp-1">{asset.title}</p>
         )}
         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{preview}…</p>
-        <p className="mt-2 text-[11px] text-muted-foreground">{ago}</p>
+        <div className="mt-2 flex items-center justify-between">
+          <p className="text-[11px] text-muted-foreground">{ago}</p>
+          {asset.is_starred && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+        </div>
       </CardContent>
     </Card>
   );
