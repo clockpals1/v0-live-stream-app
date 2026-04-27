@@ -346,7 +346,7 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
         body: JSON.stringify({
           title: topic.slice(0, 100),
           body: sections[0]?.content ?? rawResult.slice(0, 500),
-          platform: platform === "generic" ? undefined : platform,
+          platform: platform,
           asset_id: assetId,
         }),
       });

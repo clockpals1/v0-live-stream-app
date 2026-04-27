@@ -203,7 +203,7 @@ export default async function AiMonetizePage() {
                         </p>
                         <p className="text-[11px] text-muted-foreground">
                           {formatDistanceToNow(new Date(asset.created_at), { addSuffix: true })}
-                          {asset.metadata?.auto && (
+                          {!!asset.metadata?.auto && (
                             <span className="ml-1.5 inline-flex items-center gap-0.5 text-violet-500">
                               <Zap className="h-2.5 w-2.5" /> auto
                             </span>

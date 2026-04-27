@@ -321,8 +321,11 @@ function taskTypeToAssetType(t: TaskType): string {
     content_ideas: "content_ideas",
     affiliate_campaign: "campaign_copy",
     short_video_script: "short_video_script",
-    weekly_summary: "summary",
-    post_stream_recap: "summary",
+    short_video_ad:     "short_video_ad",
+    hook_variants:      "hook_variants",
+    ad_copy_full:       "ad_copy",
+    weekly_summary:     "summary",
+    post_stream_recap:  "summary",
   };
   return map[t] ?? t;
 }
