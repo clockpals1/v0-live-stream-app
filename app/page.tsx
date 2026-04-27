@@ -72,6 +72,9 @@ export default function HomePage() {
           </Link>
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
+              <Link href="/watch">Watch streams</Link>
+            </Button>
+            <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
               <Link href="/auth/signup">Become a host</Link>
             </Button>
             <Button asChild size="sm">
@@ -185,6 +188,14 @@ export default function HomePage() {
               No account needed to watch — just open the link the host shared.
             </p>
           </div>
+
+          {/* Secondary browse CTA */}
+          <p className="mt-4 text-xs text-muted-foreground">
+            Looking for something to watch?{" "}
+            <Link href="/watch" className="text-primary underline underline-offset-2 hover:no-underline">
+              Browse live streams &amp; replays →
+            </Link>
+          </p>
 
           {/* Trust strip */}
           <ul className="mx-auto mt-10 grid max-w-2xl grid-cols-2 gap-3 text-left sm:grid-cols-4 sm:gap-4">

@@ -54,7 +54,7 @@ export const CAPS = {
   beInvitedAsCohost: (r: Role) => r === "admin" || r === "host" || r === "cohost",
   accessHostDashboard: (r: Role) =>
     r === "admin" || r === "host" || r === "cohost" || r === "super_user",
-  assignOperators: (r: Role) => r === "admin",
+  assignOperators: (r: Role) => r === "admin" || r === "host",
 } as const;
 
 /**
