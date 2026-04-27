@@ -83,11 +83,15 @@ export function ProducerDeck({
       </div>
 
       {/* Segmented switcher.
-          Uses flex-wrap (not overflow-x-auto) so on a narrow column the
-          tabs reflow into a second row instead of leaving a horizontal
-          scrollbar. Every tab keeps a min-width so labels never crop. */}
+          CSS grid (not flex-wrap) so all 6 tabs share equal-width tracks
+          at every breakpoint. Earlier flex-wrap caused Health to stretch
+          full-width on row 2 when 5 fit on row 1 — every tab on the
+          short row inherited flex-1 and grew. Grid avoids this by
+          giving each tab a deterministic 1/N column.
+            base : 3 cols (2 rows of 3) for very narrow phones
+            sm+  : 6 cols (single row) — desktop default */}
       <div className="px-3 sm:px-4 pt-3">
-        <div className="flex flex-wrap items-center gap-1 p-1 bg-muted/50 rounded-lg ring-1 ring-border/60">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 p-1 bg-muted/50 rounded-lg ring-1 ring-border/60">
           {DECKS.map((d) => {
             const isActive = d.key === active;
             const Icon = d.icon;
@@ -96,14 +100,14 @@ export function ProducerDeck({
                 key={d.key}
                 type="button"
                 onClick={() => setActive(d.key)}
-                className={`flex-1 min-w-[88px] inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-[11px] sm:text-xs font-medium transition-colors ${
+                className={`inline-flex items-center justify-center gap-1.5 h-8 px-2 rounded-md text-[11px] sm:text-xs font-medium transition-colors min-w-0 ${
                   isActive
                     ? "bg-background text-foreground shadow-sm ring-1 ring-border/70"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{d.label}</span>
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{d.label}</span>
               </button>
             );
           })}
