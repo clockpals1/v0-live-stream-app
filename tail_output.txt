@@ -1622,3 +1622,144 @@ GET http://studio.isunday.me/auth/forgot-password?_rsc=1qqfn - Ok @ 2026-04-26, 
 GET http://studio.isunday.me/auth/signup?_rsc=1qqfn - Ok @ 2026-04-26, 10:28:46 p.m.
 GET http://studio.isunday.me/auth/forgot-password?_rsc=ne5al - Ok @ 2026-04-26, 10:28:46 p.m.
 GET http://studio.isunday.me/auth/forgot-password?_rsc=uxilk - Ok @ 2026-04-26, 10:28:46 p.m.
+GET http://studio.isunday.me/ - Ok @ 2026-04-26, 10:31:45 p.m.
+  (error) TypeError: Cannot read properties of null (reading 'id')
+GET http://studio.isunday.me/auth/login - Ok @ 2026-04-26, 10:31:46 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:32:39 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:34:07 p.m.
+  (error) TypeError: Cannot read properties of null (reading 'id')
+GET https://live.isunday.me/?_rsc=qfds1 - Ok @ 2026-04-26, 10:34:28 p.m.
+GET https://live.isunday.me/?_rsc=1q489 - Ok @ 2026-04-26, 10:34:29 p.m.
+GET https://live.isunday.me/ - Ok @ 2026-04-26, 10:34:29 p.m.
+GET https://live.isunday.me/auth/login?_rsc=1r34m - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=1r34m - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/?_rsc=1pn8p - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/login?_rsc=1pn8p - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/login?_rsc=m8rs8 - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/?_rsc=nn07o - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/login?_rsc=1yixr - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/login?_rsc=17j2u - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=1pn8p - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=11igb - Ok @ 2026-04-26, 10:34:30 p.m.
+GET https://live.isunday.me/?_rsc=ivliq - Ok @ 2026-04-26, 10:34:31 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=hogp5 - Ok @ 2026-04-26, 10:34:31 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=ne5al - Ok @ 2026-04-26, 10:34:40 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=1qqfn - Ok @ 2026-04-26, 10:34:40 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=uxilk - Ok @ 2026-04-26, 10:34:40 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=1ez2h - Ok @ 2026-04-26, 10:34:40 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=18n71 - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=13op5 - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=1l9fv - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=1vsmb - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/host/dashboard?_rsc=eocvw - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/signup?_rsc=6jv9q - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=67yuz - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=nr05u - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/auth/forgot-password?_rsc=1vsmb - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/host/dashboard?_rsc=1ikii - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://live.isunday.me/host/settings?_rsc=n6ft5 - Ok @ 2026-04-26, 10:34:43 p.m.
+GET https://live.isunday.me/?_rsc=g7vf3 - Ok @ 2026-04-26, 10:34:43 p.m.
+GET https://live.isunday.me/?_rsc=1vsmb - Ok @ 2026-04-26, 10:34:43 p.m.
+GET https://live.isunday.me/host/settings?_rsc=lhcw1 - Ok @ 2026-04-26, 10:34:43 p.m.
+GET https://live.isunday.me/api/insider/subscribers - Ok @ 2026-04-26, 10:34:43 p.m.
+GET https://live.isunday.me/api/host/integrations/youtube/status - Ok @ 2026-04-26, 10:34:42 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:34:52 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:35:17 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:35:47 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:35:52 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:36:40 p.m.
+  (error) TypeError: Cannot read properties of null (reading 'id')
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:38:36 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:39:06 p.m.
+  (error) TypeError: Cannot read properties of null (reading 'id')
+GET https://studio.isunday.me/auth/login - Ok @ 2026-04-26, 10:42:41 p.m.

@@ -25,13 +25,18 @@ export default async function ReplayLibraryPage() {
     .from("hosts")
     .select("id, display_name")
     .eq("user_id", user.id)
-    .single();
-  if (!host) redirect("https://live.isunday.me/host/dashboard");
+    .maybeSingle();
+  // Layout already auto-creates and blocks rendering when this is null,
+  // so reaching here without a host means an exotic race. Fall back
+  // gracefully rather than cross-origin redirecting (which crashes on
+  // OpenNext + Cloudflare Workers in some Next 16 server-component
+  // paths). The empty list state below covers it cleanly.
+  const hostId = (host as { id: string } | null)?.id ?? "";
 
   const effective = await getEffectivePlan(supabase, user.id);
   const canPublish = featureEnabled(effective.plan, "replay_publishing");
 
-  const replays = await listReplaysForHost(supabase, host.id);
+  const replays = hostId ? await listReplaysForHost(supabase, hostId) : [];
 
   return (
     <main className="mx-auto max-w-5xl px-5 py-10 sm:px-8">
@@ -68,7 +73,7 @@ export default async function ReplayLibraryPage() {
       <ReplayLibraryView
         replays={replays}
         canPublish={canPublish}
-        hostId={host.id}
+        hostId={hostId}
       />
     </main>
   );
