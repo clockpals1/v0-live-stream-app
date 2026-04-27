@@ -31,15 +31,43 @@ import {
  * page — every counter we need is one Supabase query away.
  */
 export default async function StudioOverviewPage() {
+  try {
+    return await renderStudioOverview();
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest?: unknown }).digest === "string" &&
+      ((err as { digest: string }).digest.startsWith("NEXT_REDIRECT") ||
+        (err as { digest: string }).digest === "NEXT_NOT_FOUND")
+    ) {
+      throw err;
+    }
+    const e = err as Error;
+    console.error(
+      "[studio/page] uncaught render error:",
+      JSON.stringify({
+        name: e?.name,
+        message: e?.message,
+        stack: e?.stack,
+      }),
+    );
+    return (
+      <main className="mx-auto max-w-3xl px-5 py-14 sm:px-8">
+        <h1 className="text-lg font-semibold">Studio is having trouble</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {e?.message || "Unknown error"}
+        </p>
+      </main>
+    );
+  }
+}
+
+async function renderStudioOverview() {
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData?.user;
-  // Defensive bail. The layout already redirects unauth users to
-  // /auth/login, but server components in App Router render in
-  // parallel with their layout — if we read user.id on undefined here
-  // we throw a TypeError that races the redirect's NEXT_REDIRECT and
-  // surfaces to the global error boundary as "Something broke".
-  // Returning null lets Next.js settle on the layout's redirect cleanly.
   if (!user) return null;
 
   const { data: host } = await supabase
@@ -53,22 +81,38 @@ export default async function StudioOverviewPage() {
 
   // Counts. Each wrapped individually so the page still renders if a
   // table is missing (e.g. migration 025 not applied yet — replay_
-  // publications won't exist on first deploy). The cost of a failed
-  // query is tiny; the cost of a 500 on the studio landing is large.
+  // publications won't exist on first deploy). Supabase's PostgrestBuilder
+  // is PromiseLike, not Promise, so we can't .catch() it directly —
+  // wrap in async helpers instead.
+  const hostId = host?.id ?? "";
+  const safeArchiveCount = async () => {
+    try {
+      const { count } = await supabase
+        .from("stream_archives")
+        .select("id", { count: "exact", head: true })
+        .eq("host_id", hostId);
+      return count ?? 0;
+    } catch (err) {
+      console.warn("[studio/page] archive count failed:", err);
+      return 0;
+    }
+  };
+  const safePublishedCount = async () => {
+    try {
+      const { count } = await supabase
+        .from("replay_publications")
+        .select("id", { count: "exact", head: true })
+        .eq("host_id", hostId)
+        .eq("is_published", true);
+      return count ?? 0;
+    } catch (err) {
+      console.warn("[studio/page] published count failed:", err);
+      return 0;
+    }
+  };
   const [archiveCount, publishedCount] = await Promise.all([
-    supabase
-      .from("stream_archives")
-      .select("id", { count: "exact", head: true })
-      .eq("host_id", host?.id ?? "")
-      .then((r) => r.count ?? 0)
-      .catch(() => 0),
-    supabase
-      .from("replay_publications")
-      .select("id", { count: "exact", head: true })
-      .eq("host_id", host?.id ?? "")
-      .eq("is_published", true)
-      .then((r) => r.count ?? 0)
-      .catch(() => 0),
+    safeArchiveCount(),
+    safePublishedCount(),
   ]);
 
   const tiles = [

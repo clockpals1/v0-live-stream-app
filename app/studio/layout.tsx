@@ -29,10 +29,73 @@ export default async function StudioLayout({
 }: {
   children: React.ReactNode;
 }) {
+  try {
+    return await renderStudioLayout({ children });
+  } catch (err) {
+    // Don't swallow NEXT_REDIRECT — it's how Next.js implements
+    // server-side redirects (throws a typed control-flow signal).
+    if (
+      err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest?: unknown }).digest === "string" &&
+      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
+    ) {
+      throw err;
+    }
+    // Same for not-found.
+    if (
+      err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      (err as { digest?: unknown }).digest === "NEXT_NOT_FOUND"
+    ) {
+      throw err;
+    }
+    // Anything else: log full detail (visible via `wrangler tail`) and
+    // render a friendly inline error rather than collapsing the whole
+    // app into the global-error boundary.
+    const e = err as Error;
+    console.error(
+      "[studio/layout] uncaught render error:",
+      JSON.stringify({
+        name: e?.name,
+        message: e?.message,
+        stack: e?.stack,
+        cause: (e as { cause?: unknown })?.cause,
+      }),
+    );
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-lg font-semibold">Studio is having trouble</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {e?.message || "Unknown error"}
+          </p>
+          <Link
+            href="https://live.isunday.me/host/dashboard"
+            className="mt-4 inline-block rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+          >
+            Back to live dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+}
+
+async function renderStudioLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const supabase = await createClient();
 
   // Auth
-  const { data: userData } = await supabase.auth.getUser();
+  const { data: userData, error: authErr } = await supabase.auth.getUser();
+  if (authErr) {
+    console.error("[studio/layout] auth.getUser error:", authErr);
+  }
   const user = userData?.user;
   if (!user) {
     redirect("/auth/login");

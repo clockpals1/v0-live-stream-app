@@ -1859,3 +1859,187 @@ GET http://studio.isunday.me/ - Ok @ 2026-04-26, 10:57:15 p.m.
 GET http://studio.isunday.me/ - Ok @ 2026-04-26, 10:57:36 p.m.
   (error) TypeError: Cannot read properties of null (reading 'id')
 GET https://studio.isunday.me/auth/login - Ok @ 2026-04-26, 10:57:44 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:59:05 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/auth/login - Ok @ 2026-04-26, 10:59:07 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 10:59:09 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET http://studio.isunday.me/auth/login - Ok @ 2026-04-26, 11:00:14 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:00:40 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:01:38 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:02:00 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:02:42 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:02:47 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://live.isunday.me/host/dashboard?_rsc=1rtkn - Ok @ 2026-04-26, 11:03:26 p.m.
+GET https://live.isunday.me/host/dashboard - Ok @ 2026-04-26, 11:03:27 p.m.
+GET https://live.isunday.me/api/host/integrations/youtube/status - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/host/settings?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/host/stream/AP1F5HMR?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/admin?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/host/settings?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/admin?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/host/stream/AP1F5HMR?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/api/insider/subscribers - Ok @ 2026-04-26, 11:03:28 p.m.
+GET https://live.isunday.me/?_rsc=1l9fv - Ok @ 2026-04-26, 11:03:29 p.m.
+GET https://live.isunday.me/?_rsc=1vsmb - Ok @ 2026-04-26, 11:03:29 p.m.
+GET https://live.isunday.me/?_rsc=g7vf3 - Ok @ 2026-04-26, 11:03:29 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:03:30 p.m.
+GET https://studio.isunday.me/auth/login - Ok @ 2026-04-26, 11:03:30 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=ne5al - Ok @ 2026-04-26, 11:03:31 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=ne5al - Ok @ 2026-04-26, 11:03:31 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=1uor5 - Ok @ 2026-04-26, 11:03:31 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=ay3vs - Ok @ 2026-04-26, 11:03:31 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=1qqfn - Ok @ 2026-04-26, 11:03:31 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=1qqfn - Ok @ 2026-04-26, 11:03:32 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=11vsv - Ok @ 2026-04-26, 11:03:32 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=7azmt - Ok @ 2026-04-26, 11:03:32 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=uxilk - Ok @ 2026-04-26, 11:03:32 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=1ez2h - Ok @ 2026-04-26, 11:03:32 p.m.
+GET https://studio.isunday.me/host/dashboard?_rsc=eocvw - Ok @ 2026-04-26, 11:03:36 p.m.
+OPTIONS https://live.isunday.me/host/dashboard - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/host/dashboard?_rsc=61gpq - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=1uor5 - Ok @ 2026-04-26, 11:03:36 p.m.
+OPTIONS https://live.isunday.me/host/dashboard - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=ay3vs - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=1qqfn - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=7azmt - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=11vsv - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/host/dashboard - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/signup?_rsc=1r34m - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=1r34m - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=1pn8p - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=3hghn - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://studio.isunday.me/auth/forgot-password?_rsc=vb60e - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://live.isunday.me/host/dashboard - Ok @ 2026-04-26, 11:03:36 p.m.
+GET https://live.isunday.me/host/stream/AP1F5HMR?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/host/settings?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/host/stream/AP1F5HMR?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/admin?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/host/settings?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/?_rsc=1vsmb - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/?_rsc=1l9fv - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/api/host/integrations/youtube/status - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/admin?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/api/insider/subscribers - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://live.isunday.me/?_rsc=g7vf3 - Ok @ 2026-04-26, 11:03:37 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:03:39 p.m.
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+  (error) Error: Functions cannot be passed directly to Client Components unless you explicitly expose it by marking it with "use server". Or maybe you meant to call this function rather than return it.
+  {$$typeof: ..., render: function, displayName: ...}
+                          ^^^^^^^^
+GET https://studio.isunday.me/favicon.ico - Ok @ 2026-04-26, 11:03:40 p.m.
+GET https://live.isunday.me/host/dashboard - Ok @ 2026-04-26, 11:03:43 p.m.
+GET https://live.isunday.me/host/settings?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/host/stream/AP1F5HMR?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/admin?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/?_rsc=n6ft5 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/api/insider/subscribers - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/api/host/integrations/youtube/status - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/host/settings?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/admin?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/host/stream/AP1F5HMR?_rsc=lhcw1 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/?_rsc=1vsmb - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/?_rsc=1l9fv - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://live.isunday.me/?_rsc=g7vf3 - Ok @ 2026-04-26, 11:03:44 p.m.
+GET https://studio.isunday.me/ - Ok @ 2026-04-26, 11:04:36 p.m.
