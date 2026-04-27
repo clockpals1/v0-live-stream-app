@@ -30,7 +30,10 @@ import {
   MessageSquare,
   Eye,
   Loader2,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   publishReplay,
   unpublishReplay,
@@ -104,7 +107,10 @@ function ReplayRow({
   canPublish: boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const pub = replay.publication;
   const displayTitle = pub?.title || replay.streamTitle;
@@ -139,6 +145,35 @@ function ReplayRow({
         toast.error(res.message);
       }
     });
+  }
+
+  // Hard-delete the R2 object and soft-delete the DB row. This calls
+  // the existing DELETE /api/streams/[id]/archive/[id] endpoint which
+  // does ownership + admin checks server-side. We refresh the route
+  // afterwards so the deleted card disappears immediately — the row is
+  // soft-deleted (status='deleted') and listReplaysForHost filters it
+  // out via deleted_at IS NULL.
+  async function handleDelete() {
+    if (!replay.streamId) {
+      toast.error("This archive is missing its stream link — cannot delete.");
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `/api/streams/${replay.streamId}/archive/${replay.archiveId}`,
+        { method: "DELETE", headers: { "Content-Type": "application/json" } },
+      );
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      toast.success("Recording deleted.");
+      setConfirmingDelete(false);
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't delete recording.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -220,20 +255,32 @@ function ReplayRow({
           {/* Actions */}
           <div className="flex shrink-0 flex-col items-end gap-1.5">
             {!pub?.isPublished ? (
-              <Button
-                size="sm"
-                onClick={() => setEditing(true)}
-                disabled={!canPublish || replay.archiveExpired || pending}
-              >
-                {pending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <>
-                    <Globe className="mr-1.5 h-3.5 w-3.5" />
-                    Publish
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={() => setEditing(true)}
+                  disabled={!canPublish || replay.archiveExpired || pending}
+                >
+                  {pending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <Globe className="mr-1.5 h-3.5 w-3.5" />
+                      Publish
+                    </>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={pending || deleting}
+                  title="Delete this recording permanently"
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             ) : (
               <div className="flex gap-1.5">
                 <Button
@@ -271,6 +318,16 @@ function ReplayRow({
                 >
                   <EyeOff className="h-3.5 w-3.5" />
                 </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={pending || deleting}
+                  title="Delete this recording permanently"
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             )}
             {replay.archiveUrl && (
@@ -292,6 +349,65 @@ function ReplayRow({
         onClose={() => setEditing(false)}
         replay={replay}
       />
+
+      {/* Destructive-action confirmation. Modal because the R2 delete is
+          irreversible — we don't want a fat-finger to nuke a recording. */}
+      <Dialog
+        open={confirmingDelete}
+        onOpenChange={(o) => !deleting && setConfirmingDelete(o)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete this recording?
+            </DialogTitle>
+            <DialogDescription>
+              This permanently removes the video file from cloud storage.
+              {pub?.isPublished
+                ? " The public replay page will also stop working."
+                : ""}
+              <br />
+              <span className="mt-2 inline-block font-medium text-foreground">
+                {displayTitle}
+              </span>
+              {sizeMB && (
+                <span className="text-muted-foreground"> · {sizeMB}</span>
+              )}
+              <br />
+              <span className="mt-2 inline-block text-xs">
+                This cannot be undone.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete recording
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
