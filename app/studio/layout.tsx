@@ -133,7 +133,7 @@ async function renderStudioLayout({
   }));
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background lg:flex-row">
       <StudioSidebar
         items={items}
         hostName={host.display_name || host.email}

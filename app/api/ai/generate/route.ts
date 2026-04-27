@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled, featureQuota } from "@/lib/billing/plans";
-import { generateText, getAvailableProvider } from "@/lib/ai/provider";
+import { generateText, getAvailableTextProvider } from "@/lib/ai/provider";
 import { getPromptForTask, type TaskType } from "@/lib/ai/prompts";
 
 /**
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const provider = (providerOverride as "groq" | "nvidia_nim" | undefined) ?? getAvailableProvider();
+  const provider = (providerOverride as "groq" | "nvidia_nim" | undefined) ?? await getAvailableTextProvider();
   if (!provider) {
     return NextResponse.json(
       { error: "No AI provider is configured. Set GROQ_API_KEY or NVIDIA_API_KEY." },

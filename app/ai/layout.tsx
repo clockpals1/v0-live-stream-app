@@ -91,7 +91,7 @@ async function renderAiLayout({ children }: { children: React.ReactNode }) {
   }));
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background lg:flex-row">
       <AiSidebar
         items={items}
         hostName={host.display_name || host.email}

@@ -45,6 +45,7 @@ import {
   Settings,
   Sparkles,
   Zap,
+  Film,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -1071,7 +1072,7 @@ export function DashboardContent({
                                   <MoreVertical className="w-3.5 h-3.5" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuContent align="end" className="w-52">
                                 <DropdownMenuItem onClick={() => shareStream(stream)}>
                                   <Share2 className="w-3.5 h-3.5 mr-2" />Share stream
                                 </DropdownMenuItem>
@@ -1087,6 +1088,21 @@ export function DashboardContent({
                                 <DropdownMenuItem onClick={() => setManageOperatorsFor({ id: stream.id, title: stream.title })}>
                                   <ShieldCheck className="w-3.5 h-3.5 mr-2 text-amber-500" />Manage operators
                                 </DropdownMenuItem>
+                                {stream.status === "ended" && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem asChild>
+                                      <a href="https://studio.isunday.me/replay">
+                                        <Film className="w-3.5 h-3.5 mr-2 text-violet-500" />View in Studio
+                                      </a>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <a href="https://ai.isunday.me">
+                                        <Sparkles className="w-3.5 h-3.5 mr-2 text-violet-500" />Repurpose with AI
+                                      </a>
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
                                 {stream.recording_url && (
                                   <>
                                     <DropdownMenuSeparator />

@@ -16,6 +16,7 @@ import {
   Radio,
   CalendarClock,
   CircleDot,
+  Zap,
 } from "lucide-react";
 
 /**
@@ -215,6 +216,44 @@ async function renderStudioOverview() {
         {tiles.map((tile) => (
           <ModuleTile key={tile.href} {...tile} />
         ))}
+      </div>
+
+      {/* ─── AI Hub discovery strip ──────────────────────────────────── */}
+      <div className="mt-8 rounded-xl border border-violet-200/60 bg-gradient-to-r from-violet-500/5 to-fuchsia-500/5 p-5 dark:border-violet-800/30">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-500 text-white">
+              <Zap className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold">AI Automation Hub</h3>
+              <p className="mt-0.5 max-w-lg text-xs text-muted-foreground">
+                Turn your streams into content — generate scripts, captions,
+                thumbnails, social posts, and affiliate campaigns, then
+                schedule them across platforms automatically.
+              </p>
+            </div>
+          </div>
+          <a
+            href="https://ai.isunday.me"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-700"
+          >
+            Open AI Hub
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {([
+            { label: "AI Studio", desc: "Scripts, captions, and titles from your content" },
+            { label: "Automation", desc: "Daily ideas and weekly summaries on autopilot" },
+            { label: "Publishing Hub", desc: "Schedule posts across YouTube, TikTok, Instagram" },
+          ] as const).map(({ label, desc }) => (
+            <div key={label} className="rounded-lg bg-background/60 px-3 py-2.5">
+              <div className="text-[11px] font-semibold text-violet-700 dark:text-violet-400">{label}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{desc}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </main>
   );
