@@ -876,6 +876,19 @@ export function useHostStream({
     return new Blob(recordedChunksRef.current, { type: "video/webm" });
   }, []);
 
+  /**
+   * Snapshot of every active outbound peer connection. Stable function
+   * identity so consumers (e.g. useStreamHealth) can include it in
+   * effect deps without re-subscribing every render.
+   *
+   * Returns the live array — not a copy of the Map keys — so the
+   * health poll always sees the current set even when viewers join
+   * or leave between ticks.
+   */
+  const getPeerConnections = useCallback((): RTCPeerConnection[] => {
+    return Array.from(viewersRef.current.values()).map((v) => v.peerConnection);
+  }, []);
+
   return {
     mediaStream: mediaStreamRef.current,
     initializeMedia,
@@ -903,5 +916,6 @@ export function useHostStream({
     controlRoomMode,
     downloadRecording,
     getRecordingBlob,
+    getPeerConnections,
   };
 }

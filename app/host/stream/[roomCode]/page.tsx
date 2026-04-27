@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { HostStreamInterface } from "@/components/host/stream-interface";
 import { resolveRole, resolveStreamAccess } from "@/lib/rbac";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 
 interface Props {
   params: Promise<{ roomCode: string }>;
@@ -78,11 +79,18 @@ export default async function HostStreamPage({ params }: Props) {
     redirect("/host/dashboard");
   }
 
+  // Resolve the host's effective plan once on the server so the
+  // Branding deck can render plan-gated cards synchronously without
+  // a client fetch round-trip. Falls through to null if entitlements
+  // are unavailable — every premium card defaults to locked.
+  const effective = await getEffectivePlan(supabase, user.id);
+
   return (
     <HostStreamInterface
       stream={stream}
       host={host}
       accessMode={access}
+      effectivePlan={effective.plan}
     />
   );
 }

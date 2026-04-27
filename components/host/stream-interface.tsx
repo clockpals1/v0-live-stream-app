@@ -1,78 +1,72 @@
 "use client";
 
+/**
+ * Host live page — Live Control Room.
+ *
+ * This file is now the THIN orchestrator. It owns:
+ *   - WebRTC plumbing wiring (useHostStream, useCohostReceiver, useStreamHealth)
+ *   - Section-replay recorder hook
+ *   - Producer state hook (useControlRoomState)
+ *   - Chat broadcast subscription, including operator-command + mic-state echo
+ *   - The 3-zone Live Control Room layout
+ *
+ * Producer modules (overlay / ticker / music / media / branding / health)
+ * live in `components/host/control-room/` and read state through props.
+ *
+ * Hand-off to OperatorStreamInterface (operator/cohost surfaces) is unchanged.
+ */
+
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useHostStream } from "@/lib/webrtc/use-host-stream";
 import { useCohostReceiver } from "@/lib/webrtc/use-cohost-receiver";
+import { useStreamHealth } from "@/lib/webrtc/use-stream-health";
 import { playNotificationSound, vibrateDevice } from "@/lib/utils/notification";
-import { MAX_VIEWERS } from "@/lib/webrtc/config";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DirectorPanel } from "@/components/host/director-panel";
-import { StreamOverlay } from "@/components/stream/stream-overlay";
-import { OverlayImageUpload } from "@/components/host/overlay-image-upload";
-import { OverlayMusic, type OverlayMusicHandle } from "@/components/host/overlay-music";
 import { OperatorStreamInterface } from "@/components/host/operator-stream-interface";
-import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { PrivateMessagesPanel } from "@/components/stream/private-messages-panel";
-import type { StreamAccess } from "@/lib/rbac";
+import { DirectorPanel } from "@/components/host/director-panel";
+import { PostStreamDialog } from "@/components/host/post-stream-dialog";
 import { resolveRole } from "@/lib/rbac";
+import type { StreamAccess } from "@/lib/rbac";
 import {
   OPERATOR_COMMAND_EVENT,
   type OperatorCommandEnvelope,
 } from "@/lib/stream-ops";
-import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
-import { SlideshowPanel } from "@/components/host/slideshow-panel";
-import { PostStreamDialog } from "@/components/host/post-stream-dialog";
-// ─── Section-replay subsystem (feature-flag-gated, additive only) ──────────
-// All of the imports below are NO-OP costs when REPLAY_ENABLED is false:
-// the hook returns an empty object, the panel never renders. We import them
-// unconditionally so the bundle is self-contained and there is no dynamic
-// import failure mode at runtime.
+
+// Replay subsystem (feature-flag-gated, additive only)
 import { ReplayPanel } from "@/components/host/replay-panel";
 import { useSectionRecorder } from "@/lib/replay/use-section-recorder";
 import { REPLAY_ENABLED } from "@/lib/replay/config";
-import {
-  Radio,
-  Video,
-  VideoOff,
-  Mic,
-  MicOff,
-  Users,
-  Copy,
-  ArrowLeft,
-  Circle,
-  Square,
-  Send,
-  MessageCircle,
-  Download,
-  CheckCircle2,
-  AlertCircle,
-  Wifi,
-  WifiOff,
-  SwitchCamera,
-  RefreshCw,
-  Smartphone,
-  Settings,
-  Camera,
-  WifiOff as DataSaver,
-  Pause,
-  Play,
-  Megaphone,
-  Eye,
-  EyeOff,
-  Tv,
-  Lock,
-  Film,
-} from "lucide-react";
 
+// Control Room modules
+import { useControlRoomState } from "@/lib/control-room/use-control-room-state";
+import { ControlRoomTopbar } from "@/components/host/control-room/topbar";
+import { ProgramPreview } from "@/components/host/control-room/program-preview";
+import { StageActions } from "@/components/host/control-room/stage-actions";
+import { PostStreamBanner } from "@/components/host/control-room/post-stream-banner";
+import { ScenesRail } from "@/components/host/control-room/scenes-rail";
+import { GuestsRail } from "@/components/host/control-room/guests-rail";
+import { CommsTabs } from "@/components/host/control-room/comms-tabs";
+import { ProducerDeck } from "@/components/host/control-room/producer-deck";
+import { OverlayDeck } from "@/components/host/control-room/decks/overlay-deck";
+import { TickerDeck } from "@/components/host/control-room/decks/ticker-deck";
+import { MusicDeck } from "@/components/host/control-room/decks/music-deck";
+import { MediaDeck } from "@/components/host/control-room/decks/media-deck";
+import { BrandingDeck } from "@/components/host/control-room/decks/branding-deck";
+import { HealthDeck } from "@/components/host/control-room/decks/health-deck";
+import type { OverlayMusicHandle } from "@/components/host/overlay-music";
+import type { BillingPlan } from "@/lib/billing/plans";
+
+import { AlertCircle, Copy, RefreshCw, Send, Users } from "lucide-react";
+
+// ── Types ─────────────────────────────────────────────────────────────────
 interface Stream {
   id: string;
   room_code: string;
@@ -103,24 +97,20 @@ interface StreamParticipant {
   slot_label: string;
   status: "invited" | "ready" | "live" | "offline";
   host_id: string;
-  host?: {
-    display_name: string | null;
-    email: string;
-  };
+  host?: { display_name: string | null; email: string };
 }
 
 interface HostStreamInterfaceProps {
   stream: Stream;
   host: Host;
   accessMode?: StreamAccess;
+  /** Resolved entitlements — passed from the page so plan-gated cards
+   *  in the Branding deck render synchronously without a client fetch. */
+  effectivePlan?: BillingPlan | null;
 }
 
+// ── Dispatcher ────────────────────────────────────────────────────────────
 export function HostStreamInterface(props: HostStreamInterfaceProps) {
-  // Dispatch before any hook call so the two render paths have totally
-  // independent hook trees. This matters because OwnerStreamInterface
-  // instantiates useHostStream (listens for viewer-join and creates PCs) —
-  // an operator or cohost rendering the same hook on a different browser
-  // would also respond to viewer-join and fight the real host.
   const accessMode = props.accessMode ?? "owner";
   if (accessMode === "operator" || accessMode === "cohost") {
     return (
@@ -131,85 +121,72 @@ export function HostStreamInterface(props: HostStreamInterfaceProps) {
       />
     );
   }
-  return <OwnerStreamInterface stream={props.stream} host={props.host} />;
+  return (
+    <OwnerStreamInterface
+      stream={props.stream}
+      host={props.host}
+      effectivePlan={props.effectivePlan ?? null}
+    />
+  );
 }
 
+// ── Owner / Live Control Room ─────────────────────────────────────────────
 function OwnerStreamInterface({
   stream: initialStream,
   host,
+  effectivePlan,
 }: {
   stream: Stream;
   host: Host;
+  effectivePlan: BillingPlan | null;
 }) {
   const [stream, setStream] = useState(initialStream);
-  const [copied, setCopied] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [mediaInitialized, setMediaInitialized] = useState(false);
-  const [cameraFacingMode, setCameraFacingMode] = useState<'user' | 'environment'>('environment');
+  const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("environment");
   const [isSwitching, setIsSwitching] = useState(false);
-  const [videoQuality, setVideoQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
+  const [videoQuality, setVideoQuality] = useState<"auto" | "high" | "medium" | "low">("auto");
   const [isDataSaver, setIsDataSaver] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [activeParticipantId, setActiveParticipantId] = useState<string | null>(
-    (initialStream as any).active_participant_id ?? null
+    (initialStream as any).active_participant_id ?? null,
   );
   const isStreamOwner = host.id === initialStream.host_id;
+  const isAdmin = resolveRole(host) === "admin";
 
   const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [cohostParticipants, setCohostParticipants] = useState<StreamParticipant[]>([]);
 
-  // ---- Overlay state (broadcast to all viewers over existing chat channel) ----
-  const [overlayActive, setOverlayActive] = useState(false);
-  const [overlayMessage, setOverlayMessage] = useState("");
-  const [overlayBg, setOverlayBg] = useState<"dark" | "light" | "branded">("dark");
-  const [overlayImageUrl, setOverlayImageUrl] = useState("");
-
-  // ---- Overlay music state (persisted; track replacement done in-hook) ----
-  const [overlayMusicUrl, setOverlayMusicUrl] = useState("");
-  const [overlayMusicState, setOverlayMusicState] = useState<{
-    active: boolean;
-    volume: number;
-    mixWithMic: boolean;
-  }>({ active: false, volume: 0.8, mixWithMic: true });
-
-  // ---- Post-stream archive dialog ----
-  // Opens once handleEndStream resolves with a recording. The blob is
-  // pulled from the host hook via getRecordingBlob() at the moment we
-  // open the dialog, so the user can click "Save to cloud" without us
-  // having to keep the blob in component state.
+  // Post-stream archive dialog
   const [postStreamOpen, setPostStreamOpen] = useState(false);
   const [postStreamBlob, setPostStreamBlob] = useState<Blob | null>(null);
   const [postStreamDownloaded, setPostStreamDownloaded] = useState(false);
-
-  // ---- Ticker state (scrolling news-style crawl below the video) ----
-  const [tickerActive, setTickerActive] = useState(false);
-  const [tickerMessage, setTickerMessage] = useState("");
-  const [tickerSpeed, setTickerSpeed] = useState<TickerSpeed>("normal");
-  const [tickerStyle, setTickerStyle] = useState<TickerStyle>("default");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  // Tab state (right rail). Controlled so the post-stream CTA can jump
+  // the host to the Replay tab.
   const activeTabRef = useRef("chat");
-  // Controlled tab state. Kept in sync with activeTabRef so existing reads
-  // (e.g. unread-counter gating in the chat broadcast handler) keep working,
-  // but exposed as state so we can programmatically jump to the Replay tab
-  // from the post-stream CTA below the player.
   const [activeTab, setActiveTab] = useState<string>("chat");
-  const replayTabRef = useRef<HTMLDivElement>(null);
+  const replayCardRef = useRef<HTMLDivElement>(null);
+  const handleTabChange = (v: string) => {
+    setActiveTab(v);
+    activeTabRef.current = v;
+    if (v === "chat") setUnreadCount(0);
+  };
   const jumpToReplayTab = () => {
-    setActiveTab("replay");
-    activeTabRef.current = "replay";
-    // Scroll the right-rail into view on mobile/narrow screens where the
-    // tabs sit below the player rather than beside it.
+    handleTabChange("replay");
     requestAnimationFrame(() => {
-      replayTabRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      replayCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
+
   const chatChannelRef = useRef<any>(null);
   const overlayMusicRef = useRef<OverlayMusicHandle>(null);
 
@@ -240,32 +217,27 @@ function OwnerStreamInterface({
     controlRoomMode,
     downloadRecording,
     getRecordingBlob,
+    getPeerConnections,
   } = useHostStream({
     streamId: stream.id,
     roomCode: stream.room_code,
-    // Control-room by default: admin can manage/monitor without auto-publishing
-    // their camera. Host explicitly clicks "Go On-Air" to publish.
     controlRoomMode: true,
   });
 
-  // ─── Section-replay recorder (feature-flag-gated, parallel pipeline) ────
-  // This hook runs its own MediaRecorder against the same mediaStream. When
-  // REPLAY_ENABLED is false it short-circuits to a no-op, so the live path
-  // is bit-identical to before this file was touched. Failures in the
-  // recorder are isolated and never surface to the WebRTC pipeline.
+  // ── Stream-health poll (consumes peer connections from useHostStream) ──
+  const health = useStreamHealth(getPeerConnections, isStreaming);
+
+  // ── Section-replay recorder ────────────────────────────────────────────
   const sectionRecorder = useSectionRecorder({
     enabled: REPLAY_ENABLED,
     mediaStream: mediaStream ?? null,
     isLive: isStreaming,
   });
 
-  // Fallback receiver: connects to the active co-host when the warm pool hasn't
-  // pre-connected yet (race condition where admin switches before warm-up finishes).
+  // ── Co-host receiver fallback ──────────────────────────────────────────
   const coHostFallbackStream = useCohostReceiver(
-    isStreamOwner ? activeParticipantId : null
+    isStreamOwner ? activeParticipantId : null,
   );
-
-  // Relay fallback stream when warm pool missed and receiver connects
   useEffect(() => {
     if (!isStreamOwner) return;
     if (activeParticipantId && coHostFallbackStream) {
@@ -275,68 +247,58 @@ function OwnerStreamInterface({
     }
   }, [coHostFallbackStream, activeParticipantId, isStreamOwner, relayStream]);
 
-  const shareLink =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/watch/${stream.room_code}`
-      : "";
+  // ── Producer state — single source of truth for overlay/ticker/music
+  //    /scenes/branding. Hides persistence + broadcast behind setters.
+  const cr = useControlRoomState({
+    streamId: stream.id,
+    supabase,
+    chatChannelRef,
+  });
 
-  // Detect mobile device
+  // ── Mobile detection ───────────────────────────────────────────────────
   useEffect(() => {
-    const checkMobile = () => {
-      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      setIsMobile(isMobileDevice);
+    const check = () => {
+      const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent,
+      );
+      setIsMobile(mobile);
     };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
-  // In control-room mode we DO NOT call initializeMedia() on mount — that would
-  // request camera/mic permission before the host has decided to go on-air.
-  // Instead we flag the page as "ready" immediately and let the host decide via
-  // the Go-On-Air button. Legacy mode preserves the auto-init behavior.
+  // ── Media init (control-room mode does not auto-prompt camera) ─────────
   useEffect(() => {
     if (controlRoomMode) {
       setMediaInitialized(true);
-      // Resume a previously-live stream without forcing the camera open.
-      if (stream.status === 'live' && !isStreaming) {
-        console.log('[Host] Stream was live, resuming in control-room mode...');
+      if (stream.status === "live" && !isStreaming) {
         setTimeout(() => { startStream(); }, 500);
       }
       return;
     }
-    const init = async () => {
+    (async () => {
       try {
-        const mediaStreamResult = await initializeMedia('environment');
-        if (videoRef.current && mediaStreamResult) {
-          videoRef.current.srcObject = mediaStreamResult;
-        }
+        const result = await initializeMedia("environment");
+        if (videoRef.current && result) videoRef.current.srcObject = result;
         setMediaInitialized(true);
-        if (stream.status === 'live' && !isStreaming) {
-          console.log('[Host] Stream was live, resuming automatically...');
+        if (stream.status === "live" && !isStreaming) {
           setTimeout(() => { startStream(); }, 1000);
         }
       } catch (err) {
-        console.error("[v0] Failed to initialize media:", err);
+        console.error("[host] initializeMedia failed:", err);
       }
-    };
-    init();
+    })();
   }, [controlRoomMode, initializeMedia, stream.status, isStreaming, startStream]);
 
-  // Drive the host's preview video element with whatever viewers are currently
-  // seeing — same priority used on the server side (syncAllViewerTracks):
-  //   1. Active co-host (coHostFallbackStream) when a co-host is on-air
-  //   2. Host's own camera when host is on-air
-  //   3. null (preview stays black until something goes on-air)
-  // This is what gives the host an accurate "program out" monitor in control-room
-  // mode instead of showing a stale local camera that isn't being published.
+  // ── Drive preview video element with the same priority used server-side
+  //    for viewers: relay (co-host) > host-on-air > null.
   useEffect(() => {
     if (!videoRef.current) return;
     const next =
-      (activeParticipantId && coHostFallbackStream)
+      activeParticipantId && coHostFallbackStream
         ? coHostFallbackStream
-        : (isHostOnAir && mediaStream)
+        : isHostOnAir && mediaStream
           ? mediaStream
           : null;
     if (videoRef.current.srcObject !== next) {
@@ -344,7 +306,7 @@ function OwnerStreamInterface({
     }
   }, [mediaStream, coHostFallbackStream, activeParticipantId, isHostOnAir]);
 
-  // Real-time chat via Broadcast (reliable; no Supabase publication config needed)
+  // ── Chat broadcast + operator commands + initial fetch ─────────────────
   useEffect(() => {
     const hostName = host.display_name || "Host";
 
@@ -355,36 +317,35 @@ function OwnerStreamInterface({
         .eq("stream_id", stream.id)
         .order("created_at", { ascending: true });
       if (data) {
-        // Merge: keep any broadcast-arrived messages that aren't in DB yet
         setMessages((prev) => {
-          const ids = new Set(data.map((m: ChatMessage) => m.id));
+          const ids = new Set((data as ChatMessage[]).map((m) => m.id));
           const extras = prev.filter((m) => !ids.has(m.id));
-          return [...data, ...extras].sort(
-            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          return [...(data as ChatMessage[]), ...extras].sort(
+            (a, b) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
           );
         });
       }
     };
 
     const channel = supabase
-      .channel(`chat-room-${stream.id}`, {
-        config: { broadcast: { self: true } },
-      })
-      .on("broadcast", { event: "chat-message" }, ({ payload }: { payload: any }) => {
-        const msg = payload as ChatMessage;
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-        // Notify host only for others' messages when chat tab is not active
-        if (msg.sender_name !== hostName && activeTabRef.current !== "chat") {
-          setUnreadCount((c) => c + 1);
-          playNotificationSound();
-          vibrateDevice();
-        }
-      })
-      // Remote commands from operators / admins. Only the stream owner's
-      // browser ever executes these — the command just reflects an ops request.
+      .channel(`chat-room-${stream.id}`, { config: { broadcast: { self: true } } })
+      .on(
+        "broadcast",
+        { event: "chat-message" },
+        ({ payload }: { payload: any }) => {
+          const msg = payload as ChatMessage;
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
+          if (msg.sender_name !== hostName && activeTabRef.current !== "chat") {
+            setUnreadCount((c) => c + 1);
+            playNotificationSound();
+            vibrateDevice();
+          }
+        },
+      )
       .on(
         "broadcast",
         { event: OPERATOR_COMMAND_EVENT },
@@ -396,9 +357,7 @@ function OwnerStreamInterface({
           try {
             if (c.op === "mic-toggle") {
               const audioTrack = mediaStream?.getAudioTracks()?.[0];
-              if (audioTrack && audioTrack.enabled !== c.enable) {
-                toggleAudio();
-              }
+              if (audioTrack && audioTrack.enabled !== c.enable) toggleAudio();
               toast.info(`${by} ${c.enable ? "unmuted" : "muted"} your microphone`);
             } else if (c.op === "music-play") {
               overlayMusicRef.current?.play();
@@ -424,7 +383,6 @@ function OwnerStreamInterface({
       });
 
     chatChannelRef.current = channel;
-
     return () => {
       supabase.removeChannel(channel);
       chatChannelRef.current = null;
@@ -432,9 +390,7 @@ function OwnerStreamInterface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.id, host.display_name]);
 
-  // Whenever our own mic state flips (remote-triggered or clicked locally),
-  // echo the authoritative value to every listener on the channel so the
-  // operator panel shows reality instead of its last optimistic guess.
+  // ── Mic-state echo ─────────────────────────────────────────────────────
   useEffect(() => {
     const ch = chatChannelRef.current;
     if (!ch) return;
@@ -449,224 +405,7 @@ function OwnerStreamInterface({
     }
   }, [audioEnabled]);
 
-  // Load existing overlay + ticker state from DB on mount (in case host refreshed while active)
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from("streams")
-        .select(
-          "overlay_active, overlay_message, overlay_background, overlay_image_url, overlay_music_url, overlay_music_volume, overlay_music_mix_mic, ticker_active, ticker_message, ticker_speed, ticker_style"
-        )
-        .eq("id", stream.id)
-        .single();
-      if (data) {
-        const d = data as any;
-        setOverlayActive(!!d.overlay_active);
-        setOverlayMessage(d.overlay_message ?? "");
-        const bg = d.overlay_background;
-        if (bg === "dark" || bg === "light" || bg === "branded") setOverlayBg(bg);
-        setOverlayImageUrl(d.overlay_image_url ?? "");
-        setOverlayMusicUrl(d.overlay_music_url ?? "");
-        setOverlayMusicState({
-          active: false, // never auto-resume music — requires user gesture
-          volume: typeof d.overlay_music_volume === "number" ? d.overlay_music_volume : 0.8,
-          mixWithMic: d.overlay_music_mix_mic !== false,
-        });
-
-        setTickerActive(!!d.ticker_active);
-        setTickerMessage(d.ticker_message ?? "");
-        const sp = d.ticker_speed;
-        if (sp === "slow" || sp === "normal" || sp === "fast") setTickerSpeed(sp);
-        const st = d.ticker_style;
-        if (st === "default" || st === "urgent" || st === "info") setTickerStyle(st);
-      }
-    })();
-  }, [stream.id, supabase]);
-
-  // Broadcast + persist overlay state. Broadcast gives viewers instant updates;
-  // DB upsert ensures mid-stream joiners see the current overlay on their initial fetch.
-  const pushOverlayState = async (next: {
-    active: boolean;
-    message: string;
-    background: "dark" | "light" | "branded";
-    imageUrl: string;
-  }) => {
-    const payload = {
-      active: next.active,
-      message: next.message.slice(0, 120),
-      background: next.background,
-      imageUrl: next.imageUrl,
-    };
-    try {
-      chatChannelRef.current?.send({
-        type: "broadcast",
-        event: "stream-overlay",
-        payload,
-      });
-    } catch (err) {
-      console.error("[Host] Failed to broadcast overlay:", err);
-    }
-    try {
-      await supabase
-        .from("streams")
-        .update({
-          overlay_active: payload.active,
-          overlay_message: payload.message,
-          overlay_background: payload.background,
-          overlay_image_url: payload.imageUrl,
-        })
-        .eq("id", stream.id);
-    } catch (err) {
-      console.error("[Host] Failed to persist overlay:", err);
-    }
-  };
-
-  const showOverlay = () => {
-    const msg = overlayMessage.trim();
-    // Overlay may now be image-only, text-only, or both. Require at least one.
-    if (!msg && !overlayImageUrl) {
-      toast.error("Enter a message or upload an image first");
-      return;
-    }
-    setOverlayActive(true);
-    pushOverlayState({
-      active: true,
-      message: msg,
-      background: overlayBg,
-      imageUrl: overlayImageUrl,
-    });
-  };
-
-  const hideOverlay = () => {
-    setOverlayActive(false);
-    pushOverlayState({
-      active: false,
-      message: overlayMessage,
-      background: overlayBg,
-      imageUrl: overlayImageUrl,
-    });
-  };
-
-  // Persist overlay-music state to DB. Music does not need to be broadcast to
-  // viewers over signaling — the audio reaches them via the WebRTC track swap
-  // done in useHostStream.setLiveAudioTrack(). This is purely so the host's
-  // own settings survive a refresh.
-  const pushOverlayMusicState = async (next: {
-    url?: string;
-    active?: boolean;
-    volume?: number;
-    mixWithMic?: boolean;
-  }) => {
-    try {
-      const update: Record<string, unknown> = {};
-      if (typeof next.url === "string") update.overlay_music_url = next.url;
-      if (typeof next.active === "boolean") update.overlay_music_active = next.active;
-      if (typeof next.volume === "number") update.overlay_music_volume = next.volume;
-      if (typeof next.mixWithMic === "boolean") update.overlay_music_mix_mic = next.mixWithMic;
-      if (Object.keys(update).length === 0) return;
-      await supabase.from("streams").update(update).eq("id", stream.id);
-    } catch (err) {
-      console.warn("[v0] pushOverlayMusicState failed:", err);
-    }
-  };
-
-  // Re-broadcast on background/message/image change while overlay is active so viewers see edits live
-  useEffect(() => {
-    if (!overlayActive) return;
-    const t = setTimeout(() => {
-      pushOverlayState({
-        active: true,
-        message: overlayMessage,
-        background: overlayBg,
-        imageUrl: overlayImageUrl,
-      });
-    }, 250);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlayMessage, overlayBg, overlayImageUrl]);
-
-  // ---- Ticker broadcast + persist (mirrors overlay pattern) ----
-  const pushTickerState = async (next: {
-    active: boolean;
-    message: string;
-    speed: TickerSpeed;
-    style: TickerStyle;
-  }) => {
-    const payload = {
-      active: next.active,
-      message: next.message.slice(0, 280),
-      speed: next.speed,
-      style: next.style,
-    };
-    try {
-      chatChannelRef.current?.send({
-        type: "broadcast",
-        event: "stream-ticker",
-        payload,
-      });
-    } catch (err) {
-      console.error("[Host] Failed to broadcast ticker:", err);
-    }
-    try {
-      await supabase
-        .from("streams")
-        .update({
-          ticker_active: payload.active,
-          ticker_message: payload.message,
-          ticker_speed: payload.speed,
-          ticker_style: payload.style,
-        })
-        .eq("id", stream.id);
-    } catch (err) {
-      console.error("[Host] Failed to persist ticker:", err);
-    }
-  };
-
-  const startTicker = () => {
-    const msg = tickerMessage.trim();
-    if (!msg) {
-      toast.error("Enter a ticker message first");
-      return;
-    }
-    setTickerActive(true);
-    pushTickerState({ active: true, message: msg, speed: tickerSpeed, style: tickerStyle });
-  };
-
-  const stopTicker = () => {
-    setTickerActive(false);
-    pushTickerState({ active: false, message: tickerMessage, speed: tickerSpeed, style: tickerStyle });
-  };
-
-  // Debounced re-broadcast while ticker is active and host edits text/speed/style
-  useEffect(() => {
-    if (!tickerActive) return;
-    const t = setTimeout(() => {
-      pushTickerState({
-        active: true,
-        message: tickerMessage,
-        speed: tickerSpeed,
-        style: tickerStyle,
-      });
-    }, 300);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickerMessage, tickerSpeed, tickerStyle]);
-
-  const refreshChat = async () => {
-    setIsRefreshingChat(true);
-    try {
-      const { data } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('stream_id', stream.id)
-        .order('created_at', { ascending: true });
-      if (data) setMessages(data);
-    } finally {
-      setIsRefreshingChat(false);
-    }
-  };
-
-  // Subscribe to stream status changes
+  // ── Stream-status realtime ─────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel(`stream-status-${stream.id}`)
@@ -681,33 +420,26 @@ function OwnerStreamInterface({
         (payload: any) => {
           const updated = payload.new as Stream;
           setStream(updated);
-          if ('active_participant_id' in updated) {
+          if ("active_participant_id" in updated) {
             setActiveParticipantId(updated.active_participant_id ?? null);
           }
-        }
+        },
       )
       .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [stream.id, supabase]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [stream.id]);
-
-  // Load co-host participants for this stream
+  // ── Co-host participants realtime ──────────────────────────────────────
   useEffect(() => {
-    const loadParticipants = async () => {
+    const load = async () => {
       const { data } = await supabase
         .from("stream_participants")
         .select("id, slot_label, status, host_id, host:hosts(display_name, email)")
         .eq("stream_id", stream.id)
         .neq("status", "offline");
-      if (data) {
-        setCohostParticipants(data as StreamParticipant[]);
-      }
+      if (data) setCohostParticipants(data as StreamParticipant[]);
     };
-    loadParticipants();
-
-    // Subscribe to participant status changes
+    load();
     const channel = supabase
       .channel(`participants-${stream.id}`)
       .on(
@@ -718,129 +450,74 @@ function OwnerStreamInterface({
           table: "stream_participants",
           filter: `stream_id=eq.${stream.id}`,
         },
-        () => {
-          loadParticipants();
-        }
+        () => { load(); },
       )
       .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [stream.id, supabase]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [stream.id]);
-
-  // Auto-scroll chat
+  // ── Auto-scroll chat ──────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
-  // Prevent accidental page refresh or navigation while the stream is live.
-  // The browser shows a generic "Leave site?" dialog — the exact message is
-  // controlled by the browser, not our string, in all modern browsers.
+  // ── Beforeunload guard while live ─────────────────────────────────────
   useEffect(() => {
     if (!isStreaming) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      e.returnValue = '';
+      e.returnValue = "";
     };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
   }, [isStreaming]);
 
-  const copyShareLink = () => {
-    navigator.clipboard.writeText(shareLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const rotateCamera = async () => {
-    if (isSwitching) return;
-    setIsSwitching(true);
-    const newFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
-    setCameraFacingMode(newFacingMode);
-    try {
-      const newStream = await switchCamera(newFacingMode);
-      if (newStream && videoRef.current) {
-        videoRef.current.srcObject = newStream;
-      }
-    } finally {
-      setIsSwitching(false);
-    }
-  };
-
-  const updateVideoQuality = async () => {
-    if (!mediaStream) return;
-    
-    const videoTrack = mediaStream.getVideoTracks()[0];
-    if (!videoTrack) return;
-    
-    const constraints = {
-      width: isDataSaver ? { ideal: 640 } : videoQuality === 'low' ? { ideal: 480 } : videoQuality === 'medium' ? { ideal: 720 } : videoQuality === 'high' ? { ideal: 1080 } : { ideal: 720 },
-      height: isDataSaver ? { ideal: 360 } : videoQuality === 'low' ? { ideal: 360 } : videoQuality === 'medium' ? { ideal: 480 } : videoQuality === 'high' ? { ideal: 720 } : { ideal: 480 },
-      frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 }
-    };
-    
-    try {
-      await videoTrack.applyConstraints(constraints);
-    } catch (err) {
-      console.log('Could not apply video constraints:', err);
-    }
-  };
-
-  // Apply quality changes when settings change
+  // ── Video quality apply on change ─────────────────────────────────────
   useEffect(() => {
-    if (mediaInitialized) {
-      updateVideoQuality();
-    }
-  }, [videoQuality, isDataSaver, mediaInitialized]);
+    if (!mediaInitialized || !mediaStream) return;
+    const track = mediaStream.getVideoTracks()[0];
+    if (!track) return;
+    const constraints = {
+      width: isDataSaver
+        ? { ideal: 640 }
+        : videoQuality === "low"
+          ? { ideal: 480 }
+          : videoQuality === "medium"
+            ? { ideal: 720 }
+            : videoQuality === "high"
+              ? { ideal: 1080 }
+              : { ideal: 720 },
+      height: isDataSaver
+        ? { ideal: 360 }
+        : videoQuality === "low"
+          ? { ideal: 360 }
+          : videoQuality === "medium"
+            ? { ideal: 480 }
+            : videoQuality === "high"
+              ? { ideal: 720 }
+              : { ideal: 480 },
+      frameRate: isDataSaver ? { ideal: 15 } : { ideal: 30 },
+    };
+    track.applyConstraints(constraints).catch((err) => {
+      console.warn("[host] applyConstraints failed:", err);
+    });
+  }, [videoQuality, isDataSaver, mediaInitialized, mediaStream]);
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-    const msgText = newMessage.trim();
-    setNewMessage(""); // clear immediately for responsive feel
-    const { data } = await supabase
-      .from("chat_messages")
-      .insert({ stream_id: stream.id, sender_name: host.display_name || "Host", message: msgText })
-      .select()
-      .single();
-    if (data && chatChannelRef.current) {
-      chatChannelRef.current.send({
-        type: "broadcast",
-        event: "chat-message",
-        payload: data,
-      });
-    }
-  };
-
-  const getNameColor = (name: string) => {
-    const colors = ['text-blue-400', 'text-emerald-400', 'text-purple-400', 'text-orange-400', 'text-pink-400', 'text-cyan-400', 'text-yellow-400', 'text-rose-400', 'text-indigo-400', 'text-teal-400'];
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    return colors[Math.abs(hash) % colors.length];
+  // ── Handlers ──────────────────────────────────────────────────────────
+  const handleStartStream = async () => {
+    await startStream();
+    setStream((prev) => ({ ...prev, status: "live" }));
   };
 
   const handleEndStream = async () => {
-    // Finalise any in-flight section FIRST so the last segment lands in the
-    // replay panel before the live machinery tears down. Wrapped in a
-    // try/catch so a recorder hiccup cannot block the user from ending the
-    // live — that is the most important path on this page.
     if (REPLAY_ENABLED) {
-      try {
-        await sectionRecorder.finaliseAndStop();
-      } catch (err) {
-        console.error("[Replay] finaliseAndStop during end stream failed:", err);
-        // Swallow — proceed to end the live stream regardless.
-      }
+      try { await sectionRecorder.finaliseAndStop(); }
+      catch (err) { console.error("[Replay] finaliseAndStop failed:", err); }
     }
     const hadRecording = await stopStream();
     setStream((prev) => ({ ...prev, status: "ended" }));
     if (hadRecording) {
       toast.success("Stream ended — recording downloaded to your device.");
-      // Surface the post-stream archive dialog. The hook keeps the
-      // chunks alive after stopStream(), so getRecordingBlob() returns
-      // the same data that was just downloaded — perfect for cloud
-      // upload without needing to re-record.
       const blob = getRecordingBlob();
       if (blob) {
         setPostStreamBlob(blob);
@@ -850,20 +527,8 @@ function OwnerStreamInterface({
     }
   };
 
-  const handleStartStream = async () => {
-    await startStream();
-    setStream((prev) => ({ ...prev, status: "live" }));
-  };
-
-  // Restart an ENDED stream in place — same row, same room_code, same watch URL,
-  // same host URL. We reset only the lifecycle columns (status -> 'waiting',
-  // clear started_at / ended_at, zero viewer_count). recording_url is left
-  // alone so any previously-uploaded recording stays downloadable; the next
-  // `Go Live` press goes through the normal handleStartStream / startStream
-  // flow which will repopulate started_at and broadcast `stream-start` to any
-  // viewers reconnecting on the same URL.
   const handleRestartStream = async () => {
-    if (stream.status !== "ended") return; // only meaningful from the ended state
+    if (stream.status !== "ended") return;
     try {
       const { error } = await supabase
         .from("streams")
@@ -875,7 +540,6 @@ function OwnerStreamInterface({
         })
         .eq("id", stream.id);
       if (error) {
-        console.error("[v0] Restart failed:", error);
         toast.error("Couldn't restart the stream: " + error.message);
         return;
       }
@@ -886,80 +550,93 @@ function OwnerStreamInterface({
         ended_at: null,
         viewer_count: 0,
       }));
-      toast.success("Stream restarted — the room is live again. Click 'Go Live' when you're ready.");
-    } catch (err: any) {
-      console.error("[v0] Restart error:", err);
+      toast.success("Stream restarted — click 'Go Live' when you're ready.");
+    } catch (err) {
+      console.error("[host] Restart error:", err);
       toast.error("Couldn't restart the stream.");
     }
   };
 
-  const connectedViewers = viewers.filter((v) => v.connected).length;
-  const isAdmin = resolveRole(host) === "admin";
+  const rotateCamera = async () => {
+    if (isSwitching) return;
+    setIsSwitching(true);
+    const next = cameraFacingMode === "user" ? "environment" : "user";
+    setCameraFacingMode(next);
+    try {
+      const newStream = await switchCamera(next);
+      if (newStream && videoRef.current) videoRef.current.srcObject = newStream;
+    } finally {
+      setIsSwitching(false);
+    }
+  };
 
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+    const msgText = newMessage.trim();
+    setNewMessage("");
+    const { data } = await supabase
+      .from("chat_messages")
+      .insert({
+        stream_id: stream.id,
+        sender_name: host.display_name || "Host",
+        message: msgText,
+      })
+      .select()
+      .single();
+    if (data && chatChannelRef.current) {
+      chatChannelRef.current.send({
+        type: "broadcast",
+        event: "chat-message",
+        payload: data,
+      });
+    }
+  };
+
+  const refreshChat = async () => {
+    setIsRefreshingChat(true);
+    try {
+      const { data } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("stream_id", stream.id)
+        .order("created_at", { ascending: true });
+      if (data) setMessages(data as ChatMessage[]);
+    } finally {
+      setIsRefreshingChat(false);
+    }
+  };
+
+  const getNameColor = (name: string) => {
+    const colors = [
+      "text-blue-400", "text-emerald-400", "text-purple-400", "text-orange-400",
+      "text-pink-400", "text-cyan-400", "text-yellow-400", "text-rose-400",
+      "text-indigo-400", "text-teal-400",
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  };
+
+  const connectedViewers = viewers.filter((v) => v.connected).length;
+  const showOpenReplay =
+    REPLAY_ENABLED && isStreamOwner && sectionRecorder.sections.length > 0;
+
+  // ── JSX ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
-        <div className="container mx-auto px-4 h-14 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <Button variant="ghost" size="sm" asChild className="h-8 -ml-2 px-2">
-              <Link href="/host/dashboard">
-                <ArrowLeft className="w-4 h-4 mr-1.5" />
-                <span className="hidden sm:inline">Back</span>
-              </Link>
-            </Button>
-            <div className="h-5 w-px bg-border hidden sm:block" />
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center shrink-0">
-                <Radio className="w-3.5 h-3.5 text-primary-foreground" />
-              </div>
-              <span className="font-semibold text-foreground hidden md:inline">
-                Isunday Stream Live
-              </span>
-            </div>
-            <div className="h-5 w-px bg-border" />
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden sm:inline">
-                Room
-              </span>
-              <code className="text-xs font-mono font-semibold text-foreground bg-muted px-2 py-0.5 rounded">
-                {stream.room_code}
-              </code>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {(isAdmin || isStreamOwner) && (
-              <StreamOperatorsDialog
-                streamId={stream.id}
-                streamTitle={stream.title}
-              />
-            )}
-            {isStreaming && !isPaused && (
-              <Badge className="bg-red-500 text-white animate-pulse gap-1.5 h-6 px-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                LIVE
-              </Badge>
-            )}
-            {isStreaming && isPaused && (
-              <Badge className="bg-orange-500 text-white gap-1 h-6 px-2">
-                <Pause className="w-2.5 h-2.5" />
-                PAUSED
-              </Badge>
-            )}
-            {isRecording && (
-              <Badge variant="outline" className="text-red-500 border-red-500 gap-1 h-6 px-2">
-                <Circle className="w-2 h-2 fill-red-500" />
-                REC
-              </Badge>
-            )}
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground border border-border rounded-md h-6 px-2">
-              <Users className="w-3.5 h-3.5" />
-              <span className="tabular-nums text-xs font-medium">
-                {connectedViewers}<span className="text-muted-foreground/60">/{viewerCount}</span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
+      <ControlRoomTopbar
+        roomCode={stream.room_code}
+        streamId={stream.id}
+        streamTitle={stream.title}
+        isStreaming={isStreaming}
+        isPaused={isPaused}
+        isRecording={isRecording}
+        connectedViewers={connectedViewers}
+        totalViewers={viewerCount}
+        showOperatorsDialog={isAdmin || isStreamOwner}
+        health={health}
+      />
 
       <main className="container mx-auto px-4 py-6">
         {error && (
@@ -969,821 +646,193 @@ function OwnerStreamInterface({
           </div>
         )}
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Video Preview */}
-          <div className="lg:col-span-2 flex flex-col gap-4">
-            <Card className="overflow-hidden">
-              <CardContent className="p-0">
-                <div className="relative aspect-video bg-black">
-                  {/* Top-left: camera mode + mobile indicator */}
-                  <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
-                    <Badge className={`text-xs border font-medium ${
-                      cameraFacingMode === 'environment'
-                        ? 'bg-blue-500/80 text-white border-blue-400'
-                        : 'bg-black/50 text-white border-white/20'
-                    }`}>
-                      <Camera className="w-3 h-3 mr-1" />
-                      {cameraFacingMode === 'environment' ? 'Rear Camera' : 'Front Camera'}
-                    </Badge>
-                    {isMobile && (
-                      <Badge variant="outline" className="text-xs bg-black/50 text-white border-white/20">
-                        <Smartphone className="w-3 h-3 mr-1" />
-                        Mobile
-                      </Badge>
-                    )}
-                  </div>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className={`w-full h-full object-cover ${
-                      !videoEnabled ? "hidden" : ""
-                    }`}
-                  />
-                  {!videoEnabled && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-muted">
-                      <VideoOff className="w-16 h-16 text-muted-foreground" />
-                    </div>
-                  )}
-                  {/* Host preview overlay — mirrors what viewers see */}
-                  <StreamOverlay
-                    active={overlayActive}
-                    message={overlayMessage}
-                    background={overlayBg}
-                    imageUrl={overlayImageUrl}
-                  />
-                  {/* Bottom controls bar */}
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent pt-8 pb-4 px-4">
-                    <div className="flex items-end justify-center gap-4">
+        {/* 3-zone Live Control Room layout:
+              xl: [scenes/guests rail | program + producer deck | comms tabs]
+              md: [program + producer deck | comms tabs]  (rails collapse to bottom)
+              sm: stack: program → comms → producer → rails */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-4">
+          {/* ── Left rail (xl only): Scenes + Guests ─────────────────── */}
+          <aside className="xl:col-span-2 xl:order-1 order-3 flex flex-col gap-4">
+            <ScenesRail
+              scenes={cr.scenes}
+              currentLayout={cr.branding.layout ?? "solo"}
+              currentOverlay={cr.overlay}
+              currentTicker={cr.ticker}
+              currentMusicUrl={cr.overlayMusicUrl}
+              onApply={(s) => { void cr.applyScene(s); }}
+              onSave={cr.saveScene}
+              onDelete={cr.deleteScene}
+            />
+            <GuestsRail
+              participants={cohostParticipants}
+              roomCode={stream.room_code}
+            />
+          </aside>
 
-                      {/* Camera flip — prominent, labeled */}
-                      <div className="flex flex-col items-center gap-1.5">
-                        <button
-                          onClick={rotateCamera}
-                          disabled={!mediaInitialized || isSwitching}
-                          className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
-                            isSwitching
-                              ? 'bg-white/20 border-white/30 cursor-wait'
-                              : cameraFacingMode === 'environment'
-                                ? 'bg-blue-500/90 border-blue-300 hover:bg-blue-600/90'
-                                : 'bg-white/20 border-white/40 hover:bg-white/30'
-                          } disabled:opacity-50`}
-                        >
-                          {isSwitching
-                            ? <RefreshCw className="w-6 h-6 text-white animate-spin" />
-                            : <SwitchCamera className="w-6 h-6 text-white" />
-                          }
-                        </button>
-                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
-                          {isSwitching ? 'Switching...' : cameraFacingMode === 'environment' ? 'Rear' : 'Front'}
-                        </span>
-                      </div>
+          {/* ── Center: Program preview + stage actions + producer deck ── */}
+          <section className="xl:col-span-7 md:col-span-1 xl:order-2 order-1 flex flex-col gap-4">
+            <ProgramPreview
+              ref={videoRef}
+              isMobile={isMobile}
+              cameraFacingMode={cameraFacingMode}
+              isSwitching={isSwitching}
+              videoEnabled={videoEnabled}
+              audioEnabled={audioEnabled}
+              mediaInitialized={mediaInitialized}
+              isStreaming={isStreaming}
+              isDataSaver={isDataSaver}
+              videoQuality={videoQuality}
+              overlay={cr.overlay}
+              watermarkUrl={cr.branding.watermarkUrl}
+              watermarkPosition={cr.branding.watermarkPosition}
+              onRotateCamera={rotateCamera}
+              onToggleVideo={toggleVideo}
+              onToggleAudio={toggleAudio}
+              onToggleDataSaver={() => setIsDataSaver((v) => !v)}
+              onChangeQuality={setVideoQuality}
+            />
 
-                      {/* Video toggle */}
-                      <div className="flex flex-col items-center gap-1.5">
-                        <button
-                          onClick={toggleVideo}
-                          disabled={!mediaInitialized}
-                          className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
-                            videoEnabled
-                              ? 'bg-white/20 border-white/40 hover:bg-white/30'
-                              : 'bg-red-500/90 border-red-300 hover:bg-red-600/90'
-                          } disabled:opacity-50`}
-                        >
-                          {videoEnabled ? <Video className="w-6 h-6 text-white" /> : <VideoOff className="w-6 h-6 text-white" />}
-                        </button>
-                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
-                          {videoEnabled ? 'Camera' : 'Off'}
-                        </span>
-                      </div>
+            <StageActions
+              streamTitle={stream.title}
+              roomCode={stream.room_code}
+              status={stream.status}
+              isStreaming={isStreaming}
+              isPaused={isPaused}
+              controlRoomMode={controlRoomMode}
+              isHostOnAir={isHostOnAir}
+              mediaInitialized={mediaInitialized}
+              hasRecording={hasRecording}
+              showRestart={isStreamOwner || isAdmin}
+              showOpenReplay={showOpenReplay}
+              replayCount={sectionRecorder.sections.length}
+              onStart={handleStartStream}
+              onPause={pauseStream}
+              onResume={resumeStream}
+              onEnd={handleEndStream}
+              onRestart={handleRestartStream}
+              onGoOnAir={goOnAir}
+              onGoOffAir={goOffAir}
+              onDownloadRecording={downloadRecording}
+              onJumpToReplay={jumpToReplayTab}
+              onBackToDashboard={() => router.push("/host/dashboard")}
+            />
 
-                      {/* Audio toggle */}
-                      <div className="flex flex-col items-center gap-1.5">
-                        <button
-                          onClick={toggleAudio}
-                          disabled={!mediaInitialized}
-                          className={`w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
-                            audioEnabled
-                              ? 'bg-white/20 border-white/40 hover:bg-white/30'
-                              : 'bg-red-500/90 border-red-300 hover:bg-red-600/90'
-                          } disabled:opacity-50`}
-                        >
-                          {audioEnabled ? <Mic className="w-6 h-6 text-white" /> : <MicOff className="w-6 h-6 text-white" />}
-                        </button>
-                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
-                          {audioEnabled ? 'Mic' : 'Muted'}
-                        </span>
-                      </div>
-
-                      {/* Quality selector */}
-                      <div className="flex flex-col items-center gap-1.5">
-                        <div className="h-14 flex items-center bg-black/60 rounded-full px-3 gap-1.5 border border-white/20">
-                          <button
-                            onClick={() => setIsDataSaver(!isDataSaver)}
-                            disabled={isStreaming}
-                            className="disabled:opacity-50"
-                          >
-                            <DataSaver className={`w-4 h-4 ${isDataSaver ? 'text-orange-400' : 'text-white'}`} />
-                          </button>
-                          <select
-                            value={videoQuality}
-                            onChange={(e) => setVideoQuality(e.target.value as any)}
-                            className="bg-transparent text-white text-xs border-none outline-none cursor-pointer disabled:opacity-50"
-                            disabled={isStreaming}
-                          >
-                            <option value="auto" className="bg-gray-800">Auto</option>
-                            <option value="high" className="bg-gray-800">1080p</option>
-                            <option value="medium" className="bg-gray-800">720p</option>
-                            <option value="low" className="bg-gray-800">480p</option>
-                          </select>
-                        </div>
-                        <span className="text-white text-xs font-medium" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>Quality</span>
-                      </div>
-
-                    </div>
-                  </div>
-
-                  {/* Top-right: connection status */}
-                  <div className="absolute top-3 right-3 z-10">
-                    {isStreaming ? (
-                      <Badge className="bg-red-500 text-white gap-1 border-0">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                        LIVE
-                      </Badge>
-                    ) : mediaInitialized ? (
-                      <Badge variant="outline" className="gap-1 bg-black/50 text-white border-white/20">
-                        <CheckCircle2 className="w-3 h-3 text-green-400" />
-                        Ready
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="gap-1 bg-black/50 text-white border-white/20">
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        Starting...
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Stage Controls — visually fused to the video card above */}
-            <Card className="-mt-4 rounded-t-none border-t-0">
-              <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <h1 className="text-lg sm:text-xl font-semibold text-foreground truncate">
-                  {stream.title}
-                </h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Up to {MAX_VIEWERS} viewers · Room <code className="font-mono">{stream.room_code}</code>
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
-                {stream.status === "ended" ? (
-                  <>
-                    {/* Restart in place — same room_code, same watch URL,
-                        same host URL. Viewers refreshing /watch/{room_code}
-                        will see the stream re-appear once the host clicks
-                        Go Live again. */}
-                    {(isStreamOwner || isAdmin) && (
-                      <Button onClick={handleRestartStream}>
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        Restart Stream
-                      </Button>
-                    )}
-                    {hasRecording && (
-                      <Button variant="outline" onClick={downloadRecording}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Download Recording
-                      </Button>
-                    )}
-                    {/* Post-stream shortcut to the Replay tab. The Replay tab
-                        is where each section can be downloaded locally or
-                        saved to the cloud archive (plan-gated). This button
-                        only renders when the recorder produced sections so
-                        we never lead the host to an empty panel. */}
-                    {REPLAY_ENABLED && isStreamOwner && sectionRecorder.sections.length > 0 && (
-                      <Button variant="secondary" onClick={jumpToReplayTab}>
-                        <Film className="w-4 h-4 mr-2" />
-                        Open Replay ({sectionRecorder.sections.length})
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      onClick={() => router.push("/host/dashboard")}
-                    >
-                      Back to Dashboard
-                    </Button>
-                  </>
-                ) : isStreaming ? (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Host-camera on/off-air toggle. Separate from the stream
-                        start/stop controls so the host can manage the stream
-                        without forcing their own camera to viewers. */}
-                    {controlRoomMode && (
-                      isHostOnAir ? (
-                        <Button
-                          variant="outline"
-                          onClick={goOffAir}
-                          title="Stop publishing your camera to viewers"
-                        >
-                          <VideoOff className="w-4 h-4 mr-2" />
-                          Stop My Camera
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="default"
-                          onClick={goOnAir}
-                          className="bg-green-600 hover:bg-green-700"
-                          title="Publish your camera so viewers can see you"
-                        >
-                          <Video className="w-4 h-4 mr-2" />
-                          Go On-Air with My Camera
-                        </Button>
-                      )
-                    )}
-                    {isPaused ? (
-                      <Button variant="default" onClick={resumeStream}>
-                        <Play className="w-4 h-4 mr-2" />
-                        Resume
-                      </Button>
-                    ) : (
-                      <Button variant="outline" onClick={pauseStream}>
-                        <Pause className="w-4 h-4 mr-2" />
-                        Pause
-                      </Button>
-                    )}
-                    <Button variant="destructive" onClick={handleEndStream}>
-                      <Square className="w-4 h-4 mr-2" />
-                      End Stream
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    onClick={handleStartStream}
-                    disabled={!mediaInitialized}
-                    size="lg"
-                    className="bg-red-500 hover:bg-red-600 text-white gap-2 shadow-md shadow-red-500/20"
-                  >
-                    <Circle className="w-4 h-4 fill-current" />
-                    Go Live
-                  </Button>
-                )}
-              </div>
-              </CardContent>
-            </Card>
-
-            {/* Post-stream notice — sits directly under the player so the
-                host can't miss it. Visible only when the stream has ended
-                AND the recorder produced at least one ready section. The
-                Replay tab is where Save to Cloud / Download per-section
-                lives; this banner just makes it findable. */}
-            {REPLAY_ENABLED && isStreamOwner && stream.status === "ended" && sectionRecorder.sections.length > 0 && (
-              <Card className="border-primary/40 bg-primary/5">
-                <CardContent className="p-4 flex items-center gap-3 flex-wrap">
-                  <div className="w-9 h-9 rounded-md bg-primary/15 flex items-center justify-center shrink-0">
-                    <Film className="w-4 h-4 text-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-foreground">
-                      {sectionRecorder.sections.length} recording{sectionRecorder.sections.length === 1 ? "" : "s"} ready
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Download to your device or save to your cloud Replay Library — your plan decides which options unlock.
-                    </p>
-                  </div>
-                  <Button size="sm" onClick={jumpToReplayTab} className="shrink-0">
-                    <Film className="w-4 h-4 mr-1.5" />
-                    Open Replay
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Share Link — slim info strip, this is a one-shot action */}
-            <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
-              <Copy className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0 hidden sm:inline">
-                Viewer link
-              </span>
-              <Input
-                value={shareLink}
-                readOnly
-                className="font-mono text-xs h-7 border-0 bg-transparent shadow-none focus-visible:ring-0 px-1"
+            {stream.status === "ended" && showOpenReplay && (
+              <PostStreamBanner
+                count={sectionRecorder.sections.length}
+                onOpenReplay={jumpToReplayTab}
               />
-              <Button variant="outline" size="sm" onClick={copyShareLink} className="h-7 shrink-0">
-                {copied ? "Copied!" : "Copy"}
-              </Button>
-            </div>
-
-            {/* ── Producer Tools ─────────────────────────────────────────── */}
-            <div className="flex items-center gap-2 pt-2">
-              <span className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
-                Producer Tools
-              </span>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-
-            {/* Overlay Control — announcements / title cards / pause screens */}
-            <Card>
-              <CardHeader className="pb-3 border-b">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                      <Megaphone className="w-4 h-4 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle className="text-sm font-semibold">Stream Overlay</CardTitle>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Full-screen image, text, or music shown over your video.
-                      </p>
-                    </div>
-                  </div>
-                  {overlayActive && (
-                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5 shrink-0">
-                      LIVE ON SCREEN
-                    </Badge>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <Input
-                  placeholder="Optional text message (e.g. We'll be right back in 5 minutes...)"
-                  value={overlayMessage}
-                  onChange={(e) => setOverlayMessage(e.target.value.slice(0, 120))}
-                  maxLength={120}
-                />
-                {/* Drag-drop image uploader — self-contained module. */}
-                <OverlayImageUpload
-                  streamId={stream.id}
-                  currentUrl={overlayImageUrl}
-                  onUploaded={(url) => setOverlayImageUrl(url)}
-                  onCleared={() => setOverlayImageUrl("")}
-                />
-
-                {/* Overlay music — upload + play live alongside the image overlay.
-                    Audio is attached to the outgoing WebRTC stream by replacing
-                    the audio sender track in each viewer peer connection. */}
-                <div className="pt-2 border-t border-border">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      Overlay Music
-                    </span>
-                    {overlayMusicState.active && (
-                      <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5">
-                        PLAYING LIVE
-                      </Badge>
-                    )}
-                  </div>
-                  <OverlayMusic
-                    ref={overlayMusicRef}
-                    streamId={stream.id}
-                    currentUrl={overlayMusicUrl}
-                    micTrack={mediaStream?.getAudioTracks()[0] ?? null}
-                    isStreaming={isStreaming}
-                    initial={overlayMusicState}
-                    onLiveAudioTrack={setLiveAudioTrack}
-                    onUploaded={(url) => {
-                      setOverlayMusicUrl(url);
-                      pushOverlayMusicState({ url });
-                    }}
-                    onCleared={() => {
-                      setOverlayMusicUrl("");
-                      pushOverlayMusicState({ url: "", active: false });
-                    }}
-                    onStateChange={(s) => {
-                      setOverlayMusicState(s);
-                      pushOverlayMusicState(s);
-                    }}
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground mr-1">Background:</span>
-                    {(["dark", "light", "branded"] as const).map((bg) => (
-                      <button
-                        key={bg}
-                        type="button"
-                        onClick={() => setOverlayBg(bg)}
-                        className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
-                          overlayBg === bg
-                            ? "border-primary ring-2 ring-primary/30"
-                            : "border-border hover:border-foreground/30"
-                        }`}
-                        style={{
-                          background:
-                            bg === "dark"
-                              ? "#111"
-                              : bg === "light"
-                                ? "#f5f5f5"
-                                : "hsl(var(--primary))",
-                          color:
-                            bg === "light" ? "#111" : "#fff",
-                        }}
-                      >
-                        {bg}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2 ml-auto">
-                    <span className="text-[11px] text-muted-foreground tabular-nums">
-                      {overlayMessage.length}/120
-                    </span>
-                    {overlayActive ? (
-                      <Button size="sm" variant="destructive" onClick={hideOverlay}>
-                        <EyeOff className="w-4 h-4 mr-1.5" />
-                        Hide
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={showOverlay}
-                        disabled={!overlayMessage.trim()}
-                      >
-                        <Eye className="w-4 h-4 mr-1.5" />
-                        Show Overlay
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Viewers will see this as a full-screen overlay on top of your video.
-                  Useful for announcements, break screens, or title cards.
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Ticker Control — scrolling news-style crawl under the video */}
-            <Card>
-              <CardHeader className="pb-3 border-b">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                      <Tv className="w-4 h-4 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle className="text-sm font-semibold">Stream Ticker</CardTitle>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Breaking-news style crawl across the bottom of viewers&apos; screens.
-                      </p>
-                    </div>
-                  </div>
-                  {tickerActive && (
-                    <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5 shrink-0">
-                      SCROLLING
-                    </Badge>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <textarea
-                  placeholder="e.g. BREAKING: Service starts at 10am AST • Prayer requests welcome in chat • Follow us on Instagram..."
-                  value={tickerMessage}
-                  onChange={(e) => setTickerMessage(e.target.value.slice(0, 280))}
-                  maxLength={280}
-                  rows={2}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-muted-foreground mr-1">Speed:</span>
-                      {(["slow", "normal", "fast"] as const).map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setTickerSpeed(s)}
-                          className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
-                            tickerSpeed === s
-                              ? "border-primary ring-2 ring-primary/30 bg-primary/10"
-                              : "border-border hover:border-foreground/30"
-                          }`}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-muted-foreground mr-1">Style:</span>
-                      {(["default", "urgent", "info"] as const).map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setTickerStyle(s)}
-                          className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
-                            tickerStyle === s
-                              ? "border-primary ring-2 ring-primary/30"
-                              : "border-border hover:border-foreground/30"
-                          }`}
-                          style={{
-                            background:
-                              s === "default"
-                                ? "#111827"
-                                : s === "urgent"
-                                  ? "#dc2626"
-                                  : "#1d4ed8",
-                            color: "#fff",
-                          }}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 ml-auto">
-                    <span className="text-[11px] text-muted-foreground tabular-nums">
-                      {tickerMessage.length}/280
-                    </span>
-                    {tickerActive ? (
-                      <Button size="sm" variant="destructive" onClick={stopTicker}>
-                        <Square className="w-4 h-4 mr-1.5" />
-                        Stop Ticker
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={startTicker}
-                        disabled={!tickerMessage.trim()}
-                      >
-                        <Play className="w-4 h-4 mr-1.5" />
-                        Start Ticker
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                {/* Host preview — WYSIWYG ticker as viewers see it */}
-                <div className="rounded-md overflow-hidden border border-border">
-                  <StreamTicker
-                    active={tickerActive && !!tickerMessage.trim()}
-                    message={tickerMessage || " "}
-                    speed={tickerSpeed}
-                    style={tickerStyle}
-                  />
-                  {!tickerActive && (
-                    <p className="text-[11px] text-muted-foreground py-2 px-3 bg-muted/30">
-                      Preview appears here when the ticker is running.
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Slideshow — self-contained modular panel */}
-            <SlideshowPanel streamId={stream.id} chatChannelRef={chatChannelRef} />
-
-            {/* Connected Viewers */}
-            {viewers.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3 border-b">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                        <Users className="w-4 h-4 text-primary" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-sm font-semibold">Connected Viewers</CardTitle>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Audience currently joined to your stream.
-                        </p>
-                      </div>
-                    </div>
-                    <Badge variant="secondary" className="tabular-nums">{connectedViewers}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="flex flex-wrap gap-2">
-                    {viewers.map((viewer) => (
-                      <Badge
-                        key={viewer.id}
-                        variant={viewer.connected ? "default" : "outline"}
-                        className="gap-1"
-                      >
-                        {viewer.connected ? (
-                          <Wifi className="w-3 h-3" />
-                        ) : (
-                          <WifiOff className="w-3 h-3" />
-                        )}
-                        {viewer.name}
-                      </Badge>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
             )}
-          </div>
 
-          {/* Right Sidebar: Chat + Director Panel — sticky on desktop so the
-              host can keep an eye on chat/cameras while scrolling through
-              the Producer Tools below. */}
-          <Card ref={replayTabRef} className="lg:col-span-1 flex flex-col overflow-hidden h-[calc(100vh-7rem)] lg:sticky lg:top-20 lg:self-start">
-            <Tabs
-              value={activeTab}
-              className="flex flex-col h-full"
-              onValueChange={(v) => {
-                setActiveTab(v);
-                activeTabRef.current = v;
-                if (v === "chat") setUnreadCount(0);
-              }}
-            >
-              <div className="px-3 pt-3 pb-0 border-b border-border">
-                <TabsList className="w-full">
-                  <TabsTrigger value="chat" className="flex-1 text-xs gap-1">
-                    <MessageCircle className="w-3.5 h-3.5" />
-                    Chat
-                    {unreadCount > 0 ? (
-                      <span className="ml-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
-                        {unreadCount > 9 ? "9+" : unreadCount}
-                      </span>
-                    ) : messages.length > 0 ? (
-                      <span className="text-muted-foreground">({messages.length})</span>
-                    ) : null}
-                  </TabsTrigger>
-                  <TabsTrigger value="private" className="flex-1 text-xs gap-1">
-                    <Lock className="w-3.5 h-3.5" />
-                    Private
-                  </TabsTrigger>
-                  {isStreamOwner && (
-                    <TabsTrigger value="cameras" className="flex-1 text-xs gap-1">
-                      <Camera className="w-3.5 h-3.5" />
-                      Cameras
-                    </TabsTrigger>
-                  )}
-                  {/* Replay tab — only mounted when REPLAY_ENABLED is true at
-                      build time AND the viewer is the stream owner. Hidden
-                      otherwise so non-flagged builds are visually identical. */}
-                  {REPLAY_ENABLED && isStreamOwner && (
-                    <TabsTrigger value="replay" className="flex-1 text-xs gap-1">
-                      <Film className="w-3.5 h-3.5" />
-                      Replay
-                      {sectionRecorder.sections.length > 0 && (
-                        <span className="text-muted-foreground">
-                          ({sectionRecorder.sections.length})
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  )}
-                </TabsList>
-              </div>
+            {/* Share-link strip */}
+            <ShareLinkStrip roomCode={stream.room_code} />
 
-              {/* Replay Tab — section recordings + local export. Mount only
-                  when the feature flag is on and the user is the owner. */}
-              {REPLAY_ENABLED && isStreamOwner && (
-                <TabsContent
-                  value="replay"
-                  className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col"
-                >
-                  <ReplayPanel
-                    recorder={sectionRecorder}
-                    isLive={isStreaming}
-                    roomCode={stream.room_code}
-                    streamTitle={stream.title}
-                    streamId={stream.id}
-                  />
-                </TabsContent>
-              )}
+            <ProducerDeck
+              overlayDeck={
+                <OverlayDeck
+                  streamId={stream.id}
+                  overlay={cr.overlay}
+                  setActive={cr.setOverlayActive}
+                  setMessage={cr.setOverlayMessage}
+                  setBackground={cr.setOverlayBackground}
+                  setImageUrl={cr.setOverlayImageUrl}
+                />
+              }
+              tickerDeck={
+                <TickerDeck
+                  ticker={cr.ticker}
+                  setActive={cr.setTickerActive}
+                  setMessage={cr.setTickerMessage}
+                  setSpeed={cr.setTickerSpeed}
+                  setStyle={cr.setTickerStyle}
+                />
+              }
+              musicDeck={
+                <MusicDeck
+                  streamId={stream.id}
+                  innerRef={overlayMusicRef}
+                  currentUrl={cr.overlayMusicUrl}
+                  micTrack={mediaStream?.getAudioTracks()[0] ?? null}
+                  isStreaming={isStreaming}
+                  state={cr.overlayMusic}
+                  onLiveAudioTrack={setLiveAudioTrack}
+                  onUploaded={(url) => cr.setOverlayMusicUrl(url)}
+                  onCleared={() => cr.setOverlayMusicUrl("")}
+                  onStateChange={cr.setOverlayMusic}
+                />
+              }
+              mediaDeck={
+                <MediaDeck streamId={stream.id} chatChannelRef={chatChannelRef} />
+              }
+              brandingDeck={
+                <BrandingDeck
+                  streamId={stream.id}
+                  plan={effectivePlan}
+                  branding={cr.branding}
+                  update={cr.updateBranding}
+                />
+              }
+              healthDeck={
+                <HealthDeck
+                  health={health}
+                  isStreaming={isStreaming}
+                  viewerCount={connectedViewers}
+                />
+              }
+            />
+          </section>
 
-              {/* Cameras Tab — Director Panel */}
-              {isStreamOwner && (
-                <TabsContent value="cameras" className="flex-1 overflow-hidden mt-0 data-[state=active]:flex data-[state=active]:flex-col">
-                  <DirectorPanel
-                    streamId={stream.id}
-                    roomCode={stream.room_code}
-                    activeParticipantId={activeParticipantId}
-                    onSwitch={(id, warmStream) => {
-                      setActiveParticipantId(id);
-                      if (warmStream) {
-                        // Warm pool had it ready — instant relay
-                        relayStream(warmStream);
-                      } else if (!id) {
-                        // Switching back to main camera
-                        relayStream(null);
-                      }
-                      // If id set but no warmStream: useCohostReceiver fallback
-                      // connects and the useEffect above relays when ready
-                    }}
-                  />
-                </TabsContent>
-              )}
-
-              {/* Chat Tab */}
-              <TabsContent value="chat" className="flex-1 min-h-0 flex flex-col mt-0 overflow-hidden data-[state=active]:flex">
-                {/* Co-hosts Section */}
-                {cohostParticipants.length > 0 && (
-                  <div className="shrink-0 px-4 py-3 border-b border-border bg-muted/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Users className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span className="text-xs font-medium text-foreground">Co-hosts ({cohostParticipants.length})</span>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {cohostParticipants.map((p) => {
-                        const displayName = p.host?.display_name || p.host?.email || "Unknown";
-                        const joinLink = `${typeof window !== "undefined" ? window.location.origin : ""}/host/stream/${stream.room_code}/cohost/${p.id}`;
-                        return (
-                          <div key={p.id} className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-medium truncate">{displayName}</span>
-                                <Badge
-                                  variant={p.status === "live" ? "default" : "secondary"}
-                                  className={`text-[10px] h-4 px-1.5 ${
-                                    p.status === "live" ? "bg-red-500 text-white" :
-                                    p.status === "ready" ? "bg-green-500/20 text-green-700" :
-                                    "bg-muted text-muted-foreground"
-                                  }`}
-                                >
-                                  {p.status === "live" ? "● LIVE" : p.status}
-                                </Badge>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground">{p.slot_label}</span>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-[10px]"
-                              onClick={() => {
-                                navigator.clipboard.writeText(joinLink);
-                                toast.success("Join link copied!");
-                              }}
-                            >
-                              <Copy className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="shrink-0 flex items-center justify-between px-4 py-2">
-                  <span className="text-xs text-muted-foreground">{messages.length} message{messages.length !== 1 ? 's' : ''}</span>
-                  <Button variant="ghost" size="sm" onClick={refreshChat} disabled={isRefreshingChat} className="h-6 w-6 p-0">
-                    <RefreshCw className={`w-3 h-3 ${isRefreshingChat ? 'animate-spin' : ''}`} />
-                  </Button>
-                </div>
-            <CardContent className="flex-1 min-h-0 flex flex-col p-0 overflow-hidden">
-              <ScrollArea className="flex-1 min-h-0 px-4">
-                <div className="flex flex-col gap-3 py-2 w-full">
-                  {messages.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      No messages yet
-                    </p>
-                  ) : (
-                    messages.map((msg) => {
-                      const isOwn = msg.sender_name === (host.display_name || "Host");
-                      return (
-                        <div key={msg.id} className={`w-full overflow-hidden flex flex-col gap-0.5 rounded-lg px-2.5 py-2 ${
-                          isOwn ? 'bg-primary/5 border border-primary/10' : 'bg-muted/50'
-                        }`}>
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className={`text-xs font-semibold truncate max-w-[130px] shrink ${
-                              isOwn ? 'text-primary' : getNameColor(msg.sender_name)
-                            }`}>
-                              {isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
-                            </span>
-                            <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <p className="text-sm text-foreground/80 [overflow-wrap:anywhere] leading-snug">
-                            {msg.message}
-                          </p>
-                        </div>
-                      );
-                    })
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
-              </ScrollArea>
-              <form onSubmit={sendMessage} className="shrink-0 p-4 border-t border-border">
-                <div className="flex items-center gap-2">
-                  <Input
-                    placeholder="Send a message..."
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                  />
-                  <Button type="submit" size="icon">
-                    <Send className="w-4 h-4" />
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-              </TabsContent>
-
-              {/* Private tab — admin / host / cohost / super_user shared */}
-              <TabsContent
-                value="private"
-                className="flex-1 min-h-0 flex flex-col mt-0 px-3 pb-3 pt-2 overflow-hidden data-[state=active]:flex"
-              >
-                <PrivateMessagesPanel streamId={stream.id} host={host} />
-              </TabsContent>
-            </Tabs>
-          </Card>
+          {/* ── Right rail: Comms tabs (sticky on xl) ─────────────────── */}
+          <CommsTabs
+            ref={replayCardRef}
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+            unreadCount={unreadCount}
+            messageCount={messages.length}
+            showCameras={isStreamOwner || isAdmin}
+            showReplay={REPLAY_ENABLED && isStreamOwner}
+            replayCount={sectionRecorder.sections.length}
+            chatPane={
+              <ChatPane
+                roomCode={stream.room_code}
+                cohosts={cohostParticipants}
+                messages={messages}
+                hostDisplayName={host.display_name || "Host"}
+                isRefreshing={isRefreshingChat}
+                onRefresh={refreshChat}
+                onSend={sendMessage}
+                newMessage={newMessage}
+                setNewMessage={setNewMessage}
+                getNameColor={getNameColor}
+                messagesEndRef={messagesEndRef}
+              />
+            }
+            privatePane={<PrivateMessagesPanel streamId={stream.id} host={host} />}
+            camerasPane={
+              <DirectorPanel
+                streamId={stream.id}
+                roomCode={stream.room_code}
+                activeParticipantId={activeParticipantId}
+                onSwitch={(id, warmStream) => {
+                  setActiveParticipantId(id);
+                  if (warmStream) relayStream(warmStream);
+                  else if (!id) relayStream(null);
+                }}
+              />
+            }
+            replayPane={
+              <ReplayPanel
+                recorder={sectionRecorder}
+                isLive={isStreaming}
+                roomCode={stream.room_code}
+                streamTitle={stream.title}
+                streamId={stream.id}
+              />
+            }
+          />
         </div>
       </main>
 
-      {/* Post-stream archive choice — opens after handleEndStream when a
-          recording exists. The local download already happened; this
-          dialog adds the optional cloud-archive flow. */}
       <PostStreamDialog
         open={postStreamOpen}
         onOpenChange={setPostStreamOpen}
@@ -1794,5 +843,192 @@ function OwnerStreamInterface({
         onDownloadLocal={downloadRecording}
       />
     </div>
+  );
+}
+
+// ── Subcomponents (small enough to live inline) ──────────────────────────
+
+function ShareLinkStrip({ roomCode }: { roomCode: string }) {
+  const link =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/watch/${roomCode}`
+      : "";
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
+      <Copy className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0 hidden sm:inline">
+        Viewer link
+      </span>
+      <Input
+        value={link}
+        readOnly
+        className="font-mono text-xs h-7 border-0 bg-transparent shadow-none focus-visible:ring-0 px-1"
+        onClick={(e) => (e.target as HTMLInputElement).select()}
+      />
+      <Button variant="ghost" size="sm" className="h-7 px-2 shrink-0" onClick={copy}>
+        {copied ? "Copied!" : "Copy"}
+      </Button>
+    </div>
+  );
+}
+
+interface ChatPaneProps {
+  roomCode: string;
+  cohosts: StreamParticipant[];
+  messages: ChatMessage[];
+  hostDisplayName: string;
+  isRefreshing: boolean;
+  onRefresh: () => void;
+  onSend: (e: React.FormEvent) => void;
+  newMessage: string;
+  setNewMessage: (v: string) => void;
+  getNameColor: (n: string) => string;
+  messagesEndRef: React.RefObject<HTMLDivElement | null>;
+}
+function ChatPane({
+  roomCode,
+  cohosts,
+  messages,
+  hostDisplayName,
+  isRefreshing,
+  onRefresh,
+  onSend,
+  newMessage,
+  setNewMessage,
+  getNameColor,
+  messagesEndRef,
+}: ChatPaneProps) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return (
+    <>
+      {cohosts.length > 0 && (
+        <div className="shrink-0 px-4 py-3 border-b border-border bg-muted/30">
+          <div className="flex items-center gap-2 mb-2">
+            <Users className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="text-xs font-medium text-foreground">
+              Co-hosts ({cohosts.length})
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {cohosts.map((p) => {
+              const name = p.host?.display_name || p.host?.email || "Unknown";
+              const link = `${origin}/host/stream/${roomCode}/cohost/${p.id}`;
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium truncate">{name}</span>
+                      <span
+                        className={`text-[10px] h-4 px-1.5 rounded ${
+                          p.status === "live"
+                            ? "bg-red-500 text-white"
+                            : p.status === "ready"
+                              ? "bg-green-500/20 text-green-700"
+                              : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {p.status === "live" ? "● LIVE" : p.status}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      {p.slot_label}
+                    </span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2"
+                    onClick={() => {
+                      navigator.clipboard.writeText(link);
+                      toast.success("Join link copied!");
+                    }}
+                  >
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <div className="shrink-0 flex items-center justify-between px-4 py-2">
+        <span className="text-xs text-muted-foreground">
+          {messages.length} message{messages.length !== 1 ? "s" : ""}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="h-6 w-6 p-0"
+        >
+          <RefreshCw className={`w-3 h-3 ${isRefreshing ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+      <CardContent className="flex-1 min-h-0 flex flex-col p-0 overflow-hidden">
+        <ScrollArea className="flex-1 min-h-0 px-4">
+          <div className="flex flex-col gap-3 py-2 w-full">
+            {messages.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No messages yet
+              </p>
+            ) : (
+              messages.map((msg) => {
+                const isOwn = msg.sender_name === hostDisplayName;
+                return (
+                  <div
+                    key={msg.id}
+                    className={`w-full overflow-hidden flex flex-col gap-0.5 rounded-lg px-2.5 py-2 ${
+                      isOwn ? "bg-primary/5 border border-primary/10" : "bg-muted/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`text-xs font-semibold truncate max-w-[130px] shrink ${
+                          isOwn ? "text-primary" : getNameColor(msg.sender_name)
+                        }`}
+                      >
+                        {isOwn ? `${msg.sender_name} (you)` : msg.sender_name}
+                      </span>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
+                        {new Date(msg.created_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-foreground/80 [overflow-wrap:anywhere] leading-snug">
+                      {msg.message}
+                    </p>
+                  </div>
+                );
+              })
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </ScrollArea>
+        <form onSubmit={onSend} className="shrink-0 p-4 border-t border-border">
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="Send a message..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+            />
+            <Button type="submit" size="icon">
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </>
   );
 }
