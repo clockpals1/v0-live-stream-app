@@ -5,6 +5,7 @@ import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled } from "@/lib/billing/plans";
 import { STUDIO_NAV } from "@/lib/studio/nav";
 import { StudioSidebar, type StudioSidebarItem } from "@/components/studio/sidebar";
+import { isNextControlFlowSignal } from "@/lib/next/control-flow";
 
 /**
  * Studio layout — auth + plan gate + sidebar shell.
@@ -32,26 +33,10 @@ export default async function StudioLayout({
   try {
     return await renderStudioLayout({ children });
   } catch (err) {
-    // Don't swallow NEXT_REDIRECT — it's how Next.js implements
-    // server-side redirects (throws a typed control-flow signal).
-    if (
-      err &&
-      typeof err === "object" &&
-      "digest" in err &&
-      typeof (err as { digest?: unknown }).digest === "string" &&
-      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
-    ) {
-      throw err;
-    }
-    // Same for not-found.
-    if (
-      err &&
-      typeof err === "object" &&
-      "digest" in err &&
-      (err as { digest?: unknown }).digest === "NEXT_NOT_FOUND"
-    ) {
-      throw err;
-    }
+    // Re-throw any Next.js internal control-flow signal (redirect,
+    // not-found, dynamic-server-usage, bailout-to-CSR). Swallowing
+    // those breaks routing AND breaks the static prerender pass.
+    if (isNextControlFlowSignal(err)) throw err;
     // Anything else: log full detail (visible via `wrangler tail`) and
     // render a friendly inline error rather than collapsing the whole
     // app into the global-error boundary.

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,33 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Radio, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
+  // useSearchParams forces dynamic rendering; the Suspense boundary is
+  // the canonical Next.js fix so the static shell can prerender.
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Where to send the user after sign-in. Defaults to the host
+  // dashboard but a deep-link bounce (e.g. clicking Like on a public
+  // replay) sets ?next=/r/abc so we route back. Restrict to relative
+  // paths (must start with a single "/") to avoid open-redirect into
+  // a phishing domain.
+  const rawNext = searchParams?.get("next") ?? null;
+  const safeNext =
+    rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")
+      ? rawNext
+      : "/host/dashboard";
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +56,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/host/dashboard");
+    router.push(safeNext);
     router.refresh();
   };
 

@@ -21,6 +21,8 @@ import {
   Film,
   Globe,
   EyeOff,
+  Link2,
+  Check,
   Star,
   Pencil,
   ExternalLink,
@@ -259,6 +261,7 @@ function ReplayRow({
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
+                <CopyPublicLinkButton publicationId={pub.id} />
                 <Button
                   size="sm"
                   variant="ghost"
@@ -399,5 +402,44 @@ function PublishDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Copy-public-link button. Tiny standalone component because three
+ * pieces of state (copied flag, click handler, fallback) would clutter
+ * the parent ReplayCard. Uses navigator.clipboard with a hard fallback
+ * for browsers/iframes that block it (older Safari, Cloudflare Tunnel
+ * preview, etc.).
+ */
+function CopyPublicLinkButton({ publicationId }: { publicationId: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    if (typeof window === "undefined") return;
+    const url = `${window.location.origin}/r/${publicationId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success("Public link copied.");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: open a prompt the user can copy from manually.
+      window.prompt("Copy this URL:", url);
+    }
+  };
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={handleCopy}
+      title="Copy public link"
+      aria-label="Copy public link"
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-500" />
+      ) : (
+        <Link2 className="h-3.5 w-3.5" />
+      )}
+    </Button>
   );
 }

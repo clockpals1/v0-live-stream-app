@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isNextControlFlowSignal } from "@/lib/next/control-flow";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled } from "@/lib/billing/plans";
@@ -34,14 +35,7 @@ export default async function StudioOverviewPage() {
   try {
     return await renderStudioOverview();
   } catch (err) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "digest" in err &&
-      typeof (err as { digest?: unknown }).digest === "string" &&
-      ((err as { digest: string }).digest.startsWith("NEXT_REDIRECT") ||
-        (err as { digest: string }).digest === "NEXT_NOT_FOUND")
-    ) {
+    if (isNextControlFlowSignal(err)) {
       throw err;
     }
     const e = err as Error;

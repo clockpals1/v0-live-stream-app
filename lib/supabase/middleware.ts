@@ -74,12 +74,15 @@ export async function updateSession(request: NextRequest) {
       url.host = "live.isunday.me";
       return NextResponse.redirect(url);
     }
-    // Skip rewrites for shared paths (auth, api, admin, _next assets).
+    // Skip rewrites for shared paths (auth, api, admin, _next assets,
+    // and /r — public replay pages must resolve identically on both
+    // subdomains so share links work everywhere).
     const isShared =
       path.startsWith("/auth") ||
       path.startsWith("/api") ||
       path.startsWith("/admin") ||
       path.startsWith("/_next") ||
+      path.startsWith("/r/") ||
       path === "/favicon.ico";
     if (!isShared && !path.startsWith("/studio")) {
       // studio.isunday.me/foo  →  internal /studio/foo
