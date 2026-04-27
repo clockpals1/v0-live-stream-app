@@ -6,10 +6,13 @@ import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled } from "@/lib/billing/plans";
 import { ensureHostRow } from "@/lib/host/bootstrap";
 import { isYoutubeConfigured } from "@/lib/integrations/youtube";
+import { isInstagramConfigured } from "@/lib/integrations/instagram";
+import { isTiktokConfigured } from "@/lib/integrations/tiktok";
+import { isTwitterConfigured } from "@/lib/integrations/twitter";
 import { Button } from "@/components/ui/button";
 import { PublishingHubView } from "@/components/ai/publish/hub-view";
 import type { QueueItem } from "@/components/ai/publish/hub-view";
-import type { YoutubeConnection } from "@/components/ai/publish/connections-tab";
+import type { PlatformConnection } from "@/components/ai/publish/connections-tab";
 import { Send, Lock, ArrowRight } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -33,25 +36,36 @@ export default async function PublishPage() {
     (effective.plan?.features?.distribution_youtube === true);
 
   const youtubeServerConfigured = isYoutubeConfigured();
+  const instagramConfigured     = isInstagramConfigured();
+  const tiktokConfigured        = isTiktokConfigured();
+  const twitterConfigured       = isTwitterConfigured();
 
-  // ─── YouTube connection ────────────────────────────────────────────
-  let youtube: YoutubeConnection | null = null;
+  // ─── Platform connections (single query) ──────────────────────────
+  const admin = createAdminClient();
+  let youtube: PlatformConnection | null = null;
+  let instagram: PlatformConnection | null = null;
+  let tiktok: PlatformConnection | null = null;
+  let twitter: PlatformConnection | null = null;
+
   if (host) {
-    const admin = createAdminClient();
-    const { data: row } = await admin
+    const { data: integrations } = await admin
       .from("host_integrations")
-      .select("provider_account_id, provider_account_name, provider_account_avatar_url, connected_at, token_expires_at")
+      .select("provider, provider_account_id, provider_account_name, provider_account_avatar_url, connected_at, token_expires_at")
       .eq("host_id", host.id)
-      .eq("provider", "youtube")
-      .maybeSingle();
-    if (row) {
-      youtube = {
+      .in("provider", ["youtube", "instagram", "tiktok", "twitter"]);
+
+    for (const row of integrations ?? []) {
+      const conn: PlatformConnection = {
         providerAccountId: row.provider_account_id,
         providerAccountName: row.provider_account_name,
         providerAccountAvatarUrl: row.provider_account_avatar_url,
         connectedAt: row.connected_at,
         tokenExpiresAt: row.token_expires_at ?? null,
       };
+      if (row.provider === "youtube")   youtube   = conn;
+      if (row.provider === "instagram") instagram = conn;
+      if (row.provider === "tiktok")    tiktok    = conn;
+      if (row.provider === "twitter")   twitter   = conn;
     }
   }
 
@@ -90,6 +104,12 @@ export default async function PublishPage() {
         youtube={youtube}
         youtubeServerConfigured={youtubeServerConfigured}
         canYoutube={canYoutube}
+        instagram={instagram}
+        instagramConfigured={instagramConfigured}
+        tiktok={tiktok}
+        tiktokConfigured={tiktokConfigured}
+        twitter={twitter}
+        twitterConfigured={twitterConfigured}
         initialQueue={initialQueue}
       />
     </main>

@@ -14,7 +14,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConnectionsTab } from "./connections-tab";
-import type { YoutubeConnection } from "./connections-tab";
+import type { PlatformConnection } from "./connections-tab";
 import { QueueTab } from "./queue-tab";
 import { CalendarTab } from "./calendar-tab";
 
@@ -135,9 +135,15 @@ function InsightsTab({ items }: { items: QueueItem[] }) {
 // ── Hub View ──────────────────────────────────────────────────────────
 
 export interface PublishingHubProps {
-  youtube: YoutubeConnection | null;
+  youtube: PlatformConnection | null;
   youtubeServerConfigured: boolean;
   canYoutube: boolean;
+  instagram: PlatformConnection | null;
+  instagramConfigured: boolean;
+  tiktok: PlatformConnection | null;
+  tiktokConfigured: boolean;
+  twitter: PlatformConnection | null;
+  twitterConfigured: boolean;
   initialQueue: QueueItem[];
 }
 
@@ -145,6 +151,12 @@ export function PublishingHubView({
   youtube,
   youtubeServerConfigured,
   canYoutube,
+  instagram,
+  instagramConfigured,
+  tiktok,
+  tiktokConfigured,
+  twitter,
+  twitterConfigured,
   initialQueue,
 }: PublishingHubProps) {
   const scheduledCount = initialQueue.filter((i) => i.status === "scheduled").length;
@@ -182,6 +194,12 @@ export function PublishingHubView({
           youtube={youtube}
           youtubeServerConfigured={youtubeServerConfigured}
           canYoutube={canYoutube}
+          instagram={instagram}
+          instagramConfigured={instagramConfigured}
+          tiktok={tiktok}
+          tiktokConfigured={tiktokConfigured}
+          twitter={twitter}
+          twitterConfigured={twitterConfigured}
         />
       </TabsContent>
 

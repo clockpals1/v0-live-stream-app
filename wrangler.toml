@@ -29,17 +29,20 @@ routes = [
 ]
 
 # ─── Cron triggers ────────────────────────────────────────────────────
-# Two scheduled jobs:
+# Three scheduled jobs:
 #
 #   03:30 UTC daily  — archive/stream cleanup
 #   07:00 UTC daily  — AI automation: content ideas, weekly summaries,
 #                      affiliate campaigns, God-mode agent chains
+#   00 * * * *       — Publishing Hub: sweep publish_queue for items
+#                      where status='scheduled' AND scheduled_for <= now()
+#                      and auto-publish them (YouTube server-side stream;
+#                      other platforms queued for manual trigger).
 #
 # OpenNext routes cron events to their matching /api/cron/* route.
-# You can also POST manually:
-#   POST /api/cron/archives/cleanup   Authorization: Bearer $CRON_SECRET
-#   POST /api/cron/ai/daily-jobs      Authorization: Bearer $CRON_SECRET
-#
-# God-mode only runs if agent_mode_enabled=true in the ai_config table.
+# You can also trigger manually:
+#   GET /api/cron/archives/cleanup        Authorization: Bearer $CRON_SECRET
+#   GET /api/cron/ai/daily-jobs           Authorization: Bearer $CRON_SECRET
+#   GET /api/cron/publish/scheduled       Authorization: Bearer $CRON_SECRET
 [triggers]
-crons = ["30 3 * * *", "0 7 * * *"]
+crons = ["30 3 * * *", "0 7 * * *", "0 * * * *"]
