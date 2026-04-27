@@ -24,6 +24,7 @@ import {
   Copy,
 } from "lucide-react";
 import { CopyButton } from "@/components/host/summary-copy-button";
+import { DeleteArchiveButton } from "@/components/host/delete-archive-button";
 
 /**
  * /host/streams/[streamId]/summary
@@ -86,12 +87,17 @@ export default async function StreamSummaryPage({
     redirect("/host/dashboard");
   }
 
+  // Soft-deleted archives are filtered out at query time so the host
+  // never sees a tombstone row. Admins also don't see them by default;
+  // a separate /admin/archives view can be added later if support needs
+  // to inspect deleted history.
   const { data: archives } = await admin
     .from("stream_archives")
     .select(
-      "id, provider, status, content_type, byte_size, public_url, created_at, completed_at, failure_reason",
+      "id, provider, status, content_type, byte_size, public_url, created_at, completed_at, failure_reason, delete_after_at",
     )
     .eq("stream_id", streamId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   // Best-effort viewer count — the schema differs across deployments
@@ -250,10 +256,26 @@ export default async function StreamSummaryPage({
                         </div>
                       )}
                     </div>
-                    <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-                      {a.completed_at
-                        ? new Date(a.completed_at).toLocaleDateString()
-                        : new Date(a.created_at).toLocaleDateString()}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div className="text-right text-[11px] text-muted-foreground">
+                        {a.completed_at
+                          ? new Date(a.completed_at).toLocaleDateString()
+                          : new Date(a.created_at).toLocaleDateString()}
+                        {a.delete_after_at && a.status === "ready" && (
+                          <div
+                            className="text-[10px] text-amber-600 dark:text-amber-400"
+                            title={`Auto-deleted on ${new Date(a.delete_after_at).toLocaleString()}`}
+                          >
+                            Expires {new Date(a.delete_after_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                          </div>
+                        )}
+                      </div>
+                      {a.status === "ready" || a.status === "failed" ? (
+                        <DeleteArchiveButton
+                          streamId={streamId}
+                          archiveId={a.id}
+                        />
+                      ) : null}
                     </div>
                   </li>
                 ))}

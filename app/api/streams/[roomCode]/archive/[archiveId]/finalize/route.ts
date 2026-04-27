@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendArchiveReady } from "@/lib/email/transactional";
 
 /**
  * POST /api/streams/[streamId]/archive/[archiveId]/finalize
@@ -132,5 +133,48 @@ export async function POST(
       .eq("id", streamId);
   }
 
+  // ─── Notify host ──────────────────────────────────────────────────
+  // Fire-and-forget. Failure to send the email never breaks the
+  // finalize response. We only email on success — failed uploads are
+  // already surfaced in the UI via the failure_reason column.
+  if (body.success) {
+    void notifyArchiveReady(admin, {
+      hostId: archive.host_id,
+      streamId: archive.stream_id,
+      byteSize:
+        typeof body.byteSize === "number" ? body.byteSize : null,
+    });
+  }
+
   return NextResponse.json({ archive: updated });
+}
+
+async function notifyArchiveReady(
+  admin: ReturnType<typeof createAdminClient>,
+  args: { hostId: string; streamId: string; byteSize: number | null },
+): Promise<void> {
+  try {
+    const { data: host } = await admin
+      .from("hosts")
+      .select("email, display_name")
+      .eq("id", args.hostId)
+      .maybeSingle();
+    if (!host?.email) return;
+
+    const { data: stream } = await admin
+      .from("streams")
+      .select("title")
+      .eq("id", args.streamId)
+      .maybeSingle();
+
+    await sendArchiveReady({
+      to: host.email,
+      displayName: host.display_name ?? host.email,
+      streamTitle: stream?.title ?? "Untitled stream",
+      streamId: args.streamId,
+      byteSize: args.byteSize,
+    });
+  } catch (e) {
+    console.error("[archive/finalize] notifyArchiveReady failed:", e);
+  }
 }

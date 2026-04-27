@@ -181,6 +181,51 @@ export async function presignDownload(args: {
   });
 }
 
+/**
+ * Hard-delete an object from R2.
+ *
+ * Used by:
+ *   - the host-initiated DELETE archive endpoint
+ *   - the nightly retention cron that sweeps expired archives
+ *
+ * S3 (and R2) returns 204 No Content for both "deleted" and "didn't
+ * exist" — the API is idempotent. We return ok:true in both cases.
+ *
+ * Implementation note: `presignS3` mints a query-string-signed URL
+ * which works for DELETE the same as GET/PUT. We then issue the
+ * request server-side. Doing it via presigned URL keeps all SigV4
+ * logic in one place; we never need a separate signed-header path.
+ */
+export async function deleteObject(args: {
+  objectKey: string;
+}): Promise<{ ok: boolean; status: number; error?: string }> {
+  const cfg = getR2Config();
+  const url = await presignS3({
+    method: "DELETE",
+    cfg,
+    objectKey: args.objectKey,
+    expiresIn: 60, // short — we're calling immediately
+  });
+  try {
+    const res = await fetch(url, { method: "DELETE" });
+    if (res.status === 204 || res.status === 200 || res.status === 404) {
+      return { ok: true, status: res.status };
+    }
+    const body = await res.text().catch(() => "");
+    return {
+      ok: false,
+      status: res.status,
+      error: `R2 delete failed: HTTP ${res.status} ${body.slice(0, 200)}`,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      error: e instanceof Error ? e.message : "Network error during R2 delete",
+    };
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // SigV4 query-string presigner (zero-dep, Web Crypto only)
 //
@@ -192,7 +237,7 @@ export async function presignDownload(args: {
 // ────────────────────────────────────────────────────────────────────
 
 interface PresignArgs {
-  method: "PUT" | "GET";
+  method: "PUT" | "GET" | "DELETE";
   cfg: R2Config;
   objectKey: string;
   expiresIn: number;
@@ -312,10 +357,14 @@ async function hmac(
   key: ArrayBuffer | Uint8Array,
   data: string,
 ): Promise<Uint8Array> {
-  const keyBuf = key instanceof Uint8Array ? key : new Uint8Array(key);
+  // crypto.subtle.importKey wants a BufferSource backed by ArrayBuffer
+  // (not SharedArrayBuffer). Copying into a fresh Uint8Array guarantees
+  // that, and silences the structural-typing complaint from TS strict mode.
+  const src = key instanceof Uint8Array ? key : new Uint8Array(key);
+  const keyBuf = new Uint8Array(src);
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    keyBuf,
+    keyBuf.buffer as ArrayBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

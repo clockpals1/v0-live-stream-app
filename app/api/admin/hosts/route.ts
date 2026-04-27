@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isRole, type Role } from "@/lib/rbac";
+import { sendWelcome } from "@/lib/email/transactional";
 
 /**
  * /api/admin/hosts — list and create users (admin-only).
@@ -210,6 +211,10 @@ export async function POST(req: NextRequest) {
         { code: hostError.code, hint: hostError.hint },
       );
     }
+
+    // Welcome email — fire-and-forget; never blocks the response or
+    // surfaces send failures to the admin creating the account.
+    void sendWelcome({ to: cleanEmail, displayName });
 
     return NextResponse.json({ host: newHost }, { status: 201 });
   } catch (e) {

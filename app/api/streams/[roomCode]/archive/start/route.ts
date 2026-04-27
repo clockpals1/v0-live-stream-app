@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { presignUpload, getR2Config } from "@/lib/storage/r2";
-import { isEntitled } from "@/lib/billing/entitlements";
+import { isEntitled, getEffectivePlan } from "@/lib/billing/entitlements";
 
 /**
  * POST /api/streams/[streamId]/archive/start
@@ -104,6 +104,26 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 503 });
   }
 
+  // ─── per-archive retention ────────────────────────────────────────
+  // The host's effective plan tells us how many days this recording
+  // is allowed to live in R2 before the cron deletes it. Snapshot the
+  // value AT UPLOAD TIME — a later plan downgrade must not retroactively
+  // shrink the retention window of already-paid-for archives.
+  let deleteAfterAt: string | null = null;
+  try {
+    const eff = await getEffectivePlan(admin, user.id);
+    const retentionDays = eff.plan?.features?.retention_days;
+    // Admin/null/0 → keep forever. Anything > 0 → set the column.
+    if (typeof retentionDays === "number" && retentionDays > 0) {
+      const ms = retentionDays * 24 * 60 * 60 * 1000;
+      deleteAfterAt = new Date(Date.now() + ms).toISOString();
+    }
+  } catch (e) {
+    // If plan lookup fails we default to NULL (keep forever) rather
+    // than a short window — never accidentally schedule a delete.
+    console.warn("[archive/start] retention lookup failed:", e);
+  }
+
   // ─── create archive row first so its id keys the object path ─────
   const { data: archive, error: insertErr } = await admin
     .from("stream_archives")
@@ -118,6 +138,7 @@ export async function POST(
       content_type: contentType,
       status: "pending",
       title: stream.title ?? null,
+      delete_after_at: deleteAfterAt,
     })
     .select("id")
     .single();

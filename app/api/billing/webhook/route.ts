@@ -7,6 +7,8 @@ import {
   webhookSecretForActiveMode,
 } from "@/lib/billing/stripe";
 import { syncSubscriptionToHost, clearCustomerLinkage } from "@/lib/billing/sync";
+import { reportError } from "@/lib/observability/sentry";
+import { sendPaymentFailed } from "@/lib/email/transactional";
 
 /**
  * POST /api/billing/webhook
@@ -108,6 +110,12 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Handler failed.";
     console.error(`[billing/webhook] handler failed for ${event.type}:`, msg);
+    // Sentry — webhook failures are P0; we want to know immediately.
+    void reportError(e, {
+      source: "api/billing/webhook",
+      tags: { eventType: event.type, mode },
+      extra: { eventId: event.id },
+    });
     // 500 → Stripe retries. Idempotency is provided by syncSubscriptionToHost
     // which is a deterministic write keyed on the host row.
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -158,6 +166,8 @@ async function dispatchEvent(
       );
       // No DB write — the paired subscription.updated event handles
       // status=past_due. Hosts will see it on their dashboard.
+      // ── Email the host so they don't have to.
+      void notifyPaymentFailed(admin, invoice);
       return;
     }
 
@@ -171,5 +181,64 @@ async function dispatchEvent(
       // Acknowledge unknown events so Stripe stops retrying.
       console.info(`[billing/webhook] ignoring unhandled event: ${event.type}`);
       return;
+  }
+}
+
+// --------------------------------------------------------------------
+// Notification helpers
+// --------------------------------------------------------------------
+
+async function notifyPaymentFailed(
+  admin: ReturnType<typeof createAdminClient>,
+  invoice: Stripe.Invoice,
+): Promise<void> {
+  try {
+    const customerId =
+      typeof invoice.customer === "string"
+        ? invoice.customer
+        : invoice.customer?.id;
+    if (!customerId) return;
+
+    // Find the host. We need email + display_name + plan_slug to
+    // render the message; if the host row is missing the email is
+    // dropped (Stripe still has its own dunning emails as a fallback).
+    const { data: host } = await admin
+      .from("hosts")
+      .select("email, display_name, plan_slug")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle();
+    if (!host?.email) return;
+
+    // Plan name lookup is best-effort; a missing plan row falls back
+    // to the slug or "your plan".
+    let planName = host.plan_slug ?? "your plan";
+    if (host.plan_slug) {
+      const { data: plan } = await admin
+        .from("billing_plans")
+        .select("name")
+        .eq("slug", host.plan_slug)
+        .maybeSingle();
+      if (plan?.name) planName = plan.name;
+    }
+
+    // Render amount as e.g. "$19.00 USD" using Stripe's smallest-unit math.
+    const amountCents = invoice.amount_due ?? invoice.amount_remaining ?? 0;
+    const currency = (invoice.currency ?? "usd").toUpperCase();
+    const amountLabel = `$${(amountCents / 100).toFixed(2)} ${currency}`;
+
+    // Stripe schedules retries via next_payment_attempt (unix seconds).
+    const nextRetryAt = invoice.next_payment_attempt
+      ? new Date(invoice.next_payment_attempt * 1000).toISOString()
+      : null;
+
+    await sendPaymentFailed({
+      to: host.email,
+      displayName: host.display_name ?? host.email,
+      amountLabel,
+      planName,
+      nextRetryAt,
+    });
+  } catch (e) {
+    console.error("[billing/webhook] notifyPaymentFailed failed:", e);
   }
 }

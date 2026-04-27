@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendPlanGranted } from "@/lib/email/transactional";
 
 /**
  * GET  /api/admin/billing/grants?hostId=…
@@ -167,6 +168,19 @@ export async function POST(req: NextRequest) {
   console.info(
     `[admin-grant] ${auth.email || auth.userId} granted ${planSlug} to host ${hostId}`,
   );
+
+  // Notify the host that they've been upgraded. Fire-and-forget so an
+  // email outage doesn't block the admin's grant action.
+  if (host.email) {
+    void sendPlanGranted({
+      to: host.email,
+      displayName: host.display_name ?? host.email,
+      planName: plan.name,
+      grantedByEmail: auth.email || null,
+      reason: body.reason?.trim() || null,
+      expiresAt: expiresAt?.toISOString() ?? null,
+    });
+  }
 
   return NextResponse.json({
     grant: created,

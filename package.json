@@ -12,6 +12,8 @@
     "lint": "next lint",
     "build:production": "NODE_ENV=production next build",
     "test": "echo \"No tests specified\" && exit 0",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
     "deploy": "npm run build:cf && npx wrangler pages deploy .open-next/assets --project-name=v0-live-stream-app"
   },
   "dependencies": {
@@ -74,6 +76,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260425.1",
     "@opennextjs/cloudflare": "^1.19.3",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.2.0",
     "@types/node": "^22",
     "@types/react": "^19",

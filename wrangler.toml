@@ -6,3 +6,14 @@ main = ".open-next/worker.js"
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
+
+# ─── Cron triggers ────────────────────────────────────────────────────
+# Cloudflare invokes the Worker with these schedules in addition to
+# normal HTTP traffic. OpenNext currently routes scheduled events via
+# its own handler, so we ALSO support driving the cleanup from any
+# external scheduler that POSTs to /api/cron/archives/cleanup with
+# `Authorization: Bearer ${CRON_SECRET}`.
+#
+# Schedule: every day at 03:30 UTC (10:30 PM ET, low-traffic window).
+[triggers]
+crons = ["30 3 * * *"]

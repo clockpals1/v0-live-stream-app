@@ -17,8 +17,10 @@ Before starting, make sure you have:
 - Wrangler CLI logged in: `npx wrangler whoami` should show your
   Cloudflare account email.
 - The Supabase SQL Editor open in another tab.
-- Migration `022_admin_plan_grants.sql` applied (do this once now if
-  you haven't — paste the file into the SQL Editor and run).
+- The following migrations applied in order (paste each file into the
+  SQL Editor and run, only the ones not yet applied):
+  - `022_admin_plan_grants.sql` — manual plan grants table.
+  - `023_archive_retention.sql` — soft delete + retention columns.
 
 > **Setting Worker secrets.** Throughout this guide you'll see commands
 > like `npx wrangler secret put R2_BUCKET`. Run that, then paste the
@@ -336,7 +338,116 @@ When you're ready to take real money:
 
 ---
 
-## 4. Final checklist
+## 4. Sentry (error monitoring) — ~5 min
+
+Optional but strongly recommended. Without it, every bug becomes "I
+dunno, it just stopped working."
+
+1. <https://sentry.io> → create a free account.
+2. **Projects → Create Project** → platform **Next.js** → name it
+   `live-stream-app`.
+3. On the resulting page, copy the **DSN** (looks like
+   `https://abcd1234@o123456.ingest.sentry.io/7654321`).
+4. Set the Worker secret:
+   ```bash
+   npx wrangler secret put SENTRY_DSN
+   ```
+5. (Optional) Set environment + release tags so you can filter:
+   ```bash
+   npx wrangler secret put SENTRY_ENVIRONMENT   # value: production
+   npx wrangler secret put SENTRY_RELEASE       # value: deploy SHA
+   ```
+6. The app reports server errors automatically; client errors are
+   forwarded via `app/global-error.tsx` → `/api/observability/client-error`.
+7. Test it: cause a known error (e.g. POST malformed JSON to
+   `/api/admin/billing/grants`) and watch it appear in the Sentry
+   issues list within ~30s.
+
+---
+
+## 5. Transactional email (Welcome / Payment failed / Archive ready / Plan granted) — ~10 min
+
+The platform sends 4 transactional emails. They reuse the same
+SMTP-or-Resend transport that Insider Circle broadcasts use, so if
+that's already working, transactional emails work too.
+
+If not yet configured, pick **one** of:
+
+### Option A: Resend (easiest)
+
+1. <https://resend.com> → sign up.
+2. **API Keys → Create API Key** → copy the key (starts with `re_…`).
+3. **Domains → Add Domain** → add `isunday.me`. Resend shows the DNS
+   records you need (TXT for SPF, CNAME for DKIM). Add them to your
+   Cloudflare zone and click **Verify**.
+4. Set the Worker secrets:
+   ```bash
+   npx wrangler secret put RESEND_API_KEY
+   npx wrangler secret put RESEND_FROM
+   # Value: e.g. "Live Stream <noreply@isunday.me>"
+   ```
+
+### Option B: SMTP (use any provider — SES, Brevo, SendGrid…)
+
+```bash
+npx wrangler secret put SMTP_HOST
+npx wrangler secret put SMTP_PORT       # 465 (TLS) or 587 (STARTTLS)
+npx wrangler secret put SMTP_USER
+npx wrangler secret put SMTP_PASS
+npx wrangler secret put SMTP_FROM
+```
+
+Test by triggering a known sender — for example, the easiest is admin
+→ Manual grants → grant a plan to yourself. You should receive the
+"You've been upgraded to {plan}" email within seconds.
+
+If neither backend is configured, every transactional sender silently
+no-ops (fire-and-forget; never breaks the user-facing flow). Watch for
+`[email/welcome] skipped — backend not configured` in `wrangler tail`.
+
+---
+
+## 6. Archive retention cron — ~3 min
+
+Migration 023 added a `delete_after_at` column on each archive,
+populated from the host's plan retention at upload time. The cron
+endpoint at `/api/cron/archives/cleanup` deletes any expired archives
+from R2 and soft-deletes the rows.
+
+Wrangler is already configured with a daily 03:30 UTC trigger
+(`wrangler.toml` → `[triggers] crons`), but you also need a shared
+secret for manual / external scheduler calls:
+
+```bash
+npx wrangler secret put CRON_SECRET    # any random 32-byte hex
+```
+
+Generate one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Verify by calling the dry-run mode:
+
+```bash
+curl -X POST "https://live.isunday.me/api/cron/archives/cleanup?dryRun=1" \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+Expected response: `{ "ok": true, "dryRun": true, "scanned": 0, ... }`
+when there's no expired data, or a sample of the rows that **would**
+be deleted.
+
+> **Per-plan retention.** Each plan's `features` JSON has a
+> `retention_days` integer. Free plans default to 30 days, paid to
+> 365. Edit per-plan in `/admin/billing → Plans`. Existing archives
+> were backfilled with a 365-day window by migration 023 so the cron
+> won't immediately purge legacy uploads.
+
+---
+
+## 7. Final checklist
 
 - [ ] R2: bucket created, CORS set, secrets uploaded, plan toggled.
 - [ ] R2: post-stream upload tested.
@@ -347,9 +458,15 @@ When you're ready to take real money:
       plans, test purchase with `4242…` succeeds.
 - [ ] Stripe (live): account activated, live keys + webhook + price IDs
       pasted, $1 real purchase + refund tested.
-- [ ] Migration `022_admin_plan_grants.sql` applied.
+- [ ] Migrations `022_admin_plan_grants.sql` AND `023_archive_retention.sql`
+      applied.
 - [ ] At least one admin account exists (set `hosts.role = 'admin'` or
       `hosts.is_admin = true` in Supabase).
+- [ ] (Optional) Sentry: `SENTRY_DSN` set; trial error visible in
+      Sentry within 30s of triggering.
+- [ ] (Optional) Email: SMTP_* OR RESEND_* configured; manual-grant
+      email arrives within seconds.
+- [ ] (Optional) `CRON_SECRET` set; dry-run cleanup returns 200.
 
 ---
 
