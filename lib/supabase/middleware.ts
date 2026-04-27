@@ -13,11 +13,12 @@ import { sharedCookieDomain } from "./cookie-options";
  * route group, share auth cookies across both subdomains, and enforce
  * surface-specific access (live.* shouldn't expose /studio/*, etc.).
  */
-function detectSurface(host: string | null): "live" | "studio" {
+function detectSurface(host: string | null): "live" | "studio" | "ai" {
   if (!host) return "live";
   // Strip port if present.
   const h = host.split(":")[0]?.toLowerCase() ?? "";
   if (h === "studio.isunday.me" || h.startsWith("studio.")) return "studio";
+  if (h === "ai.isunday.me" || h.startsWith("ai.")) return "ai";
   return "live";
 }
 
@@ -66,7 +67,25 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   // ─── Surface-aware rewrites ───────────────────────────────────────────
-  if (surface === "studio") {
+  // ─── AI surface rewrites ─────────────────────────────────────────────
+  if (surface === "ai") {
+    if (path.startsWith("/host")) {
+      const url = request.nextUrl.clone();
+      url.host = "live.isunday.me";
+      return NextResponse.redirect(url);
+    }
+    const isShared =
+      path.startsWith("/auth") ||
+      path.startsWith("/api") ||
+      path.startsWith("/admin") ||
+      path.startsWith("/_next") ||
+      path === "/favicon.ico";
+    if (!isShared && !path.startsWith("/ai")) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/ai${path === "/" ? "" : path}`;
+      return NextResponse.rewrite(url);
+    }
+  } else if (surface === "studio") {
     // studio.isunday.me/host/*  is forbidden — the host dashboard belongs
     // to the live surface. Redirect there cleanly.
     if (path.startsWith("/host")) {
@@ -93,13 +112,18 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.rewrite(url);
     }
   } else {
-    // live.isunday.me/studio/*  is intentionally unreachable. We could
-    // 404, but a redirect to studio.isunday.me is friendlier and lines
-    // up with link-sharing expectations.
+    // live.isunday.me/studio/* → redirect to studio subdomain
     if (path.startsWith("/studio")) {
       const url = request.nextUrl.clone();
       url.host = "studio.isunday.me";
       url.pathname = path.replace(/^\/studio/, "") || "/";
+      return NextResponse.redirect(url);
+    }
+    // live.isunday.me/ai/* → redirect to ai subdomain
+    if (path.startsWith("/ai")) {
+      const url = request.nextUrl.clone();
+      url.host = "ai.isunday.me";
+      url.pathname = path.replace(/^\/ai/, "") || "/";
       return NextResponse.redirect(url);
     }
   }
@@ -109,6 +133,12 @@ export async function updateSession(request: NextRequest) {
   // /studio is gated here AFTER the rewrite so the path matches what we
   // actually serve (/studio/replay, /studio/audience, …).
   if (path.startsWith("/host") && !user) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/login";
+    return NextResponse.redirect(url);
+  }
+  // /ai/* gate — same pattern; richer role/plan checks in the layout.
+  if (path.startsWith("/ai") && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

@@ -178,6 +178,32 @@ const FEATURE_LABELS: Record<
     help: "Viewer trends, peak concurrents, chat activity, subscriber growth, replay performance, and stream retention in the Studio Insights page.",
     icon: <BarChart3 className="h-3.5 w-3.5" />,
   },
+  // ─── AI Automation Hub (ai.isunday.me) ───────────────────────────────
+  ai_content_generation: {
+    label: "AI content generation",
+    help: "Manual AI generation of scripts, captions, hashtags, titles, content ideas, and campaign copy in the AI Studio.",
+    icon: <Sparkles className="h-3.5 w-3.5" />,
+  },
+  ai_automation: {
+    label: "AI automation workflows",
+    help: "Recurring daily/weekly AI tasks: content ideas, weekly summaries, post-stream recaps.",
+    icon: <Sparkles className="h-3.5 w-3.5" />,
+  },
+  ai_publishing: {
+    label: "AI social publishing",
+    help: "Cross-platform content scheduling and publishing via TikTok, Instagram, YouTube, and more.",
+    icon: <Sparkles className="h-3.5 w-3.5" />,
+  },
+  ai_insights: {
+    label: "AI-enhanced insights",
+    help: "Chat theme extraction, content performance patterns, and AI growth narratives.",
+    icon: <BarChart3 className="h-3.5 w-3.5" />,
+  },
+  ai_monetization: {
+    label: "AI monetization hub",
+    help: "Affiliate campaign copy generation, product launch packs, and revenue tracking.",
+    icon: <Sparkles className="h-3.5 w-3.5" />,
+  },
 };
 
 function priceLabel(p: BillingPlan): string {

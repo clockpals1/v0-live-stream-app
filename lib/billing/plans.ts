@@ -48,6 +48,12 @@ export const FEATURE_KEYS = [
   "monetization_paywall",
   // Analytics & Insights
   "live_analytics",
+  // AI Automation Hub (ai.isunday.me)
+  "ai_content_generation",
+  "ai_automation",
+  "ai_publishing",
+  "ai_insights",
+  "ai_monetization",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -114,6 +120,18 @@ export const FEATURE_CATEGORIES: ReadonlyArray<{
     label: "Analytics & Insights",
     description: "Live stream analytics, viewer trends, subscriber growth, replay performance.",
     keys: ["live_analytics"],
+  },
+  {
+    id: "ai",
+    label: "AI Automation Hub",
+    description: "AI content generation, automation workflows, social publishing, monetization campaigns, and AI-enhanced insights on ai.isunday.me.",
+    keys: [
+      "ai_content_generation",
+      "ai_automation",
+      "ai_publishing",
+      "ai_insights",
+      "ai_monetization",
+    ],
   },
 ];
 

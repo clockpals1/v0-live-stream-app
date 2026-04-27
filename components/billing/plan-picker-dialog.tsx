@@ -41,6 +41,11 @@ const FEATURE_LABELS: Record<FeatureKey, string> = {
   monetization_paywall: "Paywall & gated content",
   // Analytics & Insights
   live_analytics: "Live stream analytics & Insights",
+  ai_content_generation: "AI content generation",
+  ai_automation: "AI automation workflows",
+  ai_publishing: "AI social publishing",
+  ai_insights: "AI-enhanced insights",
+  ai_monetization: "AI monetization hub",
 };
 
 function priceLine(p: BillingPlan): string {
