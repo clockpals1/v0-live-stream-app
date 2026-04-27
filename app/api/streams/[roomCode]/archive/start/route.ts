@@ -3,6 +3,11 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { presignUpload, getR2Config } from "@/lib/storage/r2";
 import { isEntitled, getEffectivePlan } from "@/lib/billing/entitlements";
+import {
+  checkRateLimit,
+  rateLimitHeaders,
+  POLICY_HEAVY_WRITE,
+} from "@/lib/security/rate-limit";
 
 /**
  * POST /api/streams/[streamId]/archive/start
@@ -49,6 +54,18 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
+  // ─── rate limit ──────────────────────────────────────────────────
+  // 30 requests/minute per user. A normal host hits this maybe twice
+  // per stream (start + retry on browser glitch). A buggy client loop
+  // would otherwise burn R2 storage + outbound credits very quickly.
+  const rl = checkRateLimit(`user:${user.id}`, POLICY_HEAVY_WRITE);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many archive requests. Please slow down.", code: "rate_limited" },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
   }
 
   const admin = createAdminClient();

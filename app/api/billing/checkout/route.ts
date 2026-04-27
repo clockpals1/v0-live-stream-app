@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActiveStripe, priceIdForActiveMode } from "@/lib/billing/stripe";
+import {
+  checkRateLimit,
+  rateLimitHeaders,
+  POLICY_HEAVY_WRITE,
+} from "@/lib/security/rate-limit";
 
 /**
  * POST /api/billing/checkout
@@ -45,6 +50,17 @@ export async function POST(req: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
+  // Cap checkout-session creation per user. Each call hits Stripe's
+  // API and may create a new Customer record; loops here are a fast
+  // path to a Stripe rate-limit ban on the whole account.
+  const rl = checkRateLimit(`user:${user.id}`, POLICY_HEAVY_WRITE);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many checkout attempts. Try again shortly.", code: "rate_limited" },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
   }
 
   // ─── load host + plan + stripe ───────────────────────────────────

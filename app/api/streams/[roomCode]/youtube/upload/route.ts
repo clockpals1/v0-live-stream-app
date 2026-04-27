@@ -6,6 +6,11 @@ import {
   initResumableUpload,
 } from "@/lib/integrations/youtube";
 import { isEntitled } from "@/lib/billing/entitlements";
+import {
+  checkRateLimit,
+  rateLimitHeaders,
+  POLICY_HEAVY_WRITE,
+} from "@/lib/security/rate-limit";
 
 /**
  * POST /api/streams/[streamId]/youtube/upload
@@ -68,6 +73,16 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
+  // Rate limit: each session init burns YouTube quota; loops here would
+  // exhaust the project's daily budget within minutes.
+  const rl = checkRateLimit(`user:${user.id}`, POLICY_HEAVY_WRITE);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many upload requests. Please slow down.", code: "rate_limited" },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
   }
 
   const admin = createAdminClient();

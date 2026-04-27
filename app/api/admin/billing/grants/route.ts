@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/require-admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPlanGranted } from "@/lib/email/transactional";
+import {
+  checkRateLimit,
+  rateLimitHeaders,
+  clientIpFromHeaders,
+  POLICY_HEAVY_WRITE,
+} from "@/lib/security/rate-limit";
 
 /**
  * GET  /api/admin/billing/grants?hostId=…
@@ -59,6 +65,20 @@ export async function POST(req: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  // Defense in depth: even with a valid admin token, cap grant
+  // creation per actor + IP. A compromised admin session could
+  // otherwise mass-grant before anyone notices.
+  const rl = checkRateLimit(
+    `admin:${auth.userId}:${clientIpFromHeaders(req.headers)}`,
+    POLICY_HEAVY_WRITE,
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many grants in a short window. Slow down.", code: "rate_limited" },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
   }
 
   let body: {

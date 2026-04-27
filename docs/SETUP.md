@@ -447,7 +447,67 @@ be deleted.
 
 ---
 
-## 7. Final checklist
+## 7. Rate limiting
+
+The platform enforces rate limits at **two layers**. Set up both for
+proper protection.
+
+### 7a. Layer 1 — Cloudflare WAF (volumetric / DDoS, edge-enforced)
+
+Configured once in the Cloudflare dashboard. This is what stops a
+botnet from pinning your Worker. Skipping it leaves you exposed —
+the in-Worker limiter only protects against accidental misuse, not a
+real attack.
+
+1. Cloudflare dashboard → **`live.isunday.me` zone → Security → WAF
+   → Rate limiting rules** → **Create rule**.
+2. Use these recommended policies (free plan supports them all):
+
+   | Rule name | Match | Threshold | Action |
+   |---|---|---|---|
+   | `auth-strict` | URI path starts with `/auth/` OR `/api/auth/` | 20 / 1 minute / IP | Block, 1 hr |
+   | `api-default` | URI path starts with `/api/` | 200 / 1 minute / IP | Block, 10 min |
+   | `webhook-stripe` | URI path equals `/api/billing/webhook` | 50 / 10 sec / IP | **Skip** rate limit (Stripe legitimately bursts) |
+
+   Add the `webhook-stripe` skip rule **above** `api-default` in the
+   list — order matters; Cloudflare evaluates top-to-bottom.
+
+3. Test by curl-bombing your dev environment (NOT prod): 30 quick GETs
+   to `/api/streams/foo` should start returning Cloudflare's 429
+   block page partway through.
+
+### 7b. Layer 2 — Application limiter (per-user, structured 429s)
+
+Already shipped in code (`@/lib/security/rate-limit.ts`). No setup
+required; it runs in the Worker. Limits enforced today:
+
+| Policy | Routes | Limit | Window | Keyed by |
+|---|---|---|---|---|
+| `broadcast` | `POST /api/insider/broadcast` | 5 | 1 hour | `host_id` |
+| `heavy_write` | `POST /api/streams/[id]/archive/start` | 30 | 1 minute | `user_id` |
+| `heavy_write` | `POST /api/streams/[id]/youtube/upload` | 30 | 1 minute | `user_id` |
+| `heavy_write` | `POST /api/billing/checkout` | 30 | 1 minute | `user_id` |
+| `heavy_write` | `POST /api/admin/billing/grants` | 30 | 1 minute | `admin_id + IP` |
+
+Every 429 response carries:
+
+- `Retry-After: <seconds>`
+- `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+- JSON body: `{ "error": "...", "code": "rate_limited" }`
+
+Tune the limits in `@/lib/security/rate-limit.ts` (the `POLICY_*`
+constants) — every call site references the same object so changing
+the number in one place updates everywhere.
+
+> **Caveat — multi-isolate scoping.** The Worker spawns multiple
+> isolates per data center, each with its own bucket map. A determined
+> attacker hitting different isolates could 2-3× the effective rate.
+> That's the WAF's job (layer 1) to prevent — the application
+> limiter is for accidental misuse + compromised tokens, not DDoS.
+
+---
+
+## 8. Final checklist
 
 - [ ] R2: bucket created, CORS set, secrets uploaded, plan toggled.
 - [ ] R2: post-stream upload tested.
@@ -467,6 +527,8 @@ be deleted.
 - [ ] (Optional) Email: SMTP_* OR RESEND_* configured; manual-grant
       email arrives within seconds.
 - [ ] (Optional) `CRON_SECRET` set; dry-run cleanup returns 200.
+- [ ] Cloudflare WAF rate-limit rules created (`auth-strict`,
+      `api-default`, `webhook-stripe` skip) — see §7a.
 
 ---
 

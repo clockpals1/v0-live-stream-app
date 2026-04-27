@@ -8,6 +8,11 @@ import {
   unsubscribeUrl,
 } from "@/lib/insider/email";
 import { isEntitled } from "@/lib/billing/entitlements";
+import {
+  checkRateLimit,
+  rateLimitHeaders,
+  POLICY_BROADCAST,
+} from "@/lib/security/rate-limit";
 
 /**
  * POST /api/insider/broadcast
@@ -45,6 +50,23 @@ export async function POST(request: Request) {
 
   if (!host) {
     return NextResponse.json({ error: "Not a registered host" }, { status: 403 });
+  }
+
+  // ─── 1a. Rate limit ─────────────────────────────────────────────────
+  // 5/hour per host. Mass-spam from a compromised host token is the
+  // top concern here (every recipient gets a real email, costing
+  // Resend credits and reputation). Normal use is ~1/week.
+  const rl = checkRateLimit(`host:${host.id}`, POLICY_BROADCAST);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      {
+        error:
+          "Too many broadcasts. You can send at most " +
+          `${POLICY_BROADCAST.limit} per hour. Try again later.`,
+        code: "rate_limited",
+      },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
   }
 
   // ─── 1b. Plan gate ──────────────────────────────────────────────────
