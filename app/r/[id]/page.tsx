@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { ReplayPublicView } from "@/components/replay/public-view";
+import { presignDownload } from "@/lib/storage/r2";
 
 /**
  * Public replay page — `/r/[id]`.
@@ -57,7 +58,9 @@ interface ReplayRow {
 
 interface ArchiveRow {
   id: string;
+  object_key: string | null;
   public_url: string | null;
+  status: string;
   content_type: string;
   byte_size: number | null;
 }
@@ -79,6 +82,7 @@ interface CommentRow {
 async function loadReplay(id: string): Promise<{
   replay: ReplayRow;
   archive: ArchiveRow | null;
+  resolvedVideoUrl: string | null;
   host: HostRow | null;
   comments: CommentRow[];
   viewerHasLiked: boolean;
@@ -106,7 +110,7 @@ async function loadReplay(id: string): Promise<{
   // 2) Archive (for the player). May fail benignly if RLS rejects.
   const { data: archive } = await supabase
     .from("stream_archives")
-    .select("id, public_url, content_type, byte_size")
+    .select("id, object_key, public_url, status, content_type, byte_size")
     .eq("id", replay.archive_id)
     .maybeSingle<ArchiveRow>();
 
@@ -162,9 +166,25 @@ async function loadReplay(id: string): Promise<{
     console.warn("[r/[id]] view counter bump failed:", err);
   }
 
+  // If the bucket is private (no R2_PUBLIC_URL_BASE) the archive row
+  // has public_url=null even after a successful upload. Generate a
+  // short-lived presigned GET URL server-side so the player can work.
+  let resolvedVideoUrl: string | null = archive?.public_url ?? null;
+  if (!resolvedVideoUrl && archive?.status === "ready" && archive.object_key) {
+    try {
+      resolvedVideoUrl = await presignDownload({
+        objectKey: archive.object_key,
+        expiresInSeconds: 21600, // 6 hours — covers long watch sessions
+      });
+    } catch {
+      // R2 not configured or key missing — leave null; player shows fallback
+    }
+  }
+
   return {
     replay,
     archive: archive ?? null,
+    resolvedVideoUrl,
     host: host ?? null,
     comments: (comments as CommentRow[] | null) ?? [],
     viewerHasLiked,
@@ -233,7 +253,8 @@ export default async function PublicReplayPage({
       title={data.replay.title}
       description={data.replay.description}
       thumbnailUrl={data.replay.thumbnail_url}
-      videoUrl={data.archive?.public_url ?? null}
+      videoUrl={data.resolvedVideoUrl}
+      archiveStatus={data.archive?.status ?? null}
       videoMime={data.archive?.content_type ?? "video/webm"}
       hostName={data.host?.display_name ?? "Creator"}
       publishedAt={data.replay.published_at}

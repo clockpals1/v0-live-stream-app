@@ -58,6 +58,8 @@ interface PublicViewProps {
   description: string | null;
   thumbnailUrl: string | null;
   videoUrl: string | null;
+  /** Raw status from stream_archives — drives the player fallback message. */
+  archiveStatus: string | null;
   videoMime: string;
   hostName: string;
   publishedAt: string | null;
@@ -74,6 +76,7 @@ export function ReplayPublicView({
   description,
   thumbnailUrl,
   videoUrl,
+  archiveStatus,
   videoMime,
   hostName,
   publishedAt,
@@ -213,8 +216,20 @@ export function ReplayPublicView({
               Your browser doesn't support video playback.
             </video>
           ) : (
-            <div className="flex aspect-video items-center justify-center bg-muted text-sm text-muted-foreground">
-              This replay is no longer available.
+            <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-muted text-sm text-muted-foreground">
+              {archiveStatus === "uploading" ? (
+                <>
+                  <span className="text-base font-medium">Processing recording…</span>
+                  <span className="text-xs">The video is still uploading. Check back in a few minutes.</span>
+                </>
+              ) : archiveStatus === "failed" ? (
+                <>
+                  <span className="text-base font-medium">Upload failed</span>
+                  <span className="text-xs">The recording couldn't be saved. The host may need to re-upload.</span>
+                </>
+              ) : (
+                <span>This replay is no longer available.</span>
+              )}
             </div>
           )}
         </div>
