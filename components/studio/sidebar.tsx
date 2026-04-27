@@ -2,11 +2,33 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Lock } from "lucide-react";
+import {
+  ArrowLeft,
+  Lock,
+  LayoutDashboard,
+  Film,
+  Share2,
+  Users,
+  CircleDollarSign,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { StudioNavItem } from "@/lib/studio/nav";
+import type { StudioIconKey, StudioNavItem } from "@/lib/studio/nav";
+
+/**
+ * Icon registry. Lives client-side so the server layout can pass plain
+ * string keys (`iconKey`) across the RSC boundary without serializing
+ * a forwardRef component object — Next.js refuses to do that.
+ */
+const STUDIO_ICONS: Record<StudioIconKey, LucideIcon> = {
+  overview: LayoutDashboard,
+  replay: Film,
+  distribution: Share2,
+  audience: Users,
+  monetize: CircleDollarSign,
+};
 
 /**
  * Studio sidebar — the persistent left rail on every Studio page.
@@ -59,7 +81,7 @@ export function StudioSidebar({
       {/* ─── nav ─────────────────────────────────────────────────────── */}
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
         {items.map((item) => {
-          const Icon = item.icon;
+          const Icon = STUDIO_ICONS[item.iconKey];
           const active =
             item.href === "/studio"
               ? pathname === "/studio"
