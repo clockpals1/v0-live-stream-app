@@ -51,6 +51,22 @@ import {
   PictureInPicture2,
 } from "lucide-react";
 
+/**
+ * Watch-page branding (Live control room → Branding deck).
+ * Persisted host-side via streams.branding jsonb (migration 027).
+ * - watchPageTheme: 'default' | 'minimal' | 'branded'
+ * - accentColor:    any CSS colour string (e.g. "#d7711d")
+ *
+ * Theme behaviour:
+ *   default  — current look, accent ignored
+ *   minimal  — softer header / lighter chrome, accent on LIVE pill
+ *   branded  — accent on LIVE pill + primary CTAs + brand mark
+ */
+interface BrandingForViewer {
+  watchPageTheme?: "default" | "minimal" | "branded" | null;
+  accentColor?: string | null;
+}
+
 interface Stream {
   id: string;
   room_code: string;
@@ -61,6 +77,7 @@ interface Stream {
   ended_at: string | null;
   active_participant_id?: string | null;
   host_id?: string | null;
+  branding?: BrandingForViewer | null;
 }
 
 interface ChatMessage {
@@ -80,6 +97,22 @@ export function ViewerStreamInterface({
   hostName,
 }: ViewerStreamInterfaceProps) {
   const [stream, setStream] = useState(initialStream);
+
+  // Derived branding — theme + accent flow through streams.branding jsonb
+  // and update live when the host edits them in the Branding deck (the
+  // streams realtime subscription further below replaces `stream` on
+  // every UPDATE, so this re-derives automatically).
+  const brandTheme: "default" | "minimal" | "branded" =
+    stream.branding?.watchPageTheme ?? "default";
+  const brandAccent: string | null = stream.branding?.accentColor ?? null;
+  const accentInUse = brandTheme !== "default" && !!brandAccent;
+  /** Inline style binding for elements that should pick up the host's
+   *  accent colour. Components that opt in pass this as `style={accentBg}`
+   *  or `style={accentText}`. */
+  const accentBg: React.CSSProperties | undefined = accentInUse
+    ? { backgroundColor: brandAccent! }
+    : undefined;
+
   const [viewerName, setViewerName] = useState("");
   const [hasJoined, setHasJoined] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
@@ -1399,12 +1432,34 @@ export function ViewerStreamInterface({
         </div>
       )}
 
-      <div className="min-h-screen bg-background">
-        {/* Header */}
-        <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div
+        className={`min-h-screen bg-background ${
+          brandTheme === "minimal" ? "viewer-theme-minimal" : ""
+        } ${brandTheme === "branded" ? "viewer-theme-branded" : ""}`}
+        data-brand-theme={brandTheme}
+        style={
+          accentInUse
+            ? ({ "--brand-accent": brandAccent! } as React.CSSProperties)
+            : undefined
+        }
+      >
+        {/* Header.
+            'minimal' theme drops the bottom border + backdrop blur for a
+            lighter chrome. 'branded' keeps the chrome but lets the brand
+            mark and LIVE pill pick up the host's accent colour. */}
+        <header
+          className={`sticky top-0 z-40 ${
+            brandTheme === "minimal"
+              ? "bg-background"
+              : "border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+          }`}
+        >
           <div className="container mx-auto px-4 py-2 sm:py-3 flex items-center justify-between gap-3">
             <Link href="/" className="flex items-center gap-2 shrink-0">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+              <div
+                className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center"
+                style={brandTheme === "branded" && accentBg ? accentBg : undefined}
+              >
                 <Radio className="w-4 h-4 text-primary-foreground" />
               </div>
               <span className="font-bold text-foreground hidden sm:block">Isunday Stream Live</span>
@@ -1413,7 +1468,10 @@ export function ViewerStreamInterface({
             <div className="flex items-center gap-2 shrink-0">
               {stream.status === "live" && (
                 <>
-                  <Badge className="bg-red-500 text-white gap-1.5 px-2.5">
+                  <Badge
+                    className="bg-red-500 text-white gap-1.5 px-2.5"
+                    style={accentInUse ? accentBg : undefined}
+                  >
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />LIVE
                   </Badge>
                   {streamElapsed > 0 && (

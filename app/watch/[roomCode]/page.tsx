@@ -43,3 +43,8 @@ export default async function WatchStreamPage({ params }: Props) {
     />
   );
 }
+
+// Note: stream.branding is selected by `select *` above and reaches
+// ViewerStreamInterface via the stream prop. The viewer reads
+// branding.watchPageTheme + branding.accentColor at the root and
+// applies them via a CSS variable + data-brand-theme attribute.

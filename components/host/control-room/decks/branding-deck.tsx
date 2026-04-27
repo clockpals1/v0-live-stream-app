@@ -333,29 +333,53 @@ function LayoutCard({
   layout: SceneLayout;
   onChange: (patch: Partial<BrandingConfig>) => void;
 }) {
+  // ── Honest disclosure ────────────────────────────────────────────────
+  // Solo is the rendered output today (single-track WebRTC pipeline).
+  // Split / PiP store the preference and Scenes recall it, but viewer-side
+  // multi-track composition isn't shipped yet — selecting them won't
+  // visually change the broadcast for viewers. They are surfaced now so
+  // hosts can build their scene library; the rendering pipeline lights
+  // them up in a follow-up release without any further host action.
+  const SOON: SceneLayout[] = ["split", "pip"];
   return (
     <SubCard
       icon={Layout}
       title="Premium layouts"
-      description="Composition for the active program output."
+      description="Solo renders today. Split / PiP save as scene presets — multi-track viewer rendering ships next."
     >
       <div className="flex items-center gap-1.5 flex-wrap">
-        {(["solo", "split", "pip"] as SceneLayout[]).map((l) => (
-          <button
-            key={l}
-            type="button"
-            onClick={() => onChange({ layout: l })}
-            className={`h-9 px-3 rounded-md text-[12px] capitalize gap-1.5 inline-flex items-center font-medium ring-1 transition-all ${
-              layout === l
-                ? "ring-primary/60 ring-2 bg-primary/10 text-primary"
-                : "ring-border bg-background hover:ring-foreground/30"
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            {LAYOUT_LABEL[l]}
-          </button>
-        ))}
+        {(["solo", "split", "pip"] as SceneLayout[]).map((l) => {
+          const isSoon = SOON.includes(l);
+          return (
+            <button
+              key={l}
+              type="button"
+              onClick={() => onChange({ layout: l })}
+              title={
+                isSoon
+                  ? "Saved as a scene preset. Multi-track rendering ships in a follow-up."
+                  : undefined
+              }
+              className={`relative h-9 px-3 rounded-md text-[12px] capitalize gap-1.5 inline-flex items-center font-medium ring-1 transition-all ${
+                layout === l
+                  ? "ring-primary/60 ring-2 bg-primary/10 text-primary"
+                  : "ring-border bg-background hover:ring-foreground/30"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {LAYOUT_LABEL[l]}
+              {isSoon && (
+                <span className="ml-1 inline-flex items-center h-4 px-1.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.1em] bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/30">
+                  Soon
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
+      <p className="text-[11px] text-muted-foreground mt-2.5 leading-relaxed">
+        These pick the composition Scenes will recall. Solo is rendered now; Split and PiP unlock visually when multi-track viewer rendering ships.
+      </p>
     </SubCard>
   );
 }
