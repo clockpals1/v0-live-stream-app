@@ -67,12 +67,24 @@ export async function listReplaysForHost(
 ): Promise<ReplayItem[]> {
   // Two queries are simpler than a single nested select with RLS quirks.
   // Volume is bounded by the host's archive count so the cost is fine.
+  //
+  // The column name is `byte_size`, not `size_bytes` — every other
+  // archive read in the codebase uses byte_size (see migration 020).
+  // The earlier typo here failed every fetch silently with PostgREST
+  // error "column stream_archives.size_bytes does not exist" and
+  // forced the Replay Library into the 'No archives yet' empty state
+  // even when the host had successfully uploaded recordings.
+  //
+  // We also filter `deleted_at IS NULL` so soft-deleted rows the
+  // archive-cleanup cron has marked for retention purge don't flash
+  // in the UI before being filtered out elsewhere.
   const { data: archives, error: archiveErr } = await supabase
     .from("stream_archives")
     .select(
-      "id, stream_id, size_bytes, created_at, public_url, status, streams(title)",
+      "id, stream_id, byte_size, created_at, public_url, status, streams(title)",
     )
     .eq("host_id", hostId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .limit(200);
   if (archiveErr) {
@@ -121,7 +133,7 @@ export async function listReplaysForHost(
       streamId: (row.stream_id as string | null) ?? null,
       streamTitle: streamRel?.title || "Untitled stream",
       archivedAt: row.created_at as string,
-      sizeBytes: Number(row.size_bytes ?? 0),
+      sizeBytes: Number(row.byte_size ?? 0),
       archiveUrl: (row.public_url as string | null) ?? null,
       archiveExpired: row.status === "expired" || row.status === "deleted",
       publication: publications[row.id as string] ?? null,
