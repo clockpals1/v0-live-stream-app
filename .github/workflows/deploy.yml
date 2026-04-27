@@ -10,6 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Build & Deploy to Cloudflare
+    timeout-minutes: 20
 
     permissions:
       contents: read
@@ -27,6 +28,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+
+      # ─── TypeScript gate ────────────────────────────────────────────
+      # Fast check before any build work. Catches type errors introduced
+      # in the AI Hub modules (lib/ai/*, components/admin/ai/*, etc.).
+      - name: TypeScript check
+        run: npx tsc --noEmit
 
       # ─── Smoke tests ────────────────────────────────────────────────
       # Boot a regular Next prod server and hit the public surface with
@@ -104,6 +111,30 @@ jobs:
             exit 1
           fi
 
+      # ─── Sync runtime secrets to the Worker ──────────────────────
+      # These are server-side secrets (never baked into the build).
+      # wrangler secret put is idempotent — safe to run every deploy.
+      # If a secret is not set as a GitHub Secret it will be skipped.
+      - name: Sync runtime secrets to Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+            echo "✅ SUPABASE_SERVICE_ROLE_KEY synced"
+          else
+            echo "⚠️  SUPABASE_SERVICE_ROLE_KEY not set — skipping (add to GitHub Secrets)"
+          fi
+          if [ -n "$CRON_SECRET" ]; then
+            echo "$CRON_SECRET" | npx wrangler secret put CRON_SECRET
+            echo "✅ CRON_SECRET synced"
+          else
+            echo "⚠️  CRON_SECRET not set — skipping (add to GitHub Secrets)"
+          fi
+
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --var NODE_ENV:production
         env:
@@ -112,7 +143,26 @@ jobs:
 
       - name: Deployment summary
         run: |
-          echo "✅ Deployed successfully!"
-          echo "🌐 URL: https://v0-live-stream-app.workers.dev"
-          echo "📦 Commit: ${{ github.sha }}"
-          echo "👤 Author: ${{ github.actor }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅  Deployed successfully to Cloudflare Workers"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "📺  Live surface:   https://live.isunday.me"
+          echo "🎬  Studio surface: https://studio.isunday.me"
+          echo "🤖  AI Hub:         https://ai.isunday.me"
+          echo "🔧  Workers dev:    https://v0-live-stream-app.workers.dev"
+          echo ""
+          echo "📦  Commit:  ${{ github.sha }}"
+          echo "🌿  Branch:  ${{ github.ref_name }}"
+          echo "👤  Author:  ${{ github.actor }}"
+          echo "🕐  Time:    $(date -u '+%Y-%m-%d %H:%M UTC')"
+          echo ""
+          echo "🔑  Secrets required in GitHub → Settings → Secrets:"
+          echo "    CLOUDFLARE_API_TOKEN        (Workers:Edit permission)"
+          echo "    CLOUDFLARE_ACCOUNT_ID       (Cloudflare dashboard → top right)"
+          echo "    NEXT_PUBLIC_SUPABASE_URL    (baked at build time)"
+          echo "    NEXT_PUBLIC_SUPABASE_ANON_KEY (baked at build time)"
+          echo "    SUPABASE_SERVICE_ROLE_KEY   (runtime — never public)"
+          echo "    CRON_SECRET                 (runtime — random string)"
+          echo "    NEXT_PUBLIC_APP_URL         (optional, defaults to workers.dev)"
