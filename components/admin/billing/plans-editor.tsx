@@ -172,6 +172,12 @@ const FEATURE_LABELS: Record<
     help: "Gate individual replays behind a one-time price or subscription tier.",
     icon: <LockIcon className="h-3.5 w-3.5" />,
   },
+  // ─── Analytics & Insights ─────────────────────────────────────────────
+  live_analytics: {
+    label: "Live analytics & Insights",
+    help: "Viewer trends, peak concurrents, chat activity, subscriber growth, replay performance, and stream retention in the Studio Insights page.",
+    icon: <BarChart3 className="h-3.5 w-3.5" />,
+  },
 };
 
 function priceLabel(p: BillingPlan): string {

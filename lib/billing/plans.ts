@@ -46,6 +46,8 @@ export const FEATURE_KEYS = [
   // Monetization Center
   "monetization_basic",
   "monetization_paywall",
+  // Analytics & Insights
+  "live_analytics",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -106,6 +108,12 @@ export const FEATURE_CATEGORIES: ReadonlyArray<{
     label: "Monetization Center",
     description: "Earnings, paywalls, premium replays.",
     keys: ["monetization_basic", "monetization_paywall"],
+  },
+  {
+    id: "analytics",
+    label: "Analytics & Insights",
+    description: "Live stream analytics, viewer trends, subscriber growth, replay performance.",
+    keys: ["live_analytics"],
   },
 ];
 

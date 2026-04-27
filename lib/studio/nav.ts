@@ -27,7 +27,8 @@ export type StudioIconKey =
   | "replay"
   | "distribution"
   | "audience"
-  | "monetize";
+  | "monetize"
+  | "insights";
 
 export interface StudioNavItem {
   href: string;
@@ -72,5 +73,12 @@ export const STUDIO_NAV: ReadonlyArray<StudioNavItem> = [
     description: "Earnings, paywalls, premium content.",
     iconKey: "monetize",
     gateKey: "monetization_basic",
+  },
+  {
+    href: "/studio/insights",
+    label: "Insights",
+    description: "Viewer trends, chat activity, subscriber growth.",
+    iconKey: "insights",
+    gateKey: "live_analytics",
   },
 ];

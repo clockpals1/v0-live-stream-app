@@ -18,6 +18,8 @@ import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialo
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
 import { OnboardingChecklist } from "@/components/host/onboarding-checklist";
 import { CreatorWorkspaceStrip } from "@/components/host/creator-workspace-strip";
+import { DashboardStatsRow } from "@/components/host/dashboard-stats-row";
+import { RecentReplaysWidget } from "@/components/host/recent-replays-widget";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { EffectivePlan } from "@/lib/billing/entitlements";
 import {
@@ -713,6 +715,10 @@ export function DashboardContent({
           />
         )}
 
+        {/* Quick stats row — fetches aggregated analytics client-side.
+            Shown only for stream-creating hosts (not cohost-only). */}
+        {canCreateStreams && host && <DashboardStatsRow />}
+
         {/* Creator Workspace — links the live dashboard to the studio
             modules (Replay, Distribution, Audience, Monetize). The strip
             reuses STUDIO_NAV so the surfaces stay in lockstep. */}
@@ -1021,7 +1027,7 @@ export function DashboardContent({
             </Card>
           )}
 
-          {/* Streams List */}
+          {/* Streams List + Recent Replays */}
           <div className="lg:col-span-2 flex flex-col gap-6">
 
             {/* ── Live Now ── combined live streams (owned + co-hosting) */}
@@ -1168,6 +1174,12 @@ export function DashboardContent({
                     ))}
                 </div>
               </div>
+            )}
+
+            {/* Recent Replays widget — compact list of top published replays
+                so the host can see their replay performance at a glance. */}
+            {canCreateStreams && (
+              <RecentReplaysWidget />
             )}
 
             <div>

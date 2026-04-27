@@ -10,6 +10,7 @@ import {
   Share2,
   Users,
   CircleDollarSign,
+  BarChart2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ export const STUDIO_ICONS: Record<StudioIconKey, LucideIcon> = {
   distribution: Share2,
   audience: Users,
   monetize: CircleDollarSign,
+  insights: BarChart2,
 };
 
 /**

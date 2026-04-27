@@ -39,6 +39,8 @@ const FEATURE_LABELS: Record<FeatureKey, string> = {
   // Monetization Center
   monetization_basic: "Basic monetization",
   monetization_paywall: "Paywall & gated content",
+  // Analytics & Insights
+  live_analytics: "Live stream analytics & Insights",
 };
 
 function priceLine(p: BillingPlan): string {
