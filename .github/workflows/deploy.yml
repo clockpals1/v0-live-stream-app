@@ -80,6 +80,30 @@ jobs:
           echo "Worker: $(du -sh .open-next/worker.js 2>/dev/null || echo 'not found')"
           echo "Assets: $(du -sh .open-next/assets 2>/dev/null || echo 'not found')"
 
+      # Hard gate on bundle size BEFORE we hit Cloudflare. Workers Paid
+      # caps the worker at 10 MiB compressed; we keep a 9 MiB ceiling
+      # to leave headroom and catch growth early instead of finding out
+      # via a failed deploy.
+      - name: Enforce worker size budget
+        run: |
+          BUNDLE=".open-next/server-functions/default/handler.mjs"
+          if [ ! -f "$BUNDLE" ]; then
+            echo "::error::Worker bundle not found at $BUNDLE"
+            exit 1
+          fi
+          SIZE_BYTES=$(stat -c%s "$BUNDLE")
+          SIZE_MB=$(awk "BEGIN { printf \"%.2f\", $SIZE_BYTES / 1024 / 1024 }")
+          BUDGET_MB=9
+          BUDGET_BYTES=$((BUDGET_MB * 1024 * 1024))
+          echo "Handler size: ${SIZE_MB} MiB (budget: ${BUDGET_MB} MiB)"
+          if [ "$SIZE_BYTES" -gt "$BUDGET_BYTES" ]; then
+            echo "::error::Worker bundle ${SIZE_MB} MiB exceeds budget ${BUDGET_MB} MiB."
+            echo "Cloudflare Workers Paid caps at 10 MiB. See next.config.mjs"
+            echo "for the @vercel/og alias trick. Largest deps:"
+            ls -laS .open-next/server-functions/default/ | head -10
+            exit 1
+          fi
+
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --var NODE_ENV:production
         env:
