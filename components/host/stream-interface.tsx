@@ -672,6 +672,11 @@ function OwnerStreamInterface({
             <GuestsRail
               participants={cohostParticipants}
               roomCode={stream.room_code}
+              onInvite={
+                isStreamOwner || isAdmin
+                  ? () => handleTabChange("cameras")
+                  : undefined
+              }
             />
           </aside>
 

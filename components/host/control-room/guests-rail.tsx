@@ -2,7 +2,7 @@
 
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Copy, Users } from "lucide-react";
+import { Copy, Plus, Users } from "lucide-react";
 import { DeckHeader } from "@/components/host/control-room/deck-header";
 import { SURFACE, TYPO } from "@/lib/control-room/styles";
 
@@ -37,29 +37,56 @@ function initials(name: string): string {
  * one-click join-link copy per slot. Live switching of which guest
  * goes on-air remains in the Cameras tab (DirectorPanel) — this rail
  * is the at-a-glance presence list.
+ *
+ * The actual invite flow lives in DirectorPanel (the Cameras tab) so
+ * we don't duplicate it. The `onInvite` prop lets the parent jump the
+ * comms-tabs router straight to that tab when the host clicks our
+ * "Invite" CTA — closing the loop the empty-state copy promises.
  */
 export function GuestsRail({
   participants,
   roomCode,
+  onInvite,
 }: {
   participants: GuestParticipant[];
   roomCode: string;
+  onInvite?: () => void;
 }) {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
 
   return (
     <section className={`${SURFACE.panel} p-4`}>
-      <DeckHeader
-        icon={Users}
-        title="Guests"
-        description="Co-hosts invited to this room."
-      />
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <DeckHeader
+          icon={Users}
+          title="Guests"
+          description="Co-hosts invited to this room."
+        />
+        {onInvite && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onInvite}
+            className="h-7 px-2 -mt-0.5 shrink-0"
+            title="Invite a co-host"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            Invite
+          </Button>
+        )}
+      </div>
 
       {participants.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-6 text-center">
+        <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-6 text-center flex flex-col items-center gap-2">
           <p className={`${TYPO.sub} leading-relaxed`}>
-            No guests yet. Invite co-hosts from the Cameras tab.
+            No guests yet. Invite a co-host to share the camera with you.
           </p>
+          {onInvite && (
+            <Button size="sm" variant="secondary" onClick={onInvite} className="h-7">
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Invite co-host
+            </Button>
+          )}
         </div>
       ) : (
         <ul className="flex flex-col gap-1.5">
