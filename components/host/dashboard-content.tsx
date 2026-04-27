@@ -44,6 +44,7 @@ import {
   ShieldCheck,
   RefreshCw,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -615,6 +616,18 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
                   <Settings className="w-4 h-4 mr-2" />
                   <span className="hidden sm:inline">Settings</span>
                 </Link>
+              </Button>
+            )}
+            {/* Studio surface — creator workspace on a sibling subdomain.
+                Auth cookies are shared at .isunday.me so the host doesn't
+                re-login. We use a plain anchor (not Link) because the
+                target is a different host. */}
+            {canCreateStreams && host && (
+              <Button variant="ghost" size="sm" asChild>
+                <a href="https://studio.isunday.me" target="_self">
+                  <Sparkles className="w-4 h-4 mr-2 text-primary" />
+                  <span className="hidden sm:inline">Studio</span>
+                </a>
               </Button>
             )}
             {/* Emergency Notification Button */}

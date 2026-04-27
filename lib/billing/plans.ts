@@ -20,11 +20,80 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * `features` JSON in the DB will be inspected against this list.
  */
 export const FEATURE_KEYS = [
+  // Live + storage (existing)
   "insider_circle",
   "cloud_archive",
   "youtube_upload",
+  // Replay Library (Studio surface)
+  "replay_publishing",
+  "replay_likes",
+  "replay_comments",
+  "replay_featured",
+  "replay_clips",
+  "replay_analytics",
+  // Distribution Hub
+  "distribution_youtube",
+  "distribution_export",
+  // Audience CRM
+  "audience_crm",
+  // Monetization Center
+  "monetization_basic",
+  "monetization_paywall",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
+
+/**
+ * Display categories for the admin Plan Editor.
+ *
+ * The list is organised in product surfaces so the toggle UI doesn't
+ * become a flat wall of 14 switches. Adding a new key only requires
+ * appending it to FEATURE_KEYS above AND placing it in one of these
+ * groups; the admin UI auto-renders it.
+ */
+export const FEATURE_CATEGORIES: ReadonlyArray<{
+  id: string;
+  label: string;
+  description: string;
+  keys: ReadonlyArray<FeatureKey>;
+}> = [
+  {
+    id: "live",
+    label: "Live & storage",
+    description: "Capabilities used during a live stream and right after it ends.",
+    keys: ["cloud_archive", "youtube_upload", "insider_circle"],
+  },
+  {
+    id: "replay",
+    label: "Replay Library",
+    description: "What hosts can do with their replay catalogue in the Studio.",
+    keys: [
+      "replay_publishing",
+      "replay_likes",
+      "replay_comments",
+      "replay_featured",
+      "replay_clips",
+      "replay_analytics",
+    ],
+  },
+  {
+    id: "distribution",
+    label: "Distribution Hub",
+    description: "Where replays and recordings can be sent.",
+    keys: ["distribution_youtube", "distribution_export"],
+  },
+  {
+    id: "audience",
+    label: "Audience CRM",
+    description: "Subscriber management and segmentation.",
+    keys: ["audience_crm"],
+  },
+  {
+    id: "monetize",
+    label: "Monetization Center",
+    description: "Earnings, paywalls, premium replays.",
+    keys: ["monetization_basic", "monetization_paywall"],
+  },
+];
 
 export interface BillingPlan {
   id: string;
