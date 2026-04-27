@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Activity,
   Image as ImageIcon,
@@ -10,7 +8,9 @@ import {
   Music2,
   Sparkles,
   Tv,
+  type LucideIcon,
 } from "lucide-react";
+import { SURFACE, TYPO } from "@/lib/control-room/styles";
 
 interface Props {
   overlayDeck: React.ReactNode;
@@ -21,15 +21,29 @@ interface Props {
   healthDeck: React.ReactNode;
 }
 
+type DeckKey = "overlay" | "ticker" | "music" | "media" | "branding" | "health";
+
+const DECKS: ReadonlyArray<{ key: DeckKey; label: string; icon: LucideIcon }> = [
+  { key: "overlay", label: "Overlay", icon: Megaphone },
+  { key: "ticker", label: "Ticker", icon: Tv },
+  { key: "music", label: "Music", icon: Music2 },
+  { key: "media", label: "Media", icon: ImageIcon },
+  { key: "branding", label: "Branding", icon: Sparkles },
+  { key: "health", label: "Health", icon: Activity },
+];
+
 /**
- * Producer Deck — horizontal tabs over the producer modules. Replaces
- * the previous "scroll past 6 cards stacked vertically" layout. The
- * host picks a tool, configures it, and switches to the next without
- * leaving the program preview behind.
+ * Producer Deck — replaces a shadcn Tabs component with a custom
+ * segmented studio switcher. Why custom:
  *
- * Tabs are uncontrolled at this level — none of these decks have any
- * cross-deck state. The control-room state hook is the source of truth
- * for everything they read from.
+ *   - The default Tabs shows a flat list of buttons. Production
+ *     consoles signal which tool you're in with a *colored bar* and
+ *     an icon shift, not just a text underline.
+ *   - We want the active deck label to read like "OVERLAY" in a
+ *     module header strip, not like a tab title — establishes that
+ *     each deck IS a module, not a sub-page.
+ *   - The active indicator is a gradient bar above the row, drawing
+ *     the eye downward into the deck content.
  */
 export function ProducerDeck({
   overlayDeck,
@@ -39,45 +53,62 @@ export function ProducerDeck({
   brandingDeck,
   healthDeck,
 }: Props) {
-  const [tab, setTab] = useState("overlay");
+  const [active, setActive] = useState<DeckKey>("overlay");
+  const activeMeta = DECKS.find((d) => d.key === active)!;
+
+  const renderActive = () => {
+    switch (active) {
+      case "overlay": return overlayDeck;
+      case "ticker": return tickerDeck;
+      case "music": return musicDeck;
+      case "media": return mediaDeck;
+      case "branding": return brandingDeck;
+      case "health": return healthDeck;
+    }
+  };
+
   return (
-    <Card>
-      <CardContent className="p-3 sm:p-4">
-        <Tabs value={tab} onValueChange={setTab} className="w-full">
-          <TabsList className="grid grid-cols-3 sm:grid-cols-6 w-full mb-3">
-            <TabsTrigger value="overlay" className="text-xs gap-1.5">
-              <Megaphone className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Overlay</span>
-            </TabsTrigger>
-            <TabsTrigger value="ticker" className="text-xs gap-1.5">
-              <Tv className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Ticker</span>
-            </TabsTrigger>
-            <TabsTrigger value="music" className="text-xs gap-1.5">
-              <Music2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Music</span>
-            </TabsTrigger>
-            <TabsTrigger value="media" className="text-xs gap-1.5">
-              <ImageIcon className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Media</span>
-            </TabsTrigger>
-            <TabsTrigger value="branding" className="text-xs gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Branding</span>
-            </TabsTrigger>
-            <TabsTrigger value="health" className="text-xs gap-1.5">
-              <Activity className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Health</span>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="overlay" className="mt-0">{overlayDeck}</TabsContent>
-          <TabsContent value="ticker" className="mt-0">{tickerDeck}</TabsContent>
-          <TabsContent value="music" className="mt-0">{musicDeck}</TabsContent>
-          <TabsContent value="media" className="mt-0">{mediaDeck}</TabsContent>
-          <TabsContent value="branding" className="mt-0">{brandingDeck}</TabsContent>
-          <TabsContent value="health" className="mt-0">{healthDeck}</TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+    <section className={`${SURFACE.panel} overflow-hidden`}>
+      {/* Module header strip */}
+      <div className="px-4 sm:px-5 pt-3.5 pb-3 flex items-center justify-between gap-3 border-b border-border/60">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="h-7 w-7 rounded-md bg-gradient-to-br from-primary/25 via-primary/15 to-primary/5 ring-1 ring-primary/25 flex items-center justify-center text-primary shrink-0">
+            <activeMeta.icon className="w-3.5 h-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p className={TYPO.label}>Producer Deck</p>
+            <p className={`${TYPO.title} -mt-0.5`}>{activeMeta.label}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Segmented switcher */}
+      <div className="px-3 sm:px-4 pt-3">
+        <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg ring-1 ring-border/60 overflow-x-auto">
+          {DECKS.map((d) => {
+            const isActive = d.key === active;
+            const Icon = d.icon;
+            return (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => setActive(d.key)}
+                className={`relative flex-1 sm:flex-none min-w-[64px] inline-flex items-center justify-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-md text-[11px] sm:text-xs font-medium transition-colors ${
+                  isActive
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-border/70"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{d.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Active deck */}
+      <div className="px-3 sm:px-4 py-3 sm:py-4">{renderActive()}</div>
+    </section>
   );
 }

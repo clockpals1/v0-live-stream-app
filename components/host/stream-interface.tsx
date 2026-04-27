@@ -638,21 +638,22 @@ function OwnerStreamInterface({
         health={health}
       />
 
-      <main className="container mx-auto px-4 py-6">
+      <main className="container mx-auto px-4 sm:px-6 py-5 sm:py-6">
         {error && (
-          <div className="mb-4 p-4 bg-destructive/10 border border-destructive rounded-lg flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-destructive" />
-            <p className="text-sm text-destructive">{error}</p>
+          <div className="mb-4 p-3.5 rounded-xl bg-gradient-to-r from-red-500/10 to-rose-500/10 ring-1 ring-red-500/30 flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+            <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
           </div>
         )}
 
         {/* 3-zone Live Control Room layout:
-              xl: [scenes/guests rail | program + producer deck | comms tabs]
-              md: [program + producer deck | comms tabs]  (rails collapse to bottom)
-              sm: stack: program → comms → producer → rails */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-4">
+              xl ≥ 1280: [rails 3 | program + producer deck 6 | comms 3]
+              md  ≥ 768: [program + producer deck | comms]  rails go below
+              sm       : stacked: program → comms → producer → rails
+            Spacing rhythm: outer gap 5, inter-section gap 4, inner gap 3. */}
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] xl:grid-cols-[260px_1fr_320px] gap-5">
           {/* ── Left rail (xl only): Scenes + Guests ─────────────────── */}
-          <aside className="xl:col-span-2 xl:order-1 order-3 flex flex-col gap-4">
+          <aside className="xl:order-1 order-3 flex flex-col gap-4 md:col-span-2 xl:col-span-1">
             <ScenesRail
               scenes={cr.scenes}
               currentLayout={cr.branding.layout ?? "solo"}
@@ -670,7 +671,7 @@ function OwnerStreamInterface({
           </aside>
 
           {/* ── Center: Program preview + stage actions + producer deck ── */}
-          <section className="xl:col-span-7 md:col-span-1 xl:order-2 order-1 flex flex-col gap-4">
+          <section className="xl:order-2 order-1 flex flex-col gap-4 min-w-0">
             <ProgramPreview
               ref={videoRef}
               isMobile={isMobile}
@@ -860,19 +861,24 @@ function ShareLinkStrip({ roomCode }: { roomCode: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
+    <div className="flex items-center gap-2 rounded-lg ring-1 ring-border bg-muted/30 hover:bg-muted/50 transition-colors px-3 h-9">
       <Copy className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-      <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0 hidden sm:inline">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground shrink-0 hidden sm:inline">
         Viewer link
       </span>
       <Input
         value={link}
         readOnly
-        className="font-mono text-xs h-7 border-0 bg-transparent shadow-none focus-visible:ring-0 px-1"
+        className="font-mono text-[11px] h-7 border-0 bg-transparent shadow-none focus-visible:ring-0 px-1 text-foreground/80"
         onClick={(e) => (e.target as HTMLInputElement).select()}
       />
-      <Button variant="ghost" size="sm" className="h-7 px-2 shrink-0" onClick={copy}>
-        {copied ? "Copied!" : "Copy"}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2 shrink-0 text-xs"
+        onClick={copy}
+      >
+        {copied ? "Copied" : "Copy"}
       </Button>
     </div>
   );

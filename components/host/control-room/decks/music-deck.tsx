@@ -1,9 +1,8 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Music2 } from "lucide-react";
 import { OverlayMusic, type OverlayMusicHandle } from "@/components/host/overlay-music";
+import { DeckHeader } from "@/components/host/control-room/deck-header";
 
 interface Props {
   streamId: string;
@@ -18,12 +17,6 @@ interface Props {
   onStateChange: (s: { active: boolean; volume: number; mixWithMic: boolean }) => void;
 }
 
-/**
- * Music deck — host-uploaded audio fed to viewers via the audio
- * sender swap inside useHostStream.setLiveAudioTrack(). The actual
- * upload + mixer + playback UI lives in the existing OverlayMusic
- * component; this wrapper just gives it a labelled card surface.
- */
 export function MusicDeck({
   streamId,
   innerRef,
@@ -37,41 +30,27 @@ export function MusicDeck({
   onStateChange,
 }: Props) {
   return (
-    <Card>
-      <CardHeader className="pb-3 border-b">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-              <Music2 className="w-4 h-4 text-primary" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-sm font-semibold">Music</CardTitle>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Background audio mixed with your mic and broadcast to viewers.
-              </p>
-            </div>
-          </div>
-          {state.active && (
-            <Badge className="bg-green-500 text-white text-[10px] h-5 px-1.5 shrink-0">
-              PLAYING LIVE
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <OverlayMusic
-          ref={innerRef}
-          streamId={streamId}
-          currentUrl={currentUrl}
-          micTrack={micTrack}
-          isStreaming={isStreaming}
-          initial={state}
-          onLiveAudioTrack={onLiveAudioTrack}
-          onUploaded={onUploaded}
-          onCleared={onCleared}
-          onStateChange={onStateChange}
-        />
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-3.5">
+      <DeckHeader
+        icon={Music2}
+        title="Music"
+        description="Background audio mixed with your mic and broadcast to viewers."
+        status={
+          state.active ? { label: "Playing live", tone: "live" } : undefined
+        }
+      />
+      <OverlayMusic
+        ref={innerRef}
+        streamId={streamId}
+        currentUrl={currentUrl}
+        micTrack={micTrack}
+        isStreaming={isStreaming}
+        initial={state}
+        onLiveAudioTrack={onLiveAudioTrack}
+        onUploaded={onUploaded}
+        onCleared={onCleared}
+        onStateChange={onStateChange}
+      />
+    </div>
   );
 }

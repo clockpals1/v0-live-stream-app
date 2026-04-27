@@ -3,19 +3,19 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
-  ImageIcon,
+  Image as ImageIcon,
+  Layout,
   Loader2,
   Palette,
   Sparkles,
   Trash2,
-  Layout,
 } from "lucide-react";
 import { LockedCard } from "@/components/host/control-room/locked-card";
+import { DeckHeader } from "@/components/host/control-room/deck-header";
+import { ICON_CHIP, SURFACE, TYPO } from "@/lib/control-room/styles";
 import { featureEnabled } from "@/lib/billing/plans";
 import type { BillingPlan } from "@/lib/billing/plans";
 import type {
@@ -46,19 +46,9 @@ const LAYOUT_LABEL: Record<SceneLayout, string> = {
 
 /**
  * Branding deck — premium creator-tools surface. Every card is
- * rendered regardless of plan; locked features show a clear upsell
- * card so the host always knows what they could unlock without
- * leaving the page.
- *
- * Feature keys consulted:
- *   - logo_watermark        → Watermark uploader + position picker
- *   - branded_watch_page    → Watch-page theme + accent colour
- *   - premium_layouts       → Layout chooser (solo / split / pip)
- *
- * Branding writes go through the parent `update()` setter which
- * persists to streams.branding (jsonb). Watermark uploads use the
- * existing `stream-overlays` Supabase Storage bucket — same bucket
- * used by overlay images so we don't need a separate policy.
+ * rendered regardless of plan. Locked features show an upsell card
+ * (LockedCard) instead of disappearing — the host always knows what
+ * they could unlock.
  */
 export function BrandingDeck({ streamId, plan, branding, update }: Props) {
   const canWatermark = featureEnabled(plan, "logo_watermark");
@@ -66,10 +56,12 @@ export function BrandingDeck({ streamId, plan, branding, update }: Props) {
   const canLayouts = featureEnabled(plan, "premium_layouts");
 
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-[11px] text-muted-foreground -mt-1">
-        Make your stream feel like your brand. Premium controls unlock with paid plans.
-      </p>
+    <div className="flex flex-col gap-3.5">
+      <DeckHeader
+        icon={Sparkles}
+        title="Branding"
+        description="Make your stream feel like your brand. Premium controls unlock with paid plans."
+      />
 
       {canWatermark ? (
         <WatermarkCard
@@ -109,6 +101,40 @@ export function BrandingDeck({ streamId, plan, branding, update }: Props) {
           description="Switch between Solo, Split-screen, and Picture-in-Picture compositions during your show."
         />
       )}
+    </div>
+  );
+}
+
+function SubCard({
+  icon: Icon,
+  title,
+  description,
+  active,
+  children,
+}: {
+  icon: typeof Sparkles;
+  title: string;
+  description: string;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`${SURFACE.inline} p-3.5`}>
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className={ICON_CHIP.primary}>
+          <Icon className="w-4 h-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className={TYPO.title}>{title}</p>
+          <p className={`${TYPO.sub} truncate`}>{description}</p>
+        </div>
+        {active && (
+          <span className="inline-flex items-center gap-1 h-5 px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/30 shrink-0">
+            Active
+          </span>
+        )}
+      </div>
+      {children}
     </div>
   );
 }
@@ -158,35 +184,20 @@ function WatermarkCard({
   };
 
   return (
-    <Card>
-      <CardHeader className="pb-3 border-b">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
-              <ImageIcon className="w-4 h-4 text-primary" />
-            </div>
-            <div>
-              <CardTitle className="text-sm font-semibold">Logo watermark</CardTitle>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Shown in the corner of your live preview.
-              </p>
-            </div>
-          </div>
-          {watermarkUrl && (
-            <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 text-[10px] h-5 px-1.5">
-              ACTIVE
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 pt-3">
+    <SubCard
+      icon={ImageIcon}
+      title="Logo watermark"
+      description="Shown in the corner of your live preview."
+      active={!!watermarkUrl}
+    >
+      <div className="flex flex-col gap-3">
         {watermarkUrl ? (
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={watermarkUrl}
               alt="Current watermark"
-              className="h-10 w-auto rounded border border-border bg-muted/30"
+              className="h-10 w-auto rounded ring-1 ring-border bg-muted/30"
             />
             <div className="flex items-center gap-1.5 ml-auto">
               <Button
@@ -205,9 +216,7 @@ function WatermarkCard({
                 className="h-7"
                 disabled={uploading}
               >
-                {uploading ? (
-                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                ) : null}
+                {uploading && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
                 Replace
               </Button>
             </div>
@@ -239,24 +248,24 @@ function WatermarkCard({
           }}
         />
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-muted-foreground mr-1">Position:</span>
+          <span className={TYPO.label}>Position</span>
           {(["tl", "tr", "bl", "br"] as WatermarkPosition[]).map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => onChange({ watermarkPosition: p })}
-              className={`h-7 px-2.5 rounded-md border text-xs transition-all ${
+              className={`h-7 px-2.5 rounded-md text-[11px] font-medium ring-1 transition-all ${
                 position === p
-                  ? "border-primary ring-2 ring-primary/30 bg-primary/10"
-                  : "border-border hover:border-foreground/30"
+                  ? "ring-primary/60 ring-2 bg-primary/10 text-primary"
+                  : "ring-border bg-background hover:ring-foreground/30"
               }`}
             >
               {POS_LABEL[p]}
             </button>
           ))}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </SubCard>
   );
 }
 
@@ -270,32 +279,23 @@ function BrandedPageCard({
   onChange: (patch: Partial<BrandingConfig>) => void;
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-3 border-b">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
-            <Palette className="w-4 h-4 text-primary" />
-          </div>
-          <div>
-            <CardTitle className="text-sm font-semibold">Branded watch page</CardTitle>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Theme + accent colour applied to your public watch URL.
-            </p>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 pt-3">
+    <SubCard
+      icon={Palette}
+      title="Branded watch page"
+      description="Theme + accent colour applied to your public watch URL."
+    >
+      <div className="flex flex-col gap-3">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-muted-foreground mr-1">Theme:</span>
+          <span className={TYPO.label}>Theme</span>
           {(["default", "minimal", "branded"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => onChange({ watchPageTheme: t })}
-              className={`h-7 px-2.5 rounded-md border text-xs capitalize transition-all ${
+              className={`h-7 px-2.5 rounded-md text-[11px] capitalize font-medium ring-1 transition-all ${
                 theme === t
-                  ? "border-primary ring-2 ring-primary/30 bg-primary/10"
-                  : "border-border hover:border-foreground/30"
+                  ? "ring-primary/60 ring-2 bg-primary/10 text-primary"
+                  : "ring-border bg-background hover:ring-foreground/30"
               }`}
             >
               {t}
@@ -303,7 +303,7 @@ function BrandedPageCard({
           ))}
         </div>
         <label className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Accent:</span>
+          <span className={TYPO.label}>Accent</span>
           <Input
             type="color"
             value={accent}
@@ -317,8 +317,8 @@ function BrandedPageCard({
             maxLength={9}
           />
         </label>
-      </CardContent>
-    </Card>
+      </div>
+    </SubCard>
   );
 }
 
@@ -330,37 +330,28 @@ function LayoutCard({
   onChange: (patch: Partial<BrandingConfig>) => void;
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-3 border-b">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
-            <Layout className="w-4 h-4 text-primary" />
-          </div>
-          <div>
-            <CardTitle className="text-sm font-semibold">Premium layouts</CardTitle>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Composition for the active program output.
-            </p>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex items-center gap-1.5 flex-wrap pt-3">
+    <SubCard
+      icon={Layout}
+      title="Premium layouts"
+      description="Composition for the active program output."
+    >
+      <div className="flex items-center gap-1.5 flex-wrap">
         {(["solo", "split", "pip"] as SceneLayout[]).map((l) => (
           <button
             key={l}
             type="button"
             onClick={() => onChange({ layout: l })}
-            className={`h-9 px-3 rounded-md border text-xs capitalize gap-1.5 inline-flex items-center transition-all ${
+            className={`h-9 px-3 rounded-md text-[12px] capitalize gap-1.5 inline-flex items-center font-medium ring-1 transition-all ${
               layout === l
-                ? "border-primary ring-2 ring-primary/30 bg-primary/10"
-                : "border-border hover:border-foreground/30"
+                ? "ring-primary/60 ring-2 bg-primary/10 text-primary"
+                : "ring-border bg-background hover:ring-foreground/30"
             }`}
           >
-            <Sparkles className="w-3 h-3" />
+            <Sparkles className="w-3.5 h-3.5" />
             {LAYOUT_LABEL[l]}
           </button>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </SubCard>
   );
 }

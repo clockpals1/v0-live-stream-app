@@ -1,24 +1,27 @@
 "use client";
 
 import type { MutableRefObject } from "react";
+import { Image as ImageIcon } from "lucide-react";
 import { SlideshowPanel } from "@/components/host/slideshow-panel";
+import { DeckHeader } from "@/components/host/control-room/deck-header";
 
 interface Props {
   streamId: string;
   chatChannelRef: MutableRefObject<unknown>;
 }
 
-/**
- * Media deck — slideshow + future media surfaces (clip player, b-roll,
- * etc.). Today it just hosts the existing SlideshowPanel; the wrapper
- * exists so adding a second module later means dropping it in here
- * rather than adding another tab to the producer deck.
- */
 export function MediaDeck({ streamId, chatChannelRef }: Props) {
   return (
-    <SlideshowPanel
-      streamId={streamId}
-      chatChannelRef={chatChannelRef as MutableRefObject<unknown>}
-    />
+    <div className="flex flex-col gap-3.5">
+      <DeckHeader
+        icon={ImageIcon}
+        title="Media"
+        description="Slideshow images shown over your stream during scenes."
+      />
+      <SlideshowPanel
+        streamId={streamId}
+        chatChannelRef={chatChannelRef as MutableRefObject<unknown>}
+      />
+    </div>
   );
 }
