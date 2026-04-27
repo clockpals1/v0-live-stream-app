@@ -1583,6 +1583,7 @@ function OwnerStreamInterface({
                     isLive={isStreaming}
                     roomCode={stream.room_code}
                     streamTitle={stream.title}
+                    streamId={stream.id}
                   />
                 </TabsContent>
               )}

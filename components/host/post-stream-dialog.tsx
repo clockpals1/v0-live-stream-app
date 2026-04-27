@@ -81,8 +81,8 @@ export function PostStreamDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {alreadyDownloaded
-              ? "Your recording downloaded to this device. Save copies to the cloud or YouTube too."
-              : "Choose what to do with the recording."}
+              ? "A local copy downloaded to this device. To make it appear in your Replay Library (and publish as a public replay), also save it to the cloud below."
+              : "Choose where to save the recording. Only the cloud archive option puts it in your Replay Library."}
           </DialogDescription>
         </DialogHeader>
 

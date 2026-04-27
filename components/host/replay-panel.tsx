@@ -38,9 +38,13 @@ import {
   Trash2,
   Download,
   Info,
+  Cloud,
+  CloudOff,
+  ExternalLink,
 } from "lucide-react";
 import type { Section, SectionRecorderApi } from "@/lib/replay/types";
 import { exportSection, fsAccessSupported } from "@/lib/replay/export";
+import { uploadSectionToCloud } from "@/lib/replay/cloud-upload";
 import {
   REPLAY_LOCAL_EXPORT_ENABLED,
   REPLAY_MAX_SECTION_MINUTES,
@@ -54,6 +58,13 @@ interface ReplayPanelProps {
   /** Used to compose export filenames. */
   roomCode: string;
   streamTitle: string;
+  /**
+   * Stream UUID. Required for the per-section "Save to cloud" button
+   * — it's posted to /api/streams/:streamId/archive/start so the
+   * archive row is correctly attributed back to this live stream. The
+   * old name is `roomCode` (a short code) which is NOT the same thing.
+   */
+  streamId: string;
 }
 
 const formatDuration = (ms: number): string => {
@@ -144,18 +155,31 @@ function StateBadge({ state }: { state: Section["state"] }) {
   );
 }
 
-// ─── A single section row ──────────────────────────────────────────────────
+// ─── Per-row cloud upload state machine ─────────────────────────────
+// Lives entirely inside SectionRow. We deliberately don't lift it
+// onto the recorder API: cloud uploads are a presentational concern
+// (the recorder owns chunks; the panel owns destination choices).
+type CloudPhase =
+  | { kind: "idle" }
+  | { kind: "uploading"; progress: number; archiveId: string | null }
+  | { kind: "saved"; archiveUrl: string | null }
+  | { kind: "failed"; message: string };
+
+// ─── A single section row ──────────────────────────────────────
 function SectionRow({
   section,
   onForget,
   baseExportName,
+  streamId,
 }: {
   section: Section;
   onForget: () => void;
   baseExportName: string;
+  streamId: string;
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportState, setExportState] = useState<Section["state"]>(section.state);
+  const [cloud, setCloud] = useState<CloudPhase>({ kind: "idle" });
 
   // Sync local UI state with parent state — but allow local optimistic
   // exports to render before propagating up (we never DO propagate up
@@ -195,6 +219,39 @@ function SectionRow({
     }
   }, [section.blob, section.index, baseExportName]);
 
+  // Save the section to R2 + the host's Replay Library. This is the
+  // closure of the loop the Phase 1 recorder left open: a section
+  // recorded here ends up listed at studio.isunday.me/studio/replay
+  // ready to publish.
+  const handleSaveToCloud = useCallback(async () => {
+    if (!section.blob) return;
+    setCloud({ kind: "uploading", progress: 0, archiveId: null });
+    const result = await uploadSectionToCloud({
+      streamId,
+      blob: section.blob,
+      contentType: section.mimeType || "video/webm",
+      onStarted: (archiveId) =>
+        setCloud((prev) =>
+          prev.kind === "uploading" ? { ...prev, archiveId } : prev,
+        ),
+      onProgress: (fraction) =>
+        setCloud((prev) =>
+          prev.kind === "uploading"
+            ? { ...prev, progress: fraction }
+            : prev,
+        ),
+    });
+    if (result.status === "saved") {
+      setCloud({ kind: "saved", archiveUrl: result.publicUrl });
+      toast.success(
+        "Section saved to your Replay Library. Open Studio to publish it.",
+      );
+    } else {
+      setCloud({ kind: "failed", message: result.message });
+      toast.error(`Couldn't save to cloud: ${result.message}`);
+    }
+  }, [section.blob, section.mimeType, streamId]);
+
   return (
     <div className="rounded-lg border border-border bg-card/60 p-3 space-y-2.5">
       {/* Row header */}
@@ -227,18 +284,81 @@ function SectionRow({
         </div>
       )}
 
+      {/* Cloud upload progress / outcome */}
+      {cloud.kind === "uploading" && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Uploading to your Replay Library… {Math.round(cloud.progress * 100)}%
+          </div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all"
+              style={{ width: `${Math.max(2, cloud.progress * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {cloud.kind === "saved" && (
+        <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">In your Replay Library.</span>
+          <a
+            href="https://studio.isunday.me/studio/replay"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-0.5 font-medium hover:underline"
+          >
+            Open <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      )}
+      {cloud.kind === "failed" && (
+        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+          <CloudOff className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span className="flex-1">{cloud.message}</span>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex items-center gap-2 flex-wrap">
         {section.state === "ready" || section.state === "exported" ||
         section.state === "export-cancelled" || section.state === "export-failed" ? (
           <>
-            {REPLAY_LOCAL_EXPORT_ENABLED && (
+            {/* Save to cloud — the only path that gets the section into
+                the host's Replay Library. "Save to drive" below is
+                local-only and never reaches the studio. */}
+            {cloud.kind !== "saved" && (
               <Button
                 size="sm"
                 variant="default"
+                onClick={handleSaveToCloud}
+                disabled={cloud.kind === "uploading" || !section.blob}
+                className="gap-1.5"
+                title="Upload to your Replay Library so you can publish it as a public replay."
+              >
+                {cloud.kind === "uploading" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : cloud.kind === "failed" ? (
+                  <Cloud className="w-3.5 h-3.5" />
+                ) : (
+                  <Cloud className="w-3.5 h-3.5" />
+                )}
+                {cloud.kind === "uploading"
+                  ? "Uploading…"
+                  : cloud.kind === "failed"
+                    ? "Retry upload"
+                    : "Save to cloud"}
+              </Button>
+            )}
+            {REPLAY_LOCAL_EXPORT_ENABLED && (
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={handleExport}
                 disabled={isExporting || !section.blob}
                 className="gap-1.5"
+                title="Save a copy to your computer. Local-only — will not appear in your Replay Library."
               >
                 {fsAccessSupported() ? (
                   <Save className="w-3.5 h-3.5" />
@@ -252,6 +372,7 @@ function SectionRow({
               size="sm"
               variant="ghost"
               onClick={onForget}
+              disabled={cloud.kind === "uploading"}
               className="gap-1.5 text-muted-foreground hover:text-destructive"
               title="Drop this section from memory"
             >
@@ -269,12 +390,13 @@ function SectionRow({
   );
 }
 
-// ─── The main panel ────────────────────────────────────────────────────────
+// ─── The main panel ───────────────────────────────────────────
 export function ReplayPanel({
   recorder,
   isLive,
   roomCode,
   streamTitle,
+  streamId,
 }: ReplayPanelProps) {
   const { sections, isRecording, markSectionEnd, forgetSection } = recorder;
 
@@ -353,6 +475,7 @@ export function ReplayPanel({
               section={s}
               onForget={() => forgetSection(s.id)}
               baseExportName={baseExportName}
+              streamId={streamId}
             />
           ))}
         </div>
