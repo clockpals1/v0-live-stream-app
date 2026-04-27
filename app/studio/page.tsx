@@ -44,19 +44,25 @@ export default async function StudioOverviewPage() {
   const effective = await getEffectivePlan(supabase, user.id);
   const plan = effective.plan;
 
-  // Counts. Keep all queries cheap (head:true, exact count).
-  const [{ count: archiveCount }, { count: publishedCount }] =
-    await Promise.all([
-      supabase
-        .from("stream_archives")
-        .select("id", { count: "exact", head: true })
-        .eq("host_id", host?.id ?? ""),
-      supabase
-        .from("replay_publications")
-        .select("id", { count: "exact", head: true })
-        .eq("host_id", host?.id ?? "")
-        .eq("is_published", true),
-    ]);
+  // Counts. Each wrapped individually so the page still renders if a
+  // table is missing (e.g. migration 025 not applied yet — replay_
+  // publications won't exist on first deploy). The cost of a failed
+  // query is tiny; the cost of a 500 on the studio landing is large.
+  const [archiveCount, publishedCount] = await Promise.all([
+    supabase
+      .from("stream_archives")
+      .select("id", { count: "exact", head: true })
+      .eq("host_id", host?.id ?? "")
+      .then((r) => r.count ?? 0)
+      .catch(() => 0),
+    supabase
+      .from("replay_publications")
+      .select("id", { count: "exact", head: true })
+      .eq("host_id", host?.id ?? "")
+      .eq("is_published", true)
+      .then((r) => r.count ?? 0)
+      .catch(() => 0),
+  ]);
 
   const tiles = [
     {
