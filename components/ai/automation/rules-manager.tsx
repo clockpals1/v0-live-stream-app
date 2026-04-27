@@ -10,6 +10,13 @@ import {
   Plus,
   Trash2,
   AlertCircle,
+  Clapperboard,
+  RefreshCw,
+  Play,
+  Clock,
+  TrendingUp,
+  Sparkles,
+  ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -53,7 +60,9 @@ type RuleType =
   | "daily_content_ideas"
   | "weekly_summary"
   | "post_stream_recap"
-  | "affiliate_campaign";
+  | "affiliate_campaign"
+  | "short_video_autopilot"
+  | "evergreen_repurpose";
 
 export interface AutomationRule {
   id: string;
@@ -70,6 +79,15 @@ export interface AutomationRule {
 
 // ── Rule type metadata ────────────────────────────────────────────────────
 
+type ConfigField =
+  | "niche"
+  | "platform"
+  | "tone"
+  | "product_name"
+  | "product_description"
+  | "video_length"
+  | "monetization_angle";
+
 const RULE_META: Record<
   RuleType,
   {
@@ -78,28 +96,28 @@ const RULE_META: Record<
     icon: LucideIcon;
     scheduleLabel: string;
     color: string;
-    configFields: Array<"niche" | "platform" | "tone" | "product_name" | "product_description">;
+    configFields: ConfigField[];
   }
 > = {
   daily_content_ideas: {
     label: "Daily Content Ideas",
-    description: "5 fresh ideas in your niche, every morning",
+    description: "5 fresh content ideas in your niche, every morning",
     icon: ListChecks,
-    scheduleLabel: "Daily",
+    scheduleLabel: "Daily · 07:00 UTC",
     color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
     configFields: ["niche", "platform", "tone"],
   },
   weekly_summary: {
     label: "Weekly Performance Summary",
-    description: "AI narrative of your last 7 days' stream performance",
+    description: "AI narrative of your last 7 days of stream performance",
     icon: BarChart2,
-    scheduleLabel: "Weekly",
+    scheduleLabel: "Weekly · Mondays",
     color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     configFields: [],
   },
   post_stream_recap: {
     label: "Post-Stream Recap",
-    description: "Auto recap and repurposing plan after each live ends",
+    description: "Auto recap + repurposing plan after each live ends",
     icon: Video,
     scheduleLabel: "After each live",
     color: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
@@ -107,11 +125,27 @@ const RULE_META: Record<
   },
   affiliate_campaign: {
     label: "Affiliate Campaign Copy",
-    description: "Weekly campaign copy for a configured product",
+    description: "Weekly campaign copy and CTAs for a configured product",
     icon: CircleDollarSign,
-    scheduleLabel: "Weekly",
+    scheduleLabel: "Weekly · Mondays",
     color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
     configFields: ["product_name", "product_description", "niche", "tone"],
+  },
+  short_video_autopilot: {
+    label: "Short Video Autopilot",
+    description: "Daily 60s script for TikTok/Reels — hook, body, CTA, caption",
+    icon: Clapperboard,
+    scheduleLabel: "Daily · 07:00 UTC",
+    color: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+    configFields: ["niche", "platform", "tone", "video_length", "monetization_angle"],
+  },
+  evergreen_repurpose: {
+    label: "Evergreen Repurposer",
+    description: "Recycles your best content weekly — 3 new hooks, captions, angles",
+    icon: RefreshCw,
+    scheduleLabel: "Weekly · Mondays",
+    color: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+    configFields: ["niche", "tone"],
   },
 };
 
@@ -132,6 +166,20 @@ function timeAgo(dateStr: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function nextRunLabel(rule: AutomationRule): string {
+  if (rule.schedule === "post_stream") return "After next live";
+  if (rule.next_run_at) {
+    const diff = new Date(rule.next_run_at).getTime() - Date.now();
+    if (diff <= 0) return "Due soon";
+    const h = Math.floor(diff / (60 * 60 * 1000));
+    if (h < 1) return "< 1h";
+    if (h < 24) return `in ${h}h`;
+    return `in ${Math.floor(h / 24)}d`;
+  }
+  if (rule.schedule === "daily") return "tomorrow";
+  return "next Monday";
+}
+
 function configSummary(rule: AutomationRule): string {
   const c = rule.config;
   const parts: string[] = [];
@@ -144,13 +192,21 @@ function configSummary(rule: AutomationRule): string {
 
 // ── Main component ────────────────────────────────────────────────────────
 
-interface RulesManagerProps {
-  initialRules: AutomationRule[];
+export interface RulesManagerStats {
+  assetsThisWeek: number;
+  runsThisWeek: number;
 }
 
-export function RulesManager({ initialRules }: RulesManagerProps) {
+interface RulesManagerProps {
+  initialRules: AutomationRule[];
+  stats?: RulesManagerStats;
+}
+
+export function RulesManager({ initialRules, stats }: RulesManagerProps) {
   const [rules, setRules] = useState<AutomationRule[]>(initialRules);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [initialDialogType, setInitialDialogType] = useState<RuleType | undefined>();
+  const [runningRuleId, setRunningRuleId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const handleToggle = (id: string, enabled: boolean) => {
@@ -180,31 +236,77 @@ export function RulesManager({ initialRules }: RulesManagerProps) {
     });
   };
 
+  const handleRunNow = async (id: string) => {
+    setRunningRuleId(id);
+    try {
+      const res = await fetch(`/api/ai/rules/${id}/run`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error ?? "Run failed");
+        return;
+      }
+      setRules((prev) => prev.map((r) =>
+        r.id === id
+          ? { ...r, last_run_at: json.last_run_at, run_count: json.run_count }
+          : r,
+      ));
+      toast.success(`Done — ${json.assetCount} asset${json.assetCount !== 1 ? "s" : ""} ready in AI Studio`);
+    } catch {
+      toast.error("Network error — please try again.");
+    } finally {
+      setRunningRuleId(null);
+    }
+  };
+
   const handleCreate = (rule: AutomationRule) => {
     setRules((prev) => [...prev, rule]);
     setDialogOpen(false);
+    setInitialDialogType(undefined);
     toast.success("Automation rule created");
   };
 
+  const openDialogWith = (type?: RuleType) => {
+    setInitialDialogType(type);
+    setDialogOpen(true);
+  };
+
   const activeCount = rules.filter((r) => r.enabled).length;
+  const existingTypes = new Set(rules.map((r) => r.rule_type));
 
   return (
     <div className="space-y-5">
+      {/* Stats bar — only if there's something to show */}
+      {rules.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <StatPill
+            icon={Zap}
+            label="Active rules"
+            value={`${activeCount}/${rules.length}`}
+            color="text-violet-500"
+          />
+          <StatPill
+            icon={Sparkles}
+            label="Auto-assets this week"
+            value={String(stats?.assetsThisWeek ?? 0)}
+            color="text-blue-500"
+          />
+          <StatPill
+            icon={TrendingUp}
+            label="Runs this week"
+            value={String(stats?.runsThisWeek ?? 0)}
+            color="text-emerald-500"
+          />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold">Automation Rules</h2>
-          {rules.length > 0 && (
-            <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-              {activeCount}/{rules.length} active
-            </Badge>
-          )}
-        </div>
+        <h2 className="text-base font-semibold">Automation Rules</h2>
         <Button
           size="sm"
           variant="outline"
           className="h-8 gap-1.5"
-          onClick={() => setDialogOpen(true)}
+          onClick={() => openDialogWith()}
         >
           <Plus className="h-3.5 w-3.5" />
           New rule
@@ -213,7 +315,7 @@ export function RulesManager({ initialRules }: RulesManagerProps) {
 
       {/* Rule list */}
       {rules.length === 0 ? (
-        <EmptyState onAdd={() => setDialogOpen(true)} />
+        <EmptyState onAdd={() => openDialogWith()} />
       ) : (
         <div className="space-y-2">
           {rules.map((rule) => (
@@ -222,18 +324,41 @@ export function RulesManager({ initialRules }: RulesManagerProps) {
               rule={rule}
               onToggle={handleToggle}
               onDelete={handleDelete}
-              disabled={isPending}
+              onRunNow={handleRunNow}
+              isRunning={runningRuleId === rule.id}
+              disabled={isPending || runningRuleId !== null}
             />
           ))}
         </div>
       )}
 
+      {/* Autopilot Opportunities */}
+      <OpportunitiesPanel
+        existingTypes={existingTypes}
+        onAddType={openDialogWith}
+      />
+
       {/* Create dialog */}
       <CreateRuleDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        initialRuleType={initialDialogType}
+        onOpenChange={(v) => { if (!v) setInitialDialogType(undefined); setDialogOpen(v); }}
         onCreate={handleCreate}
       />
+    </div>
+  );
+}
+
+// ── Stats pill ────────────────────────────────────────────────────────────
+
+function StatPill({
+  icon: Icon, label, value, color,
+}: { icon: LucideIcon; label: string; value: string; color: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1 rounded-xl border border-border bg-muted/30 px-3 py-3 text-center">
+      <Icon className={cn("h-3.5 w-3.5", color)} />
+      <div className="text-base font-semibold tabular-nums">{value}</div>
+      <div className="text-[10px] text-muted-foreground leading-tight">{label}</div>
     </div>
   );
 }
@@ -244,11 +369,15 @@ function RuleRow({
   rule,
   onToggle,
   onDelete,
+  onRunNow,
+  isRunning,
   disabled,
 }: {
   rule: AutomationRule;
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
+  onRunNow: (id: string) => void;
+  isRunning: boolean;
   disabled: boolean;
 }) {
   const meta = RULE_META[rule.rule_type];
@@ -259,12 +388,7 @@ function RuleRow({
     <Card className={cn("transition-opacity", !rule.enabled && "opacity-60")}>
       <CardContent className="flex items-start gap-4 p-4">
         {/* Icon */}
-        <div
-          className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-            meta.color,
-          )}
-        >
+        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", meta.color)}>
           <Icon className="h-4 w-4" />
         </div>
 
@@ -276,28 +400,44 @@ function RuleRow({
               {meta.scheduleLabel}
             </Badge>
             {!rule.enabled && (
-              <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-normal">
-                Paused
-              </Badge>
+              <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-normal">Paused</Badge>
             )}
           </div>
           {summary && (
             <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">{summary}</p>
           )}
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {rule.run_count > 0 ? (
-              <>
-                {rule.run_count} run{rule.run_count !== 1 ? "s" : ""} ·{" "}
-                Last: {timeAgo(rule.last_run_at)}
-              </>
-            ) : (
-              "Not yet run · will fire on next cron cycle"
+          <div className="mt-1 flex items-center gap-2.5">
+            <p className="text-[11px] text-muted-foreground">
+              {rule.run_count > 0
+                ? `${rule.run_count} run${rule.run_count !== 1 ? "s" : ""} · last ${timeAgo(rule.last_run_at)}`
+                : "Not yet run"}
+            </p>
+            {rule.enabled && rule.schedule !== "post_stream" && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
+                <Clock className="h-2.5 w-2.5" />
+                next {nextRunLabel(rule)}
+              </span>
             )}
-          </p>
+          </div>
         </div>
 
         {/* Actions */}
-        <div className="flex shrink-0 items-center gap-2 pl-2">
+        <div className="flex shrink-0 items-center gap-1.5 pl-2">
+          {rule.schedule !== "post_stream" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={() => onRunNow(rule.id)}
+              disabled={disabled || isRunning}
+              title="Run now"
+            >
+              {isRunning
+                ? <RefreshCw className="h-3 w-3 animate-spin" />
+                : <Play className="h-3 w-3" />}
+              {isRunning ? "Running…" : "Run now"}
+            </Button>
+          )}
           <Switch
             checked={rule.enabled}
             onCheckedChange={(v) => onToggle(rule.id, v)}
@@ -340,6 +480,60 @@ function RuleRow({
   );
 }
 
+// ── Autopilot Opportunities Panel ───────────────────────────────────────
+
+const OPPORTUNITY_TYPES: RuleType[] = [
+  "short_video_autopilot",
+  "evergreen_repurpose",
+  "affiliate_campaign",
+  "daily_content_ideas",
+];
+
+function OpportunitiesPanel({
+  existingTypes,
+  onAddType,
+}: {
+  existingTypes: Set<RuleType>;
+  onAddType: (type: RuleType) => void;
+}) {
+  const missing = OPPORTUNITY_TYPES.filter((t) => !existingTypes.has(t)).slice(0, 2);
+  if (missing.length === 0) return null;
+
+  return (
+    <div className="mt-4 space-y-2">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Autopilot opportunities
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {missing.map((type) => {
+          const m = RULE_META[type];
+          const TypeIcon = m.icon;
+          return (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onAddType(type)}
+              className="flex items-start gap-3 rounded-xl border border-dashed border-border bg-muted/20 p-3.5 text-left transition-colors hover:border-primary/40 hover:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <div className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", m.color)}>
+                <TypeIcon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium">{m.label}</div>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{m.description}</div>
+                <div className="mt-1.5 text-[10px] font-medium text-primary">+ Add this autopilot</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Empty state ───────────────────────────────────────────────────────────
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
@@ -363,25 +557,35 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 // ── Create dialog ─────────────────────────────────────────────────────────
 
+const VIDEO_LENGTHS = ["15", "30", "60"] as const;
+const MONETIZATION_ANGLES = ["organic", "product", "affiliate", "brand"] as const;
+
 const DEFAULT_FORM = {
-  rule_type: "daily_content_ideas" as RuleType,
-  niche: "",
-  platform: "generic" as string,
-  tone: "casual" as string,
-  product_name: "",
-  product_description: "",
+  rule_type:            "daily_content_ideas" as RuleType,
+  niche:                "",
+  platform:             "generic" as string,
+  tone:                 "casual" as string,
+  product_name:         "",
+  product_description:  "",
+  video_length:         "60" as string,
+  monetization_angle:   "organic" as string,
 };
 
 function CreateRuleDialog({
   open,
   onOpenChange,
   onCreate,
+  initialRuleType,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreate: (rule: AutomationRule) => void;
+  initialRuleType?: RuleType;
 }) {
-  const [form, setForm] = useState(DEFAULT_FORM);
+  const [form, setForm] = useState(() => ({
+    ...DEFAULT_FORM,
+    rule_type: initialRuleType ?? DEFAULT_FORM.rule_type,
+  }));
   const [saving, setSaving] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
 
@@ -394,6 +598,10 @@ function CreateRuleDialog({
       setFieldError("Product name is required for Affiliate Campaign.");
       return;
     }
+    if (form.rule_type === "short_video_autopilot" && !form.niche.trim()) {
+      setFieldError("Niche is required for Short Video Autopilot.");
+      return;
+    }
 
     const config: Record<string, string> = {};
     if (fields.includes("niche") && form.niche.trim()) config.niche = form.niche.trim();
@@ -403,10 +611,14 @@ function CreateRuleDialog({
       config.product_name = form.product_name.trim();
     if (fields.includes("product_description") && form.product_description.trim())
       config.product_description = form.product_description.trim();
+    if (fields.includes("video_length")) config.video_length = form.video_length;
+    if (fields.includes("monetization_angle")) config.monetization_angle = form.monetization_angle;
 
     const label =
       form.rule_type === "affiliate_campaign" && form.product_name.trim()
         ? `Affiliate — ${form.product_name.trim()}`
+        : form.rule_type === "short_video_autopilot" && form.niche.trim()
+        ? `Short Video — ${form.niche.trim()}`
         : meta.label;
 
     setSaving(true);
@@ -434,7 +646,10 @@ function CreateRuleDialog({
     <Dialog
       open={open}
       onOpenChange={(v) => {
-        if (!saving) { onOpenChange(v); if (!v) { setForm(DEFAULT_FORM); setFieldError(null); } }
+        if (!saving) {
+          onOpenChange(v);
+          if (!v) { setForm({ ...DEFAULT_FORM, rule_type: initialRuleType ?? DEFAULT_FORM.rule_type }); setFieldError(null); }
+        }
       }}
     >
       <DialogContent className="max-w-lg">
@@ -488,6 +703,34 @@ function CreateRuleDialog({
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Configuration
               </p>
+
+              {fields.includes("video_length") && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Video length</Label>
+                  <Select value={form.video_length} onValueChange={(v) => setForm((f) => ({ ...f, video_length: v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {VIDEO_LENGTHS.map((l) => (
+                        <SelectItem key={l} value={l} className="text-sm">{l}s</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {fields.includes("monetization_angle") && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Monetization angle</Label>
+                  <Select value={form.monetization_angle} onValueChange={(v) => setForm((f) => ({ ...f, monetization_angle: v }))}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {MONETIZATION_ANGLES.map((a) => (
+                        <SelectItem key={a} value={a} className="text-sm capitalize">{a}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {fields.includes("product_name") && (
                 <div className="space-y-1">

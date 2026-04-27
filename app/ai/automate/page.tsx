@@ -6,7 +6,7 @@ import { featureEnabled } from "@/lib/billing/plans";
 import { ensureHostRow } from "@/lib/host/bootstrap";
 import { Button } from "@/components/ui/button";
 import { RulesManager } from "@/components/ai/automation/rules-manager";
-import type { AutomationRule } from "@/components/ai/automation/rules-manager";
+import type { AutomationRule, RulesManagerStats } from "@/components/ai/automation/rules-manager";
 import { Zap, Lock, ArrowRight, Info } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +27,35 @@ export default async function AutomatePage() {
 
   // Load existing rules server-side so there's no loading flash
   let initialRules: AutomationRule[] = [];
+  let stats: RulesManagerStats = { assetsThisWeek: 0, runsThisWeek: 0 };
+
   if (host) {
-    const { data } = await supabase
-      .from("ai_automation_rules")
-      .select("id, rule_type, label, enabled, schedule, config, last_run_at, next_run_at, run_count, created_at")
-      .eq("host_id", host.id)
-      .order("created_at", { ascending: true });
-    initialRules = (data ?? []) as AutomationRule[];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [rulesRes, assetsRes, runsRes] = await Promise.all([
+      supabase
+        .from("ai_automation_rules")
+        .select("id, rule_type, label, enabled, schedule, config, last_run_at, next_run_at, run_count, created_at")
+        .eq("host_id", host.id)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("ai_generated_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("host_id", host.id)
+        .gte("created_at", weekAgo)
+        .contains("metadata", { auto: true }),
+      supabase
+        .from("ai_automation_rules")
+        .select("id", { count: "exact", head: true })
+        .eq("host_id", host.id)
+        .gte("last_run_at", weekAgo),
+    ]);
+
+    initialRules = (rulesRes.data ?? []) as AutomationRule[];
+    stats = {
+      assetsThisWeek: assetsRes.count ?? 0,
+      runsThisWeek:   runsRes.count  ?? 0,
+    };
   }
 
   return (
@@ -66,7 +88,7 @@ export default async function AutomatePage() {
       </div>
 
       {/* Live rules manager */}
-      <RulesManager initialRules={initialRules} />
+      <RulesManager initialRules={initialRules} stats={stats} />
     </main>
   );
 }

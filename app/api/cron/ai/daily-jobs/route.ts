@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAiConfig } from "@/lib/ai/config";
-import { generateText } from "@/lib/ai/provider";
-import { getPromptForTask } from "@/lib/ai/prompts";
+import { processAutomationRule } from "@/lib/ai/automation-jobs";
 import { runAgentTask } from "@/lib/ai/agent";
 
 /**
@@ -161,131 +160,43 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// ─── Rule processors ──────────────────────────────────────────────────────
+// ─── Rule processor ───────────────────────────────────────────────────────
 
 async function processRule(opts: {
-  rule: { id: string; host_id: string; rule_type: string; config: Record<string, unknown>; schedule: string };
+  rule: { id: string; host_id: string; rule_type: string; label: string; config: Record<string, unknown>; schedule: string; run_count: number; last_run_at: string | null };
   cfg: Awaited<ReturnType<typeof getAiConfig>>;
   admin: ReturnType<typeof createAdminClient>;
 }): Promise<{ ok: boolean; assetCount: number; error?: string }> {
   const { rule, cfg, admin } = opts;
-  const dailyIdeas = cfg?.agent_daily_ideas ?? 5;
+  if (!cfg) return { ok: false, assetCount: 0, error: "AI config not found" };
 
-  switch (rule.rule_type) {
-    case "daily_content_ideas": {
-      const niche = (rule.config.niche as string) ?? "content creation";
-      const platform = (rule.config.platform as string) ?? "generic";
-      const tone = (rule.config.tone as string) ?? "casual";
+  // Known rule types are handled by the shared processor
+  const knownTypes = [
+    "daily_content_ideas", "weekly_summary", "affiliate_campaign",
+    "short_video_autopilot", "evergreen_repurpose",
+  ];
 
-      const prompts = getPromptForTask("content_ideas", { topic: niche, platform, tone });
-      if (!prompts) return { ok: false, assetCount: 0, error: "No prompt for content_ideas" };
-
-      const result = await generateText({
-        systemPrompt: prompts.systemPrompt.replace("7 content ideas", `${dailyIdeas} content ideas`),
-        userPrompt: prompts.userPrompt,
-        config: cfg,
-        maxTokens: 800,
-        temperature: 0.8,
-      });
-
-      if (!result.ok) return { ok: false, assetCount: 0, error: result.error };
-
-      await admin.from("ai_generated_assets").insert({
-        host_id: rule.host_id,
-        asset_type: "content_ideas",
-        title: `Daily ideas — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
-        content: result.content,
-        platform: platform !== "generic" ? platform : null,
-        metadata: { rule_id: rule.id, auto: true, provider: result.provider, model: result.model },
-      });
-
-      return { ok: true, assetCount: 1 };
-    }
-
-    case "weekly_summary": {
-      // Fetch stream stats for the past 7 days
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: streams } = await admin
-        .from("streams")
-        .select("title, viewer_count")
-        .eq("host_id", rule.host_id)
-        .gte("created_at", since)
-        .order("viewer_count", { ascending: false });
-
-      const streamCount = streams?.length ?? 0;
-      const totalViewers = streams?.reduce((s, r) => s + (r.viewer_count ?? 0), 0) ?? 0;
-      const topTitle = streams?.[0]?.title ?? "untitled stream";
-
-      const prompts = getPromptForTask("weekly_summary", {
-        streamCount,
-        totalViewers,
-        topStreamTitle: topTitle,
-        subscriberGrowth: 0,
-        periodLabel: `last 7 days`,
-      });
-      if (!prompts) return { ok: false, assetCount: 0, error: "No prompt for weekly_summary" };
-
-      const result = await generateText({ systemPrompt: prompts.systemPrompt, userPrompt: prompts.userPrompt, config: cfg, maxTokens: 400, temperature: 0.6 });
-      if (!result.ok) return { ok: false, assetCount: 0, error: result.error };
-
-      await admin.from("ai_generated_assets").insert({
-        host_id: rule.host_id,
-        asset_type: "summary",
-        title: `Weekly summary — ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
-        content: result.content,
-        metadata: { rule_id: rule.id, auto: true, stream_count: streamCount, total_viewers: totalViewers },
-      });
-
-      return { ok: true, assetCount: 1 };
-    }
-
-    case "affiliate_campaign": {
-      const productName = (rule.config.product_name as string) ?? "";
-      if (!productName) return { ok: false, assetCount: 0, error: "No product_name in rule config" };
-
-      const prompts = getPromptForTask("affiliate_campaign", {
-        topic: productName,
-        productName,
-        productDescription: (rule.config.product_description as string) ?? "",
-        niche: (rule.config.niche as string) ?? "",
-        tone: (rule.config.tone as string) ?? "casual",
-      });
-      if (!prompts) return { ok: false, assetCount: 0, error: "No prompt for affiliate_campaign" };
-
-      const result = await generateText({ systemPrompt: prompts.systemPrompt, userPrompt: prompts.userPrompt, config: cfg, maxTokens: 900, temperature: 0.7 });
-      if (!result.ok) return { ok: false, assetCount: 0, error: result.error };
-
-      await admin.from("ai_generated_assets").insert({
-        host_id: rule.host_id,
-        asset_type: "campaign_copy",
-        title: `Affiliate campaign — ${productName}`,
-        content: result.content,
-        metadata: { rule_id: rule.id, auto: true, product: productName },
-      });
-
-      return { ok: true, assetCount: 1 };
-    }
-
-    default: {
-      // God-mode rule — run full agentic chain
-      const agentResult = await runAgentTask({
-        hostId: rule.host_id,
-        goal: {
-          description: rule.config.goal as string ?? rule.rule_type,
-          niche: rule.config.niche as string,
-          platform: rule.config.platform as string,
-          tone: rule.config.tone as string,
-          productName: rule.config.product_name as string,
-        },
-        ruleId: rule.id,
-        supabase: admin,
-      });
-
-      return {
-        ok: agentResult.ok,
-        assetCount: agentResult.assetsCreated.length,
-        error: agentResult.error,
-      };
-    }
+  if (knownTypes.includes(rule.rule_type)) {
+    return processAutomationRule(rule, admin, cfg);
   }
+
+  // Unknown / god-mode rule — run full agentic chain
+  const agentResult = await runAgentTask({
+    hostId: rule.host_id,
+    goal: {
+      description: (rule.config.goal as string) ?? rule.rule_type,
+      niche:        rule.config.niche        as string,
+      platform:     rule.config.platform     as string,
+      tone:         rule.config.tone         as string,
+      productName:  rule.config.product_name as string,
+    },
+    ruleId:   rule.id,
+    supabase: admin,
+  });
+
+  return {
+    ok:         agentResult.ok,
+    assetCount: agentResult.assetsCreated.length,
+    error:      agentResult.error,
+  };
 }

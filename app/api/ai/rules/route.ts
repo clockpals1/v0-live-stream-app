@@ -6,13 +6,17 @@ const VALID_RULE_TYPES = [
   "weekly_summary",
   "post_stream_recap",
   "affiliate_campaign",
+  "short_video_autopilot",
+  "evergreen_repurpose",
 ] as const;
 
 const RULE_SCHEDULE: Record<string, string> = {
-  daily_content_ideas: "daily",
-  weekly_summary:      "weekly",
-  post_stream_recap:   "post_stream",
-  affiliate_campaign:  "weekly",
+  daily_content_ideas:   "daily",
+  weekly_summary:        "weekly",
+  post_stream_recap:     "post_stream",
+  affiliate_campaign:    "weekly",
+  short_video_autopilot: "daily",
+  evergreen_repurpose:   "weekly",
 };
 
 export async function GET() {
@@ -66,6 +70,9 @@ export async function POST(req: NextRequest) {
   }
   if (rule_type === "affiliate_campaign" && !((config as Record<string,unknown>)?.product_name as string)?.trim()) {
     return NextResponse.json({ error: "product_name is required for affiliate_campaign" }, { status: 400 });
+  }
+  if (rule_type === "short_video_autopilot" && !((config as Record<string,unknown>)?.niche as string)?.trim()) {
+    return NextResponse.json({ error: "niche is required for short_video_autopilot" }, { status: 400 });
   }
 
   const schedule = RULE_SCHEDULE[rule_type];
