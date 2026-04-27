@@ -195,6 +195,21 @@ function OwnerStreamInterface({
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
   const activeTabRef = useRef("chat");
+  // Controlled tab state. Kept in sync with activeTabRef so existing reads
+  // (e.g. unread-counter gating in the chat broadcast handler) keep working,
+  // but exposed as state so we can programmatically jump to the Replay tab
+  // from the post-stream CTA below the player.
+  const [activeTab, setActiveTab] = useState<string>("chat");
+  const replayTabRef = useRef<HTMLDivElement>(null);
+  const jumpToReplayTab = () => {
+    setActiveTab("replay");
+    activeTabRef.current = "replay";
+    // Scroll the right-rail into view on mobile/narrow screens where the
+    // tabs sit below the player rather than beside it.
+    requestAnimationFrame(() => {
+      replayTabRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
   const chatChannelRef = useRef<any>(null);
   const overlayMusicRef = useRef<OverlayMusicHandle>(null);
 
@@ -1142,6 +1157,17 @@ function OwnerStreamInterface({
                         Download Recording
                       </Button>
                     )}
+                    {/* Post-stream shortcut to the Replay tab. The Replay tab
+                        is where each section can be downloaded locally or
+                        saved to the cloud archive (plan-gated). This button
+                        only renders when the recorder produced sections so
+                        we never lead the host to an empty panel. */}
+                    {REPLAY_ENABLED && isStreamOwner && sectionRecorder.sections.length > 0 && (
+                      <Button variant="secondary" onClick={jumpToReplayTab}>
+                        <Film className="w-4 h-4 mr-2" />
+                        Open Replay ({sectionRecorder.sections.length})
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       onClick={() => router.push("/host/dashboard")}
@@ -1206,6 +1232,33 @@ function OwnerStreamInterface({
               </div>
               </CardContent>
             </Card>
+
+            {/* Post-stream notice — sits directly under the player so the
+                host can't miss it. Visible only when the stream has ended
+                AND the recorder produced at least one ready section. The
+                Replay tab is where Save to Cloud / Download per-section
+                lives; this banner just makes it findable. */}
+            {REPLAY_ENABLED && isStreamOwner && stream.status === "ended" && sectionRecorder.sections.length > 0 && (
+              <Card className="border-primary/40 bg-primary/5">
+                <CardContent className="p-4 flex items-center gap-3 flex-wrap">
+                  <div className="w-9 h-9 rounded-md bg-primary/15 flex items-center justify-center shrink-0">
+                    <Film className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">
+                      {sectionRecorder.sections.length} recording{sectionRecorder.sections.length === 1 ? "" : "s"} ready
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Download to your device or save to your cloud Replay Library — your plan decides which options unlock.
+                    </p>
+                  </div>
+                  <Button size="sm" onClick={jumpToReplayTab} className="shrink-0">
+                    <Film className="w-4 h-4 mr-1.5" />
+                    Open Replay
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Share Link — slim info strip, this is a one-shot action */}
             <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
@@ -1522,11 +1575,12 @@ function OwnerStreamInterface({
           {/* Right Sidebar: Chat + Director Panel — sticky on desktop so the
               host can keep an eye on chat/cameras while scrolling through
               the Producer Tools below. */}
-          <Card className="lg:col-span-1 flex flex-col overflow-hidden h-[calc(100vh-7rem)] lg:sticky lg:top-20 lg:self-start">
+          <Card ref={replayTabRef} className="lg:col-span-1 flex flex-col overflow-hidden h-[calc(100vh-7rem)] lg:sticky lg:top-20 lg:self-start">
             <Tabs
-              defaultValue="chat"
+              value={activeTab}
               className="flex flex-col h-full"
               onValueChange={(v) => {
+                setActiveTab(v);
                 activeTabRef.current = v;
                 if (v === "chat") setUnreadCount(0);
               }}
