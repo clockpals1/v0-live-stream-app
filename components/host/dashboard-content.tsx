@@ -44,6 +44,7 @@ import {
   RefreshCw,
   Settings,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -676,6 +677,15 @@ export function DashboardContent({
                 <a href="https://studio.isunday.me">
                   <Sparkles className="w-4 h-4 text-primary" />
                   <span className="ml-1.5 hidden md:inline text-xs">Studio</span>
+                </a>
+              </Button>
+            )}
+
+            {canCreateStreams && (
+              <Button variant="ghost" size="sm" asChild className="h-8 px-2.5">
+                <a href="https://ai.isunday.me">
+                  <Zap className="w-4 h-4 text-violet-500" />
+                  <span className="ml-1.5 hidden md:inline text-xs">AI Hub</span>
                 </a>
               </Button>
             )}

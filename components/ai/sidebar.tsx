@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ArrowLeft,
   Lock,
   Sparkles,
   Zap,
   Send,
   CircleDollarSign,
   BarChart2,
+  Radio,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -118,13 +118,20 @@ export function AiSidebar({ items, hostName, planLabel }: AiSidebarProps) {
           </div>
           <ThemeToggle size="sm" />
         </div>
-        <Link
+        <a
+          href="https://live.isunday.me/host/dashboard"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Radio className="h-3 w-3" />
+          <span>Live dashboard</span>
+        </a>
+        <a
           href="https://studio.isunday.me"
           className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <ArrowLeft className="h-3 w-3" />
-          Back to Studio
-        </Link>
+          <Sparkles className="h-3 w-3 text-primary" />
+          <span>Studio</span>
+        </a>
       </div>
     </aside>
   );

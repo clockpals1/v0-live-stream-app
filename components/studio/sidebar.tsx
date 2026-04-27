@@ -11,6 +11,7 @@ import {
   Users,
   CircleDollarSign,
   BarChart2,
+  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -137,12 +138,19 @@ export function StudioSidebar({
           </div>
           <ThemeToggle size="sm" />
         </div>
+        <a
+          href="https://ai.isunday.me"
+          className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Zap className="h-3 w-3 text-violet-500" />
+          <span>AI Hub</span>
+        </a>
         <Link
           href="https://live.isunday.me/host/dashboard"
           className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <ArrowLeft className="h-3 w-3" />
-          Back to live dashboard
+          Live dashboard
         </Link>
       </div>
     </aside>
