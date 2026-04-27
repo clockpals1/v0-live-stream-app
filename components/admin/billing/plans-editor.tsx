@@ -72,6 +72,9 @@ import {
   CircleDollarSign as DollarIcon,
   Lock as LockIcon,
   Globe,
+  ImageIcon,
+  Palette,
+  Layout as LayoutIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -93,6 +96,22 @@ const FEATURE_LABELS: Record<
     label: "YouTube upload",
     help: "Upload ended streams to the host's connected YouTube channel.",
     icon: <Wand2 className="h-3.5 w-3.5" />,
+  },
+  // ─── Live Control Room — production-time premium tools ───────────────
+  live_watermark: {
+    label: "Logo watermark",
+    help: "Hosts can place a logo in any corner of their live preview.",
+    icon: <ImageIcon className="h-3.5 w-3.5" />,
+  },
+  live_branded_page: {
+    label: "Branded watch page",
+    help: "Custom theme + accent colour applied to the public watch page.",
+    icon: <Palette className="h-3.5 w-3.5" />,
+  },
+  live_premium_layouts: {
+    label: "Premium layouts",
+    help: "Solo / Split-screen / Picture-in-Picture compositions during a live show.",
+    icon: <LayoutIcon className="h-3.5 w-3.5" />,
   },
   // ─── Replay Library ───────────────────────────────────────────────────
   replay_publishing: {

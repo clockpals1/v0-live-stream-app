@@ -82,9 +82,12 @@ export function ProducerDeck({
         </div>
       </div>
 
-      {/* Segmented switcher */}
+      {/* Segmented switcher.
+          Uses flex-wrap (not overflow-x-auto) so on a narrow column the
+          tabs reflow into a second row instead of leaving a horizontal
+          scrollbar. Every tab keeps a min-width so labels never crop. */}
       <div className="px-3 sm:px-4 pt-3">
-        <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg ring-1 ring-border/60 overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-muted/50 rounded-lg ring-1 ring-border/60">
           {DECKS.map((d) => {
             const isActive = d.key === active;
             const Icon = d.icon;
@@ -93,14 +96,14 @@ export function ProducerDeck({
                 key={d.key}
                 type="button"
                 onClick={() => setActive(d.key)}
-                className={`relative flex-1 sm:flex-none min-w-[64px] inline-flex items-center justify-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-md text-[11px] sm:text-xs font-medium transition-colors ${
+                className={`flex-1 min-w-[88px] inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-[11px] sm:text-xs font-medium transition-colors ${
                   isActive
                     ? "bg-background text-foreground shadow-sm ring-1 ring-border/70"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{d.label}</span>
+                <span>{d.label}</span>
               </button>
             );
           })}

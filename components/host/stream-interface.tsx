@@ -646,14 +646,19 @@ function OwnerStreamInterface({
           </div>
         )}
 
-        {/* 3-zone Live Control Room layout:
-              xl ≥ 1280: [rails 3 | program + producer deck 6 | comms 3]
-              md  ≥ 768: [program + producer deck | comms]  rails go below
-              sm       : stacked: program → comms → producer → rails
-            Spacing rhythm: outer gap 5, inter-section gap 4, inner gap 3. */}
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] xl:grid-cols-[260px_1fr_320px] gap-5">
-          {/* ── Left rail (xl only): Scenes + Guests ─────────────────── */}
-          <aside className="xl:order-1 order-3 flex flex-col gap-4 md:col-span-2 xl:col-span-1">
+        {/* 3-zone Live Control Room layout.
+            Track sizing is intentional, not 12-col fluid:
+              xl ≥ 1280px : [rails 280 | program 1fr | comms 360]
+              md  ≥ 768px : [program 1fr | comms 340]   rails go below
+              base        : single column — program → comms → rails
+
+            Each child gets EXPLICIT col-start / row-start at xl so
+            CSS grid can't auto-place them by source order. (Earlier
+            code relied on `order` which silently swapped rails into
+            the program slot on wide screens.) */}
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[280px_minmax(0,1fr)_360px] gap-5 xl:gap-6">
+          {/* ── Left rail (xl): Scenes + Guests ────────────────────── */}
+          <aside className="flex flex-col gap-4 md:col-span-2 xl:col-span-1 xl:col-start-1 xl:row-start-1 order-3 xl:order-none">
             <ScenesRail
               scenes={cr.scenes}
               currentLayout={cr.branding.layout ?? "solo"}
@@ -671,7 +676,7 @@ function OwnerStreamInterface({
           </aside>
 
           {/* ── Center: Program preview + stage actions + producer deck ── */}
-          <section className="xl:order-2 order-1 flex flex-col gap-4 min-w-0">
+          <section className="flex flex-col gap-4 min-w-0 xl:col-start-2 xl:row-start-1 order-1 xl:order-none">
             <ProgramPreview
               ref={videoRef}
               isMobile={isMobile}
@@ -786,6 +791,7 @@ function OwnerStreamInterface({
           {/* ── Right rail: Comms tabs (sticky on xl) ─────────────────── */}
           <CommsTabs
             ref={replayCardRef}
+            className="xl:col-start-3 xl:row-start-1 order-2 xl:order-none"
             activeTab={activeTab}
             onTabChange={handleTabChange}
             unreadCount={unreadCount}

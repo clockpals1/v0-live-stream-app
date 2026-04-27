@@ -24,6 +24,13 @@ export const FEATURE_KEYS = [
   "insider_circle",
   "cloud_archive",
   "youtube_upload",
+  // Live Control Room — broadcast-time production tools.
+  // These gate premium UI inside the control room (branding deck,
+  // multi-cam layouts, branded watch page) and are surfaced to admins
+  // as toggles in the plan editor like every other feature key.
+  "live_watermark",
+  "live_branded_page",
+  "live_premium_layouts",
   // Replay Library (Studio surface)
   "replay_publishing",
   "replay_likes",
@@ -61,6 +68,13 @@ export const FEATURE_CATEGORIES: ReadonlyArray<{
     label: "Live & storage",
     description: "Capabilities used during a live stream and right after it ends.",
     keys: ["cloud_archive", "youtube_upload", "insider_circle"],
+  },
+  {
+    id: "live_control_room",
+    label: "Live control room",
+    description:
+      "Premium production tools surfaced inside the host's live control room.",
+    keys: ["live_watermark", "live_branded_page", "live_premium_layouts"],
   },
   {
     id: "replay",

@@ -51,9 +51,13 @@ const LAYOUT_LABEL: Record<SceneLayout, string> = {
  * they could unlock.
  */
 export function BrandingDeck({ streamId, plan, branding, update }: Props) {
-  const canWatermark = featureEnabled(plan, "logo_watermark");
-  const canBrandedPage = featureEnabled(plan, "branded_watch_page");
-  const canLayouts = featureEnabled(plan, "premium_layouts");
+  // Feature keys are registered in lib/billing/plans.ts FEATURE_KEYS
+  // and surfaced in the admin plan editor's "Live control room"
+  // category. Admin synthetic plan flips them all on; host plans
+  // inherit whatever the admin toggled per plan.
+  const canWatermark = featureEnabled(plan, "live_watermark");
+  const canBrandedPage = featureEnabled(plan, "live_branded_page");
+  const canLayouts = featureEnabled(plan, "live_premium_layouts");
 
   return (
     <div className="flex flex-col gap-3.5">

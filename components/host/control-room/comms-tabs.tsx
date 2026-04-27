@@ -17,6 +17,9 @@ interface Props {
   privatePane: React.ReactNode;
   camerasPane?: React.ReactNode;
   replayPane?: React.ReactNode;
+  /** Outer className — used by the page to hand grid-placement classes
+   *  (e.g. xl:col-start-3) to the panel root without an extra wrapper. */
+  className?: string;
 }
 
 interface TabMeta {
@@ -46,6 +49,7 @@ export const CommsTabs = forwardRef<HTMLDivElement, Props>(function CommsTabs(
     privatePane,
     camerasPane,
     replayPane,
+    className,
   },
   ref,
 ) {
@@ -71,7 +75,7 @@ export const CommsTabs = forwardRef<HTMLDivElement, Props>(function CommsTabs(
   return (
     <section
       ref={ref}
-      className={`${SURFACE.panel} flex flex-col overflow-hidden h-[calc(100vh-7rem)] xl:sticky xl:top-20 xl:self-start`}
+      className={`${SURFACE.panel} flex flex-col overflow-hidden h-[calc(100vh-7rem)] xl:sticky xl:top-20 xl:self-start ${className ?? ""}`}
     >
       <Tabs
         value={activeTab}
