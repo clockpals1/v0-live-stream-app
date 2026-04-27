@@ -84,24 +84,24 @@ export function ScenesRail({
 
   return (
     <section className={`${SURFACE.panel} p-4`}>
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <DeckHeader
-          icon={Layers}
-          title="Scenes"
-          description="Saved overlay + ticker + music presets."
-        />
-        {!adding && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setAdding(true)}
-            className="h-7 px-2 -mt-0.5 shrink-0"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1" />
-            New
-          </Button>
-        )}
-      </div>
+      <DeckHeader
+        icon={Layers}
+        title="Scenes"
+        description="Saved overlay + ticker + music presets."
+        action={
+          !adding ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAdding(true)}
+              className="h-7 px-2.5"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              New
+            </Button>
+          ) : undefined
+        }
+      />
 
       {adding && (
         <div className="flex gap-2 mb-3">

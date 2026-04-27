@@ -56,25 +56,25 @@ export function GuestsRail({
 
   return (
     <section className={`${SURFACE.panel} p-4`}>
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <DeckHeader
-          icon={Users}
-          title="Guests"
-          description="Co-hosts invited to this room."
-        />
-        {onInvite && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onInvite}
-            className="h-7 px-2 -mt-0.5 shrink-0"
-            title="Invite a co-host"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1" />
-            Invite
-          </Button>
-        )}
-      </div>
+      <DeckHeader
+        icon={Users}
+        title="Guests"
+        description="Co-hosts invited to this room."
+        action={
+          onInvite ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onInvite}
+              className="h-7 px-2.5"
+              title="Invite a co-host"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Invite
+            </Button>
+          ) : undefined
+        }
+      />
 
       {participants.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-6 text-center flex flex-col items-center gap-2">

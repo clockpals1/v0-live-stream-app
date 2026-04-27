@@ -27,6 +27,8 @@ import {
   ChevronRight,
   Play,
   Square,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import { StreamSlideshow } from "@/components/stream/stream-slideshow";
 
@@ -57,6 +59,8 @@ export function SlideshowPanel({ streamId, chatChannelRef }: SlideshowPanelProps
   const [newUrl, setNewUrl] = useState("");
   const [newCaption, setNewCaption] = useState("");
   const [adding, setAdding] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [active, setActive] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -157,6 +161,63 @@ export function SlideshowPanel({ streamId, chatChannelRef }: SlideshowPanelProps
       toast.error("Could not add slide: " + (err?.message ?? "unknown"));
     } finally {
       setAdding(false);
+    }
+  };
+
+  // ---- Upload from device ----
+  // Patterns after the watermark uploader: same stream-overlays bucket,
+  // 5 MB cap (slides can be larger than logos), public URL inserted into
+  // the same stream_slides table via addSlide() so playback / position /
+  // delete logic doesn't need to know the source.
+  const handleFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file (JPG, PNG, or WebP).");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be under 5 MB.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
+      const path = `${streamId}/slides/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("stream-overlays")
+        .upload(path, file, { cacheControl: "3600", upsert: false });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage
+        .from("stream-overlays")
+        .getPublicUrl(path);
+      // Pre-fill the URL field so the existing addSlide validates and
+      // persists through the same code path. We then auto-trigger it.
+      const url = data.publicUrl;
+      setNewUrl(url);
+      // Insert immediately — no need to make the host click "Add slide"
+      // again after they already chose a file.
+      const position = slides.length;
+      const { data: row, error: insErr } = await supabase
+        .from("stream_slides")
+        .insert({
+          stream_id: streamId,
+          image_url: url,
+          caption: newCaption.trim(),
+          position,
+        })
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      if (row) {
+        setSlides((prev) => [...prev, row as Slide]);
+        setNewUrl("");
+        setNewCaption("");
+        toast.success("Slide uploaded");
+      }
+    } catch (err: any) {
+      console.error("[Slideshow] upload failed:", err);
+      toast.error("Upload failed: " + (err?.message ?? "unknown"));
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -267,26 +328,61 @@ export function SlideshowPanel({ streamId, chatChannelRef }: SlideshowPanelProps
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {/* Add a slide */}
+        {/* Add a slide — either upload from device OR paste a URL. */}
         <div className="flex flex-col gap-2 p-3 rounded-md border border-dashed border-border">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleFile(f);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || adding}
+            className="w-full justify-center"
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Uploading…
+              </>
+            ) : (
+              <>
+                <Upload className="w-4 h-4 mr-2" />
+                Upload image (≤ 5 MB)
+              </>
+            )}
+          </Button>
+          <div className="flex items-center gap-2 my-0.5">
+            <span className="flex-1 h-px bg-border" />
+            <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">or paste URL</span>
+            <span className="flex-1 h-px bg-border" />
+          </div>
           <Input
             placeholder="Paste image URL (https://...)"
             value={newUrl}
             onChange={(e) => setNewUrl(e.target.value)}
-            disabled={adding}
+            disabled={adding || uploading}
           />
           <Input
             placeholder="Optional caption (shown below the image)"
             value={newCaption}
             onChange={(e) => setNewCaption(e.target.value.slice(0, 140))}
             maxLength={140}
-            disabled={adding}
+            disabled={adding || uploading}
           />
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">
-              Use a direct image URL (jpg / png / webp). Any public host works.
+              Direct image URL (JPG / PNG / WebP).
             </span>
-            <Button size="sm" onClick={addSlide} disabled={adding || !newUrl.trim()}>
+            <Button size="sm" onClick={addSlide} disabled={adding || uploading || !newUrl.trim()}>
               <Plus className="w-4 h-4 mr-1.5" />
               Add slide
             </Button>

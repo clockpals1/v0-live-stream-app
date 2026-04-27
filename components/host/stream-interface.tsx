@@ -169,6 +169,13 @@ function OwnerStreamInterface({
   const router = useRouter();
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+  /**
+   * Remembers the host's mic state at the moment a video clip starts
+   * playing, so when the clip stops we can restore exactly that state
+   * (instead of blindly un-muting someone who'd deliberately gone silent
+   * before pressing Play). null = no clip active. See MediaDeck wiring.
+   */
+  const audioStateBeforeClipRef = useRef<boolean | null>(null);
 
   // Tab state (right rail). Controlled so the post-stream CTA can jump
   // the host to the Replay tab.
@@ -773,7 +780,27 @@ function OwnerStreamInterface({
                 />
               }
               mediaDeck={
-                <MediaDeck streamId={stream.id} chatChannelRef={chatChannelRef} />
+                <MediaDeck
+                  streamId={stream.id}
+                  chatChannelRef={chatChannelRef}
+                  onClipActiveChange={(active, muteMic) => {
+                    // Auto-mute the host mic during clip playback so the
+                    // clip's own audio fills the space, then restore the
+                    // host's pre-clip mic state when the clip is stopped.
+                    // We remember the prior state in a ref so we don't
+                    // un-mute someone who deliberately muted themselves
+                    // before pressing Play.
+                    if (!muteMic) return;
+                    if (active) {
+                      audioStateBeforeClipRef.current = audioEnabled;
+                      if (audioEnabled) toggleAudio();
+                    } else {
+                      const prior = audioStateBeforeClipRef.current;
+                      audioStateBeforeClipRef.current = null;
+                      if (prior === true && !audioEnabled) toggleAudio();
+                    }
+                  }}
+                />
               }
               brandingDeck={
                 <BrandingDeck

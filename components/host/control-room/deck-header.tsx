@@ -13,6 +13,12 @@ interface Props {
     /** Tailwind tone — defaults to emerald for ACTIVE, amber for STAGING, etc. */
     tone?: "live" | "ok" | "warn" | "muted";
   };
+  /**
+   * Optional right-side action node (button etc). Rendered next to the
+   * title row, NOT next to the description, so a long description never
+   * crowds it. Used by Scenes / Guests rails for "+ New" / "+ Invite".
+   */
+  action?: React.ReactNode;
 }
 
 const TONE_CLASS: Record<NonNullable<Props["status"]>["tone"] & string, string> = {
@@ -35,33 +41,51 @@ const TONE_CLASS: Record<NonNullable<Props["status"]>["tone"] & string, string> 
  *   3. Optional STATUS pill (right) for "currently broadcasting"
  *      affordances like "LIVE ON SCREEN" or "PLAYING LIVE".
  */
-export function DeckHeader({ icon: Icon, title, description, status }: Props) {
+export function DeckHeader({
+  icon: Icon,
+  title,
+  description,
+  status,
+  action,
+}: Props) {
   return (
-    <div className="flex items-start justify-between gap-3 mb-3">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <span className={ICON_CHIP.primary}>
-          <Icon className="w-4 h-4" />
-        </span>
-        <div className="min-w-0 leading-tight">
-          <p className={TYPO.title}>{title}</p>
-          <p className={`${TYPO.sub} truncate`}>{description}</p>
+    <div className="mb-3">
+      {/* Title row: icon + title on the left, optional status / action on the
+          right. Putting the action HERE (and not in a wrapping flex around
+          the description) means a long description can wrap freely without
+          fighting the right-side button for space. */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className={ICON_CHIP.primary}>
+            <Icon className="w-4 h-4" />
+          </span>
+          <p className={`${TYPO.title} truncate`}>{title}</p>
         </div>
-      </div>
-      {status && (
-        <span
-          className={`shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em] ${
-            TONE_CLASS[status.tone ?? "live"]
-          }`}
-        >
-          {status.tone !== "muted" && (
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-current opacity-60 animate-ping" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+        <div className="shrink-0 flex items-center gap-1.5">
+          {status && (
+            <span
+              className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                TONE_CLASS[status.tone ?? "live"]
+              }`}
+            >
+              {status.tone !== "muted" && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-current opacity-60 animate-ping" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+                </span>
+              )}
+              {status.label}
             </span>
           )}
-          {status.label}
-        </span>
-      )}
+          {action}
+        </div>
+      </div>
+      {/* Description is on its own line, indented to align with the title.
+          Always full-width so any rail (even at 240px) can show it without
+          truncation in most languages. */}
+      <p className={`${TYPO.sub} mt-1 ml-[42px] leading-snug`}>
+        {description}
+      </p>
     </div>
   );
 }

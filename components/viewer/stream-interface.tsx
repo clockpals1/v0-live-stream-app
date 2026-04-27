@@ -169,6 +169,19 @@ export function ViewerStreamInterface({
     caption: string;
   }>({ active: false, url: "", caption: "" });
 
+  // ---- Host-controlled short video clip (overlays the live stream) ----
+  // Shape mirrors the stream-clip broadcast payload from VideoClipPanel.
+  // active=true triggers a full-bleed <video autoplay loop> over the
+  // current stream content; active=false unmounts the element entirely
+  // so the live camera continues unimpeded. The <video> is muted-by-
+  // default-then-unmuted so iOS Safari permits autoplay (the user has
+  // already gestured by clicking "Join Stream", so audio is allowed).
+  const [clip, setClip] = useState<{
+    active: boolean;
+    url: string;
+    caption: string;
+  }>({ active: false, url: "", caption: "" });
+
   // Track whether the user has completed the join gesture (name dialog submitted).
   // This is the key gate for triggering play() — iOS Safari only allows audio/video
   // to start within a synchronous user-gesture call stack.
@@ -484,6 +497,19 @@ export function ViewerStreamInterface({
       });
     });
 
+    // Host short-video-clip broadcasts — same channel, no extra sub.
+    // Payload is sent on every state change AND on initial play, so
+    // viewers who join mid-clip start rendering immediately without
+    // a separate hydration call.
+    channel.on("broadcast", { event: "stream-clip" }, ({ payload }: any) => {
+      if (!payload) return;
+      setClip({
+        active: !!payload.active,
+        url: typeof payload.url === "string" ? payload.url : "",
+        caption: typeof payload.caption === "string" ? payload.caption : "",
+      });
+    });
+
     // Host ticker broadcasts — same channel, same pattern as overlay.
     channel.on("broadcast", { event: "stream-ticker" }, ({ payload }: any) => {
       if (!payload) return;
@@ -610,7 +636,7 @@ export function ViewerStreamInterface({
       const { data } = await supabase
         .from("streams")
         .select(
-          "overlay_active, overlay_message, overlay_background, overlay_image_url, ticker_active, ticker_message, ticker_speed, ticker_style, slideshow_active, slideshow_current_url, slideshow_current_caption"
+          "overlay_active, overlay_message, overlay_background, overlay_image_url, ticker_active, ticker_message, ticker_speed, ticker_style, slideshow_active, slideshow_current_url, slideshow_current_caption, clip_active, clip_url, clip_caption"
         )
         .eq("id", stream.id)
         .single();
@@ -630,6 +656,11 @@ export function ViewerStreamInterface({
           message: d.ticker_message ?? "",
           speed: sp === "slow" || sp === "fast" ? sp : "normal",
           style: st === "urgent" || st === "info" ? st : "default",
+        });
+        setClip({
+          active: !!d.clip_active,
+          url: d.clip_url ?? "",
+          caption: d.clip_caption ?? "",
         });
         setSlideshow({
           active: !!d.slideshow_active,
@@ -1556,6 +1587,36 @@ export function ViewerStreamInterface({
                     imageUrl={slideshow.url}
                     caption={slideshow.caption}
                   />
+                  {/* Host-controlled short video clip.
+                      Sits just above the slideshow (z-25) so a clip rolling
+                      during a slideshow takes precedence — that's the
+                      typical use ("be right back" bumper that interrupts
+                      everything else for 10–30 s). The video element is
+                      keyed by url so swapping clips actually re-loads the
+                      element rather than seeking the old src. autoplay +
+                      playsInline + loop are required: the user already
+                      gestured to join the room, so audio is allowed by
+                      every browser including iOS Safari. */}
+                  {clip.active && clip.url && (
+                    <div
+                      className="absolute inset-0 z-[25] bg-black flex items-center justify-center"
+                      data-clip-overlay
+                    >
+                      <video
+                        key={clip.url}
+                        src={clip.url}
+                        className="w-full h-full object-contain"
+                        autoPlay
+                        loop
+                        playsInline
+                      />
+                      {clip.caption && (
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 max-w-[90%] px-4 py-2 rounded-lg bg-black/70 text-white text-sm font-medium backdrop-blur text-center">
+                          {clip.caption}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {/* Host-controlled overlay — rendered on top of video, below controls badge */}
                   <StreamOverlay
                     active={overlay.active}
