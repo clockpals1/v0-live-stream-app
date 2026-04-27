@@ -79,11 +79,25 @@ export default async function HostStreamPage({ params }: Props) {
     redirect("/host/dashboard");
   }
 
-  // Resolve the host's effective plan once on the server so the
-  // Branding deck can render plan-gated cards synchronously without
-  // a client fetch round-trip. Falls through to null if entitlements
-  // are unavailable — every premium card defaults to locked.
-  const effective = await getEffectivePlan(supabase, user.id);
+  // Resolve the effective plan to gate the Branding deck.
+  //
+  // For owners / admins we use THEIR plan. For operators / cohosts we
+  // resolve the OWNER'S plan instead — operators are managing someone
+  // else's stream and should see the same locked / unlocked cards the
+  // owner would, regardless of the operator's own subscription. That
+  // way an admin operator on a Pro host's stream still gets all the
+  // premium tools, and a Free-tier operator on a Free host's stream
+  // doesn't get to flip on premium features the owner can't keep.
+  let planTargetUserId = user.id;
+  if (access === "operator" || access === "cohost") {
+    const { data: owner } = await supabase
+      .from("hosts")
+      .select("user_id")
+      .eq("id", stream.host_id)
+      .single();
+    if (owner?.user_id) planTargetUserId = owner.user_id as string;
+  }
+  const effective = await getEffectivePlan(supabase, planTargetUserId);
 
   return (
     <HostStreamInterface

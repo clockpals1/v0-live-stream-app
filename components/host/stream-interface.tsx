@@ -118,6 +118,7 @@ export function HostStreamInterface(props: HostStreamInterfaceProps) {
         stream={props.stream}
         host={props.host}
         accessMode={accessMode}
+        effectivePlan={props.effectivePlan ?? null}
       />
     );
   }
