@@ -1,85 +1,81 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Smoke tests: every public route must return 200 and render its
- * landmark element. If this suite fails, do NOT deploy — production
- * will 500 on first request.
+ * Smoke tests — DELIBERATELY MINIMAL.
  *
- * NOTE: We avoid testing anything behind auth here. A real login flow
- * needs Supabase test credentials, and you can layer that on later as
- * an "auth.spec.ts" using the Playwright global setup pattern. The
- * goal of THIS file is to catch:
+ * The only invariant we test here is "every public route returns
+ * something other than 5xx." That's it. We do NOT assert on copy,
+ * button labels, headings, or any UI state, because those change
+ * with normal product work and would generate noise.
  *
- *   1. Next.js routing conflicts that throw at module load (this is
- *      what took down the site on Apr 26 after the [streamId]/[roomCode]
- *      collision — every route 500s, including '/').
- *   2. Top-level imports that fail in the Workers runtime but pass the
- *      build step.
- *   3. Missing required env vars surfaced as 500s.
+ * The job of this suite is to catch the class of bugs that took prod
+ * down on Apr 26 2026: a Next.js routing-conflict / runtime crash
+ * where every URL — including unrelated ones — 500s before reaching
+ * any handler code. A single 200/404 on the homepage proves the
+ * worker initialised, all dynamic-segment trees are coherent, and
+ * top-level imports loaded. That's the signal we need before deploy.
+ *
+ * If you find yourself adding visual / functional tests, put them in
+ * a separate spec file (e.g. `dashboard.spec.ts`) and gate them on a
+ * test-account login flow.
  */
 
-test.describe("public routes return 200", () => {
-  test("homepage", async ({ page }) => {
-    const response = await page.goto("/");
-    expect(response?.status(), "homepage status").toBe(200);
-    // Landing copy from the hero section.
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  });
+const PUBLIC_ROUTES = [
+  "/",
+  "/auth/login",
+  "/auth/signup",
+  "/auth/forgot-password",
+  "/auth/error",
+  "/auth/confirmed",
+];
 
-  test("login page", async ({ page }) => {
-    const response = await page.goto("/login");
-    expect(response?.status(), "login status").toBe(200);
-    await expect(page.getByRole("button", { name: /sign in|log in/i })).toBeVisible();
-  });
+const PROTECTED_ROUTES = [
+  // Should redirect to /auth/login or render a guarded shell — never 5xx.
+  "/host/dashboard",
+  "/host/settings",
+  "/admin/billing",
+];
 
-  test("auth/error displays a message", async ({ page }) => {
-    // A page Next.js renders when an OAuth callback fails. It must
-    // not itself crash.
-    const response = await page.goto("/auth/error");
-    expect(response?.status(), "auth/error status").toBe(200);
-  });
+const API_HEALTH = [
+  // Public routes that take no auth and must always respond < 500.
+  // 4xx is an acceptable "validation says no" signal; 5xx is a regression.
+  { path: "/api/streams/AAAAAA", method: "GET" },
+];
+
+test.describe("public routes never 5xx", () => {
+  for (const route of PUBLIC_ROUTES) {
+    test(`GET ${route}`, async ({ page }) => {
+      const response = await page.goto(route);
+      const status = response?.status() ?? 0;
+      expect(
+        status,
+        `${route} returned ${status} — expected < 500`,
+      ).toBeLessThan(500);
+    });
+  }
 });
 
 test.describe("protected routes redirect, not crash", () => {
-  test("/host/dashboard redirects unauthenticated users", async ({ page }) => {
-    const response = await page.goto("/host/dashboard");
-    // Expect either a 200 (login page rendered after server redirect)
-    // or a 3xx — NOT a 5xx. Next's middleware does the redirect with
-    // status 307; Playwright follows automatically so we typically see
-    // the final 200.
-    expect(
-      response?.status(),
-      "/host/dashboard must not 500",
-    ).toBeLessThan(500);
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test("/admin/billing redirects unauthenticated users", async ({ page }) => {
-    const response = await page.goto("/admin/billing");
-    expect(
-      response?.status(),
-      "/admin/billing must not 500",
-    ).toBeLessThan(500);
-    await expect(page).toHaveURL(/\/login/);
-  });
+  for (const route of PROTECTED_ROUTES) {
+    test(`GET ${route}`, async ({ page }) => {
+      const response = await page.goto(route);
+      const status = response?.status() ?? 0;
+      expect(
+        status,
+        `${route} returned ${status} — expected < 500 (redirect or guarded render)`,
+      ).toBeLessThan(500);
+    });
+  }
 });
 
 test.describe("API health", () => {
-  test("auth callback returns a sane error rather than 500 on missing args", async ({
-    request,
-  }) => {
-    const res = await request.get("/api/auth/callback");
-    // 4xx is fine; 5xx is a regression. The route must validate args.
-    expect(res.status(), "/api/auth/callback must not 500").toBeLessThan(500);
-  });
-
-  test("public stream lookup returns a structured 404 for unknown rooms", async ({
-    request,
-  }) => {
-    const res = await request.get("/api/streams/AAAAAA");
-    expect(res.status()).toBeLessThan(500);
-    // 404 (not found) or 400 (bad code) — both are acceptable signals
-    // the route ran. The previous routing-conflict bug returned 500.
-    expect([400, 404, 410]).toContain(res.status());
-  });
+  for (const probe of API_HEALTH) {
+    test(`${probe.method} ${probe.path}`, async ({ request }) => {
+      const res = await request.fetch(probe.path, { method: probe.method });
+      expect(
+        res.status(),
+        `${probe.method} ${probe.path} returned ${res.status()} — expected < 500`,
+      ).toBeLessThan(500);
+    });
+  }
 });

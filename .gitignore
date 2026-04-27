@@ -22,3 +22,8 @@ node_modules
 
 tail_output.txt
 tail_err.txt
+
+# Playwright
+playwright-report/
+test-results/
+.cache/
