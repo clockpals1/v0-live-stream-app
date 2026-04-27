@@ -10,6 +10,7 @@ import { StreamOverlay, type OverlayBackground } from "@/components/stream/strea
 import { StreamTicker, type TickerSpeed, type TickerStyle } from "@/components/stream/stream-ticker";
 import { StreamSlideshow } from "@/components/stream/stream-slideshow";
 import { InsiderCircleSubscribe } from "@/components/viewer/insider-circle-subscribe";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -1425,6 +1426,7 @@ export function ViewerStreamInterface({
                 <span className="text-sm font-bold tabular-nums">{viewerCount}</span>
                 <span className="text-xs hidden sm:inline text-red-400">watching</span>
               </div>
+              <ThemeToggle size="sm" />
             </div>
           </div>
         </header>

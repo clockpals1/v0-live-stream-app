@@ -17,6 +17,7 @@ import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
 import { OnboardingChecklist } from "@/components/host/onboarding-checklist";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Radio,
   Video,
@@ -535,10 +536,13 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
               </div>
               <span className="font-bold text-foreground">Isunday Stream Live</span>
             </Link>
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
+            <div className="flex items-center gap-1">
+              <ThemeToggle size="sm" />
+              <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </div>
           </div>
         </header>
         <main className="container mx-auto px-4 py-12">
@@ -631,6 +635,7 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             <span className="text-sm text-muted-foreground hidden sm:inline">
               {host.display_name || user.email}
             </span>
+            <ThemeToggle size="sm" />
             <Button variant="ghost" size="sm" onClick={handleSignOut}>
               <LogOut className="w-4 h-4 mr-2" />
               Sign Out
