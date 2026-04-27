@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
+import { OnboardingChecklist } from "@/components/host/onboarding-checklist";
 import {
   Radio,
   Video,
@@ -90,6 +91,7 @@ interface Host {
   display_name: string | null;
   role?: Role | null;
   is_admin?: boolean;
+  plan_slug?: string | null;
 }
 
 interface DashboardContentProps {
@@ -638,6 +640,18 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
       </header>
 
       <main className="container mx-auto px-4 py-8">
+        {/* Onboarding checklist — surfaces only when at least one
+            mandatory step is incomplete and the host hasn't dismissed.
+            Self-hides; gated to actual hosts (not super-user operators). */}
+        {canCreateStreams && host && (
+          <OnboardingChecklist
+            userId={user.id}
+            displayName={host.display_name}
+            streamCount={streams.length}
+            planSlug={host.plan_slug ?? null}
+          />
+        )}
+
         {/* Co-hosting Status Banner */}
         {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length > 0 && (
           <div className="mb-6 p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-2 border-purple-500/30 rounded-lg">
