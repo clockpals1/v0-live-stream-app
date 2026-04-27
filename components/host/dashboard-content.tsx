@@ -94,8 +94,11 @@ interface Host {
   user_id: string;
   email: string;
   display_name: string | null;
-  role?: Role | null;
-  is_admin?: boolean;
+  /** Widened to string so the HostRow from bootstrap.ts (role?: string|null)
+   *  is directly assignable without an explicit cast on the server side.
+   *  resolveRole() narrows it back to Role inside the component. */
+  role?: string | null;
+  is_admin?: boolean | null;
   plan_slug?: string | null;
 }
 
@@ -103,8 +106,14 @@ interface DashboardContentProps {
   user: User;
   host: Host | null;
   streams: Stream[];
-  /** Resolved entitlements — used by the Creator Workspace strip. */
-  effectivePlan?: EffectivePlan | null;
+  effectivePlan: EffectivePlan | null;
+  /** Server-side prefetched operator assignments so the Super User banner
+   *  renders on first paint without an async flash. The client-side
+   *  realtime subscription will keep it updated thereafter. */
+  initialOperatorStreams?: Array<{
+    id: string;
+    stream: { id: string; title: string; room_code: string; status: string };
+  }>;
 }
 
 export function DashboardContent({
@@ -112,6 +121,7 @@ export function DashboardContent({
   host,
   streams: initialStreams,
   effectivePlan,
+  initialOperatorStreams,
 }: DashboardContentProps) {
   const router = useRouter();
   const [streams, setStreams] = useState<Stream[]>(initialStreams || []);
@@ -120,11 +130,12 @@ export function DashboardContent({
   const [emergencyMessages, setEmergencyMessages] = useState<EmergencyMessage[]>([]);
   const [showEmergencyPanel, setShowEmergencyPanel] = useState(false);
   const [cohostParticipants, setCohostParticipants] = useState<CohostParticipant[]>([]);
-  // Streams this user manages as a Super User (stream_operators row + joined stream)
+  // Streams this user manages as a Super User (stream_operators row + joined stream).
+  // Seeded from the server-side prefetch so the banner appears on first paint.
   const [operatorStreams, setOperatorStreams] = useState<Array<{
     id: string;
     stream: { id: string; title: string; room_code: string; status: string };
-  }>>([]);
+  }>>(initialOperatorStreams ?? []);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
@@ -574,7 +585,7 @@ export function DashboardContent({
   const role = resolveRole(host);
   const canCreateStreams = CAPS.createOwnStreams(role);
   const canAccessAdmin = CAPS.accessAdminPanel(role)
-    || user.email?.toLowerCase() === 'sunday@isunday.me';
+    || effectivePlan?.isPlatformAdmin === true;
 
   return (
     <div className="min-h-screen bg-background">
@@ -924,7 +935,55 @@ export function DashboardContent({
               </Tabs>
             </CardContent>
           </Card>
+          ) : role === "super_user" ? (
+            /* Super User left-column card — shows assigned streams directly */
+            <Card className="lg:col-span-1 border-amber-200 bg-amber-50/40 dark:bg-amber-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-amber-500" />
+                  Operator Access
+                </CardTitle>
+                <CardDescription>
+                  You are a <strong>Super User</strong> operator. You can manage
+                  overlays, ticker, music, media, and branding for any stream
+                  you are assigned to. You cannot create your own streams.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {operatorStreams.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No streams assigned yet. Ask an admin or stream owner to add you
+                    as an operator.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {operatorStreams.map((op) => {
+                      const live = op.stream.status === "live";
+                      return (
+                        <Button
+                          key={op.id}
+                          asChild
+                          variant="outline"
+                          className={`justify-start gap-2 ${live ? "border-red-300 bg-red-50/40 dark:bg-red-950/20" : ""}`}
+                        >
+                          <Link href={`/host/stream/${op.stream.room_code}`}>
+                            <Radio className={`w-4 h-4 shrink-0 ${live ? "text-red-500 animate-pulse" : "text-amber-500"}`} />
+                            <span className="truncate flex-1 text-left">{op.stream.title}</span>
+                            {live && (
+                              <Badge className="ml-auto bg-red-500 text-white text-[10px] h-4 px-1.5 shrink-0">
+                                LIVE
+                              </Badge>
+                            )}
+                          </Link>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           ) : (
+            /* Cohost left-column card */
             <Card className="lg:col-span-1 border-purple-200 bg-purple-50/40 dark:bg-purple-950/20">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2">

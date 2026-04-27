@@ -190,6 +190,11 @@ function OwnerStreamInterface({
     caption: string;
   }>({ active: false, url: null, caption: "" });
 
+  /** ID of the last scene the host applied — used to highlight the
+   *  active scene in ScenesRail so the host always knows which preset
+   *  is currently live. Resets to null on stream end. */
+  const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+
   // Tab state (right rail). Controlled so the post-stream CTA can jump
   // the host to the Replay tab.
   const activeTabRef = useRef("chat");
@@ -658,7 +663,7 @@ function OwnerStreamInterface({
         health={health}
       />
 
-      <main className="container mx-auto px-4 sm:px-6 py-5 sm:py-6">
+      <main className="w-full max-w-[1680px] mx-auto px-3 sm:px-5 lg:px-6 py-4 sm:py-5 lg:py-6">
         {error && (
           <div className="mb-4 p-3.5 rounded-xl bg-gradient-to-r from-red-500/10 to-rose-500/10 ring-1 ring-red-500/30 flex items-center gap-2.5">
             <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
@@ -668,26 +673,29 @@ function OwnerStreamInterface({
 
         {/* 3-zone Live Control Room layout.
             Track sizing is intentional, not 12-col fluid:
-              xl ≥ 1280px : [rails 280 | program 1fr | comms 360]
-              md  ≥ 768px : [program 1fr | comms 340]   rails go below
-              base        : single column — program → comms → rails
+              lg  ≥ 1024px : [scenes 240px | program 1fr | comms 330px]
+              xl  ≥ 1280px : [scenes 280px | program 1fr | comms 360px]
+              md  ≥  768px : [program 1fr  | comms 320px]  rails go below
+              base          : single column — program → comms → rails
 
-            Each child gets EXPLICIT col-start / row-start at xl so
-            CSS grid can't auto-place them by source order. (Earlier
-            code relied on `order` which silently swapped rails into
-            the program slot on wide screens.) */}
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[280px_minmax(0,1fr)_360px] gap-5 xl:gap-6">
-          {/* ── Left rail (xl): Scenes + Guests ────────────────────── */}
-          <aside className="flex flex-col gap-4 md:col-span-2 xl:col-span-1 xl:col-start-1 xl:row-start-1 order-3 xl:order-none">
+            Each child gets EXPLICIT col-start / row-start at lg so
+            CSS grid can't auto-place them by source order. */}
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_320px] lg:grid-cols-[240px_minmax(0,1fr)_330px] xl:grid-cols-[280px_minmax(0,1fr)_360px] gap-4 sm:gap-5 xl:gap-6">
+          {/* ── Left rail (lg+): Scenes + Guests (sticky on desktop) ── */}
+          <aside className="flex flex-col gap-4 md:col-span-2 lg:col-span-1 lg:col-start-1 lg:row-start-1 order-3 lg:order-none lg:sticky lg:top-[4.5rem] lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto lg:pr-0.5">
             <ScenesRail
               scenes={cr.scenes}
               currentLayout={cr.branding.layout ?? "solo"}
               currentOverlay={cr.overlay}
               currentTicker={cr.ticker}
               currentMusicUrl={cr.overlayMusicUrl}
-              onApply={(s) => { void cr.applyScene(s); }}
+              activeSceneId={activeSceneId}
+              onApply={(s) => { void cr.applyScene(s); setActiveSceneId(s.id); }}
               onSave={cr.saveScene}
-              onDelete={cr.deleteScene}
+              onDelete={async (id) => {
+                await cr.deleteScene(id);
+                if (activeSceneId === id) setActiveSceneId(null);
+              }}
             />
             <GuestsRail
               participants={cohostParticipants}
@@ -701,7 +709,7 @@ function OwnerStreamInterface({
           </aside>
 
           {/* ── Center: Program preview + stage actions + producer deck ── */}
-          <section className="flex flex-col gap-4 min-w-0 xl:col-start-2 xl:row-start-1 order-1 xl:order-none">
+          <section className="flex flex-col gap-4 min-w-0 lg:col-start-2 lg:row-start-1 order-1 lg:order-none">
             <ProgramPreview
               ref={videoRef}
               isMobile={isMobile}
@@ -842,10 +850,10 @@ function OwnerStreamInterface({
             />
           </section>
 
-          {/* ── Right rail: Comms tabs (sticky on xl) ─────────────────── */}
+          {/* ── Right rail: Comms tabs (sticky on lg+) ─────────────────── */}
           <CommsTabs
             ref={replayCardRef}
-            className="xl:col-start-3 xl:row-start-1 order-2 xl:order-none"
+            className="lg:col-start-3 lg:row-start-1 order-2 lg:order-none"
             activeTab={activeTab}
             onTabChange={handleTabChange}
             unreadCount={unreadCount}

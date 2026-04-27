@@ -16,9 +16,29 @@ import { type BillingPlan, FEATURE_KEYS, type FeatureKey } from "@/lib/billing/p
 import { cn } from "@/lib/utils";
 
 const FEATURE_LABELS: Record<FeatureKey, string> = {
+  // Live & storage
   insider_circle: "Insider Circle broadcasts",
   cloud_archive: "Cloud archive of ended streams",
   youtube_upload: "Upload to your YouTube channel",
+  // Live control room
+  live_watermark: "Logo watermark on stream",
+  live_branded_page: "Branded watch page",
+  live_premium_layouts: "Premium layouts (Split / PiP)",
+  // Replay Library
+  replay_publishing: "Replay publishing",
+  replay_likes: "Replay likes",
+  replay_comments: "Replay comments",
+  replay_featured: "Featured replays",
+  replay_clips: "Replay clips",
+  replay_analytics: "Replay analytics",
+  // Distribution Hub
+  distribution_youtube: "YouTube distribution",
+  distribution_export: "Export & download replays",
+  // Audience CRM
+  audience_crm: "Audience CRM",
+  // Monetization Center
+  monetization_basic: "Basic monetization",
+  monetization_paywall: "Paywall & gated content",
 };
 
 function priceLine(p: BillingPlan): string {

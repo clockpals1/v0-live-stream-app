@@ -75,7 +75,7 @@ export const CommsTabs = forwardRef<HTMLDivElement, Props>(function CommsTabs(
   return (
     <section
       ref={ref}
-      className={`${SURFACE.panel} flex flex-col overflow-hidden h-[calc(100vh-7rem)] xl:sticky xl:top-20 xl:self-start ${className ?? ""}`}
+      className={`${SURFACE.panel} flex flex-col overflow-hidden h-[calc(100vh-5.5rem)] lg:sticky lg:top-[4.5rem] lg:self-start ${className ?? ""}`}
     >
       <Tabs
         value={activeTab}
@@ -95,14 +95,14 @@ export const CommsTabs = forwardRef<HTMLDivElement, Props>(function CommsTabs(
                     key={t.key}
                     type="button"
                     onClick={() => onTabChange(t.key)}
-                    className={`relative flex-1 inline-flex items-center justify-center gap-1 h-8 px-1.5 rounded-md text-[11px] font-medium transition-all ${
+                    className={`relative flex-1 inline-flex items-center justify-center gap-1 h-8 px-1.5 rounded-md text-[11px] lg:text-xs font-medium transition-all ${
                       isActive
                         ? "bg-background text-foreground shadow-sm ring-1 ring-border/70"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span className="hidden xs:inline lg:inline">{t.label}</span>
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden sm:inline">{t.label}</span>
                     {t.badge != null && (
                       <span
                         className={`ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-semibold leading-none ${

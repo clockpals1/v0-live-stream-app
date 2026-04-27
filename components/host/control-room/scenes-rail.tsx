@@ -29,6 +29,8 @@ interface Props {
   currentOverlay: OverlayPreset;
   currentTicker: TickerPreset;
   currentMusicUrl: string;
+  /** ID of the last scene applied this session (for the Active badge). */
+  activeSceneId?: string | null;
   onApply: (s: Scene) => void;
   onSave: (s: Scene) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -47,6 +49,7 @@ export function ScenesRail({
   currentOverlay,
   currentTicker,
   currentMusicUrl,
+  activeSceneId,
   onApply,
   onSave,
   onDelete,
@@ -140,14 +143,25 @@ export function ScenesRail({
             .map((s) => (
               <li
                 key={s.id}
-                className="group rounded-lg ring-1 ring-border bg-background/60 hover:ring-primary/40 hover:bg-background transition-all p-2.5 flex items-center gap-2"
+                className={`group rounded-lg ring-1 bg-background/60 hover:bg-background transition-all p-2.5 flex items-center gap-2 ${
+                  activeSceneId === s.id
+                    ? "ring-emerald-500/50 bg-emerald-500/5"
+                    : "ring-border hover:ring-primary/40"
+                }`}
               >
-                <span className={`${ICON_CHIP.muted} h-7 w-7 group-hover:bg-primary/10 group-hover:text-primary group-hover:ring-primary/30 transition-colors`}>
+                <span className={`${ICON_CHIP.muted} h-7 w-7 group-hover:bg-primary/10 group-hover:text-primary group-hover:ring-primary/30 transition-colors ${
+                  activeSceneId === s.id ? "bg-emerald-500/10 text-emerald-600 ring-emerald-500/30" : ""
+                }`}>
                   <Play className="w-3 h-3 fill-current ml-0.5" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-semibold text-foreground truncate leading-tight">
+                  <p className="text-[13px] font-semibold text-foreground truncate leading-tight flex items-center gap-1.5">
                     {s.name}
+                    {activeSceneId === s.id && (
+                      <span className="inline-flex items-center h-4 px-1.5 rounded-full text-[9px] font-semibold uppercase tracking-[0.1em] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/30 shrink-0">
+                        Active
+                      </span>
+                    )}
                   </p>
                   <div className="flex items-center gap-1 mt-1 flex-wrap">
                     {s.overlay && (

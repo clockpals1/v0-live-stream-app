@@ -100,12 +100,34 @@ export default async function HostDashboardPage() {
     ? await getEffectivePlan(db, user.id)
     : null;
 
+  // Operator-stream assignments — prefetched server-side so the
+  // Super User banner and "Streams You Manage" section render on first
+  // paint, not after a client-side async flash. The client-side
+  // realtime subscription in DashboardContent will keep it live.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let initialOperatorStreams: any[] = [];
+  if (host) {
+    try {
+      const { data: opData } = await db
+        .from("stream_operators")
+        .select("id, stream:streams(id, title, room_code, status)")
+        .eq("host_id", host.id);
+      initialOperatorStreams = ((opData as any[]) ?? []).filter(
+        (r) => r.stream && r.stream.status !== "ended",
+      );
+    } catch {
+      // stream_operators table may not exist yet — safe to start empty.
+      initialOperatorStreams = [];
+    }
+  }
+
   return (
     <DashboardContent
       user={user}
       host={host}
       streams={streams || []}
       effectivePlan={effective}
+      initialOperatorStreams={initialOperatorStreams}
     />
   );
 }
