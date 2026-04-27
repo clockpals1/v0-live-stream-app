@@ -499,59 +499,75 @@ export function useHostStream({
 
   // Stop streaming.
   // Returns true if a recording was auto-downloaded so the caller can show a toast.
+  //
+  // ORDER MATTERS HERE.
+  //   1. Stop the recorder + flush its final chunk (so chunks are intact for
+  //      the download below — same race fix as before).
+  //   2. **Notify viewers FIRST**: flip streams.status='ended' in the DB and
+  //      send the stream-end broadcast. Both are cheap, ~50ms round-trips.
+  //   3. THEN do the heavy local download (Blob construction + a.click()),
+  //      which can stall the main thread for several seconds on long
+  //      recordings. Doing this BEFORE step 2 (the previous order) meant
+  //      viewers stayed on the "Joining the stream..." spinner the entire
+  //      time the host's tab was busy serialising the Blob — and if the
+  //      host closed the tab mid-download, the viewer never got the
+  //      ended signal at all.
+  //   4. Tear down peer connections last; viewers have already been told.
   const stopStream = useCallback(async (): Promise<boolean> => {
     let recordingDownloaded = false;
 
-    // Stop recording — await the recorder's final 'stop' event so the last
-    // dataavailable chunk is flushed into recordedChunksRef BEFORE we build
-    // the Blob. Calling stop() without waiting fires ondataavailable async and
-    // the previous code would race: download could run before the final chunk
-    // arrived, silently truncating the recording.
+    // 1. Flush recorder.
     const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
+    const recorderWasActive = !!recorder && recorder.state !== 'inactive';
+    if (recorderWasActive) {
       await new Promise<void>((resolve) => {
-        recorder.addEventListener('stop', () => resolve(), { once: true });
-        recorder.stop();
+        recorder!.addEventListener('stop', () => resolve(), { once: true });
+        recorder!.stop();
       });
       setIsRecording(false);
-
-      // Auto-download: the host explicitly ended the stream (user gesture path),
-      // so a programmatic anchor click is permitted by browsers without any
-      // autoplay/download policy block.
-      if (recordedChunksRef.current.length > 0) {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `stream-${roomCode}-${Date.now()}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(downloadUrl);
-        recordingDownloaded = true;
-      }
     }
 
-    // Close all peer connections
+    // 2. Notify viewers IMMEDIATELY. We don't await the broadcast — Supabase
+    //    Realtime resolves it locally and we don't need confirmation. We DO
+    //    await the DB update because realtime UPDATE events depend on the
+    //    write actually landing.
+    try {
+      await supabase
+        .from("streams")
+        .update({ status: "ended", ended_at: new Date().toISOString() })
+        .eq("id", streamId);
+    } catch (err) {
+      // Network blip — log but don't block the rest of the teardown. The
+      // viewer-side polling fallback will catch this case.
+      console.error("[host] failed to mark stream ended in DB:", err);
+    }
+    channelRef.current?.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { type: "stream-end", from: "host" } as SignalMessage,
+    });
+
+    // 3. Heavy local download — viewers no longer care about this thread.
+    if (recorderWasActive && recordedChunksRef.current.length > 0) {
+      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `stream-${roomCode}-${Date.now()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+      recordingDownloaded = true;
+    }
+
+    // 4. Close peer connections last.
     viewersRef.current.forEach((viewer) => {
       viewer.peerConnection.close();
     });
     viewersRef.current.clear();
     setViewers(new Map());
     setViewerCount(0);
-
-    // Update stream status
-    await supabase
-      .from("streams")
-      .update({ status: "ended", ended_at: new Date().toISOString() })
-      .eq("id", streamId);
-
-    // Broadcast stream end
-    channelRef.current?.send({
-      type: "broadcast",
-      event: "signal",
-      payload: { type: "stream-end", from: "host" } as SignalMessage,
-    });
 
     setIsStreaming(false);
     setIsPaused(false);

@@ -220,6 +220,55 @@ export function ViewerStreamInterface({
     if (connectingSeconds >= 60) window.location.reload();
   }, [connectingSeconds]);
 
+  // ─── Stuck-connecting fallback: poll streams.status from the DB ──────────
+  // Belt-and-braces for the post-stream-end flow. The primary signals are:
+  //   1. supabase realtime UPDATE on the streams row, and
+  //   2. the host's `stream-end` broadcast on the signaling channel.
+  // Either is sufficient to flip stream.status='ended' locally. But both can
+  // miss in rare cases: realtime publication misconfig, client channel drop,
+  // host-tab closed mid-broadcast, etc. Without a fallback the viewer would
+  // sit on the "Joining the stream..." spinner forever.
+  //
+  // Polling every 8s only WHILE we're in the stuck-connecting state means
+  // the cost is bounded (zero polling for a happy live session, zero polling
+  // once the ended screen is shown).
+  useEffect(() => {
+    const isStuckConnecting =
+      (stream.status === "live" || isStreamLive) && !isConnected && !remoteStream;
+    if (!isStuckConnecting) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const { data } = await supabase
+          .from("streams")
+          .select("status, ended_at")
+          .eq("id", stream.id)
+          .maybeSingle();
+        if (cancelled || !data) return;
+        if (data.status === "ended") {
+          // Funnel through the same path as the realtime handler so the
+          // existing cleanup effect at "Session cleanup on stream end" runs.
+          setStream((prev) => ({
+            ...prev,
+            status: "ended",
+            ended_at: data.ended_at ?? prev.ended_at,
+          }));
+        }
+      } catch {
+        /* swallow — next tick will retry */
+      }
+    };
+    // Wait 4s before the first poll so we don't pile on top of the realtime
+    // subscription's own initial sync. After that, every 8s.
+    const initial = setTimeout(tick, 4000);
+    const id = setInterval(tick, 8000);
+    return () => {
+      cancelled = true;
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [stream.status, stream.id, isStreamLive, isConnected, remoteStream, supabase]);
+
   // ─── Attach remoteStream to video + dedicated audio element ──────────────
   // Pattern: <video> is permanently muted so its play() never blocks. A
   // dedicated <audio> sink carries sound and is what survives autoplay
