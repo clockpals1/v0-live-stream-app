@@ -11,11 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
-import { InsiderCircleSection } from "@/components/host/insider-circle-section";
 import { OnboardingChecklist } from "@/components/host/onboarding-checklist";
 import { CreatorWorkspaceStrip } from "@/components/host/creator-workspace-strip";
 import { DashboardStatsRow } from "@/components/host/dashboard-stats-row";
@@ -28,7 +27,6 @@ import {
   Users,
   Clock,
   LogOut,
-  Plus,
   Copy,
   ExternalLink,
   Loader2,
@@ -36,20 +34,16 @@ import {
   Trash2,
   Share2,
   MoreVertical,
-  Eye,
-  EyeOff,
-  Pause,
   Play,
   Square,
   AlertTriangle,
+  Bell,
   X,
   CalendarClock,
-  MapPin,
   ShieldCheck,
   RefreshCw,
   Settings,
   Sparkles,
-  ChevronDown,
 } from "lucide-react";
 import { nanoid } from "nanoid";
 import type { User } from "@supabase/supabase-js";
@@ -403,6 +397,7 @@ export function DashboardContent({
 
   const [deletingStream, setDeletingStream] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   // When non-null, the StreamOperatorsDialog at the bottom of the page opens
   // for this specific stream. Used by both the "Your Streams" dropdown and
   // the post-schedule auto-open flow.
@@ -574,24 +569,24 @@ export function DashboardContent({
   if (!host) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="border-b border-border">
-          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <header className="border-b border-border/60 bg-background/95 backdrop-blur">
+          <div className="container mx-auto px-4 py-3 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Radio className="w-4 h-4 text-primary-foreground" />
               </div>
-              <span className="font-bold text-foreground">Isunday Stream Live</span>
+              <span className="font-bold">Isunday Live</span>
             </Link>
             <div className="flex items-center gap-1">
               <ThemeToggle size="sm" />
               <Button variant="ghost" size="sm" onClick={handleSignOut}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Sign Out
+                <LogOut className="w-4 h-4" />
+                <span className="sr-only">Sign Out</span>
               </Button>
             </div>
           </div>
         </header>
-        <main className="container mx-auto px-4 py-12">
+        <main className="container mx-auto px-4 py-16">
           <Card className="max-w-md mx-auto">
             <CardHeader className="text-center">
               <CardTitle>Host Access Required</CardTitle>
@@ -611,102 +606,128 @@ export function DashboardContent({
   const canAccessAdmin = CAPS.accessAdminPanel(role)
     || effectivePlan?.isPlatformAdmin === true;
 
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 17) return "Good afternoon";
+    return "Good evening";
+  })();
+
+  const liveOwned = streams.filter(s => s.status === "live");
+  const liveCohost = cohostParticipants.filter(p => p.stream.status === "live");
+  const isAnyLive = liveOwned.length > 0 || liveCohost.length > 0;
+  const scheduledStreams = streams
+    .filter(s => s.status === "scheduled")
+    .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime());
+  const pastStreams = streams.filter(s => s.status !== "scheduled" && s.status !== "live");
+
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <Radio className="w-4 h-4 text-primary-foreground" />
+
+      {/* ─── Slim header ────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/95 backdrop-blur">
+        <div className="container mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+
+          {/* Brand */}
+          <Link href="/" className="flex items-center gap-2 shrink-0">
+            <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center">
+              <Radio className="w-3.5 h-3.5 text-primary-foreground" />
             </div>
-            <span className="font-bold text-foreground">Isunday Stream Live</span>
+            <span className="font-bold text-sm hidden sm:block">Isunday Live</span>
           </Link>
-          <div className="flex items-center gap-4">
-            {/* Role badge — always visible so users know their permissions */}
+
+          {/* Nav actions */}
+          <div className="flex items-center gap-0.5 ml-auto">
+            {/* Role badge */}
             <Badge
               variant="secondary"
-              className={`text-xs gap-1 ${
-                role === "admin"
-                  ? "bg-primary/10 text-primary border-primary/20"
-                  : role === "cohost"
-                  ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
-                  : role === "super_user"
-                  ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                  : ""
+              className={`mr-2 hidden sm:flex text-[10px] gap-1 ${
+                role === "admin" ? "bg-primary/10 text-primary border-primary/20"
+                : role === "cohost" ? "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                : role === "super_user" ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                : ""
               }`}
             >
-              {role === "admin" && <ShieldCheck className="w-3 h-3" />}
-              {role === "cohost" && <Users className="w-3 h-3" />}
-              {role === "super_user" && <ShieldCheck className="w-3 h-3" />}
+              {(role === "admin" || role === "super_user") && <ShieldCheck className="w-2.5 h-2.5" />}
+              {role === "cohost" && <Users className="w-2.5 h-2.5" />}
               {ROLE_LABELS[role]}
             </Badge>
 
-            {/* Admin Panel Link — only for admins */}
             {canAccessAdmin && (
-              <Button variant="ghost" size="sm" asChild>
+              <Button variant="ghost" size="sm" asChild className="h-8 px-2.5">
                 <Link href="/admin">
-                  <ShieldCheck className="w-4 h-4 mr-2 text-primary" />
-                  <span className="hidden sm:inline">User Management</span>
-                  <span className="sm:hidden">Admin</span>
+                  <ShieldCheck className="w-4 h-4" />
+                  <span className="ml-1.5 hidden md:inline text-xs">Admin</span>
                 </Link>
               </Button>
             )}
 
-            {/* Settings — host preferences (subscription, integrations,
-                profile). Available to anyone who can create streams,
-                same gate as the cards we just removed from this body. */}
-            {canCreateStreams && host && (
-              <Button variant="ghost" size="sm" asChild>
+            {canCreateStreams && (
+              <Button variant="ghost" size="sm" asChild className="h-8 px-2.5">
                 <Link href="/host/settings">
-                  <Settings className="w-4 h-4 mr-2" />
-                  <span className="hidden sm:inline">Settings</span>
+                  <Settings className="w-4 h-4" />
+                  <span className="ml-1.5 hidden md:inline text-xs">Settings</span>
                 </Link>
               </Button>
             )}
-            {/* Studio surface — creator workspace on a sibling subdomain.
-                Auth cookies are shared at .isunday.me so the host doesn't
-                re-login. We use a plain anchor (not Link) because the
-                target is a different host. */}
-            {canCreateStreams && host && (
-              <Button variant="ghost" size="sm" asChild>
-                <a href="https://studio.isunday.me" target="_self">
-                  <Sparkles className="w-4 h-4 mr-2 text-primary" />
-                  <span className="hidden sm:inline">Studio</span>
+
+            {canCreateStreams && (
+              <Button variant="ghost" size="sm" asChild className="h-8 px-2.5">
+                <a href="https://studio.isunday.me">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <span className="ml-1.5 hidden md:inline text-xs">Studio</span>
                 </a>
               </Button>
             )}
-            {/* Emergency Notification Button */}
+
+            {/* Emergency bell */}
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowEmergencyPanel(true)}
-              className="relative"
+              className="relative h-8 px-2.5"
             >
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Emergency
+              <Bell className="w-4 h-4" />
               {emergencyMessages.length > 0 && (
-                <Badge className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center p-0">
-                  {emergencyMessages.length}
-                </Badge>
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
               )}
             </Button>
-            <span className="text-sm text-muted-foreground hidden sm:inline">
+
+            <span className="hidden lg:block text-xs text-muted-foreground px-2 border-l border-border ml-1">
               {host.display_name || user.email}
             </span>
+
             <ThemeToggle size="sm" />
-            <Button variant="ghost" size="sm" onClick={handleSignOut}>
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
+
+            <Button variant="ghost" size="sm" onClick={handleSignOut} className="h-8 px-2.5">
+              <LogOut className="w-4 h-4" />
+              <span className="sr-only">Sign Out</span>
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
-        {/* Onboarding checklist — surfaces only when at least one
-            mandatory step is incomplete and the host hasn't dismissed.
-            Self-hides; gated to actual hosts (not super-user operators). */}
-        {canCreateStreams && host && (
+      <main className="container mx-auto px-4 py-6 max-w-6xl space-y-6">
+
+        {/* ─── Greeting ───────────────────────────────────────────── */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {greeting}, {host.display_name?.split(" ")[0] || "creator"}.
+            </h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+            </p>
+          </div>
+          {effectivePlan?.plan && (
+            <div className="shrink-0 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[11px] font-medium text-primary">
+              {effectivePlan.isPlatformAdmin ? "Admin" : effectivePlan.plan.name}
+            </div>
+          )}
+        </div>
+
+        {/* ─── Onboarding checklist ───────────────────────────────── */}
+        {canCreateStreams && (
           <OnboardingChecklist
             userId={user.id}
             displayName={host.display_name}
@@ -715,518 +736,244 @@ export function DashboardContent({
           />
         )}
 
-        {/* Quick stats row — fetches aggregated analytics client-side.
-            Shown only for stream-creating hosts (not cohost-only). */}
-        {canCreateStreams && host && <DashboardStatsRow />}
+        {/* ─── Quick stats ────────────────────────────────────────── */}
+        {canCreateStreams && <DashboardStatsRow />}
 
-        {/* Creator Workspace — links the live dashboard to the studio
-            modules (Replay, Distribution, Audience, Monetize). The strip
-            reuses STUDIO_NAV so the surfaces stay in lockstep. */}
-        {canCreateStreams && host && (
-          <CreatorWorkspaceStrip
-            plan={effectivePlan?.plan ?? null}
-            isPlatformAdmin={effectivePlan?.isPlatformAdmin ?? false}
-          />
-        )}
-
-        {/* Super-User assignment banner.
-            Mirrors the cohost banner directly below. Appears whenever
-            this user has at least one stream assigned to them as an
-            operator, so the assignment is impossible to miss the moment
-            they land on the dashboard. The amber palette matches the
-            rest of the Super User language used elsewhere
-            (ROLE_LABELS.super_user, the topbar pill, the stream card
-            ring colour). Clicking the chevron scrolls down to the
-            full "Streams You Manage" section so this banner doubles as
-            a jump link. */}
-        {operatorStreams.length > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              document
-                .getElementById("super-user-streams")
-                ?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="w-full mb-6 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-2 border-amber-500/30 rounded-lg text-left hover:from-amber-500/15 hover:to-orange-500/15 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 bg-amber-500 rounded-full shrink-0">
-                <ShieldCheck className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  You manage {operatorStreams.length} stream
-                  {operatorStreams.length !== 1 ? "s" : ""} as Super User
-                  {operatorStreams.some((p) => p.stream.status === "live") && (
-                    <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">
-                      ● LIVE
-                    </Badge>
-                  )}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
-                  You can edit overlays, ticker, music, media, branding,
-                  scenes, and co-host cameras for{" "}
-                  {operatorStreams.length === 1 ? "this stream" : "these streams"}
-                  . Tap to jump to the list.
-                </p>
-              </div>
-              <ChevronDown className="w-4 h-4 text-amber-600 shrink-0" />
+        {/* ─── LIVE NOW banner ────────────────────────────────────── */}
+        {isAnyLive && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+              <h2 className="font-semibold text-base">Live Right Now</h2>
             </div>
-          </button>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {liveOwned.map((s) => (
+                <Card key={s.id} className="border-red-400/40 bg-red-500/5">
+                  <CardContent className="p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shrink-0" />
+                        <span className="font-medium text-sm truncate">{s.title}</span>
+                        <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 shrink-0">LIVE</Badge>
+                      </div>
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Users className="w-3 h-3" />{s.viewer_count} viewers
+                      </span>
+                    </div>
+                    <Button asChild size="sm" className="bg-red-600 hover:bg-red-700 text-white shrink-0 h-8">
+                      <Link href={`/host/stream/${s.room_code}`}>
+                        <Radio className="w-3.5 h-3.5 mr-1" />Manage
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+              {liveCohost.map((p) => (
+                <Card key={p.id} className="border-purple-400/40 bg-purple-500/5">
+                  <CardContent className="p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shrink-0" />
+                        <span className="font-medium text-sm truncate">{p.stream.title}</span>
+                        <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 shrink-0">LIVE</Badge>
+                      </div>
+                      <span className="text-xs text-purple-600">Co-Host · {p.slot_label}</span>
+                    </div>
+                    <Button asChild size="sm" className="bg-purple-600 hover:bg-purple-700 text-white shrink-0 h-8">
+                      <Link href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}>
+                        <Video className="w-3.5 h-3.5 mr-1" />Manage
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
         )}
 
-        {/* Co-hosting Status Banner */}
-        {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length > 0 && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-2 border-purple-500/30 rounded-lg">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 bg-purple-500 rounded-full">
-                <Users className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  You are co-hosting {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length} stream{cohostParticipants.filter(p => p.status === "live" || p.status === "ready").length !== 1 ? "s" : ""}
-                  {cohostParticipants.some(p => p.status === "live") && (
-                    <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
-                  )}
-                </h3>
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  {cohostParticipants.filter(p => p.status === "live" || p.status === "ready").map((p) => (
-                    <Link
-                      key={p.id}
-                      href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}
-                      className="text-xs text-purple-600 hover:text-purple-700 underline"
-                    >
-                      {p.stream.title} ({p.slot_label})
-                    </Link>
-                  ))}
+        {/* ─── Operator assignment banner ─────────────────────────── */}
+        {operatorStreams.length > 0 && (
+          <Card className="border-amber-400/40 bg-amber-500/5">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 bg-amber-500 rounded-full flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold flex items-center gap-2 flex-wrap">
+                    Super User — {operatorStreams.length} stream{operatorStreams.length !== 1 ? "s" : ""} assigned
+                    {operatorStreams.some(p => p.stream.status === "live") && (
+                      <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {operatorStreams.map((op) => (
+                      <Button key={op.id} asChild size="sm" variant="outline"
+                        className={`h-7 text-xs gap-1.5 ${op.stream.status === "live" ? "border-red-300" : "border-amber-300"}`}>
+                        <Link href={`/host/stream/${op.stream.room_code}`}>
+                          <Radio className={`w-3 h-3 ${op.stream.status === "live" ? "text-red-500 animate-pulse" : "text-amber-500"}`} />
+                          {op.stream.title}
+                        </Link>
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Super User section — assigned streams are the operator's homepage. */}
-        {operatorStreams.length > 0 && (
-          <div id="super-user-streams" className="mb-6">
-            <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-amber-500" />
-              Streams You Manage
-              <Badge
-                variant="secondary"
-                className="text-[10px] bg-amber-500/15 text-amber-600 border-amber-500/30"
-              >
-                Super User
-              </Badge>
-              {operatorStreams.some((p) => p.stream.status === "live") && (
-                <Badge className="bg-red-500 text-white text-[10px] h-4 px-1.5 animate-pulse">● LIVE</Badge>
-              )}
-            </h2>
-            <div className="grid gap-3">
-              {operatorStreams.map((p) => {
-                const live = p.stream.status === "live";
-                return (
-                  <Card
-                    key={p.id}
-                    className={
-                      live
-                        ? "border-red-300 bg-red-50/40 dark:bg-red-950/20"
-                        : "border-amber-200 bg-amber-50/40 dark:bg-amber-950/20"
-                    }
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            {live && (
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
-                            )}
-                            <h3 className="font-semibold text-foreground truncate">
-                              {p.stream.title}
-                            </h3>
-                            {live ? (
-                              <Badge className="bg-red-500 text-white text-xs shrink-0">● LIVE</Badge>
-                            ) : p.stream.status === "scheduled" ? (
-                              <Badge className="bg-blue-500 text-white text-xs shrink-0 gap-1">
-                                <CalendarClock className="w-3 h-3" /> Scheduled
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs shrink-0">
-                                {p.stream.status === "waiting" ? "Waiting" : p.stream.status}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <span className="text-xs font-medium text-amber-600 flex items-center gap-1">
-                              <ShieldCheck className="w-3 h-3" /> Operator access
-                            </span>
-                            <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                              {p.stream.room_code}
-                            </span>
-                          </div>
-                        </div>
-                        <Button
-                          asChild
-                          size="sm"
-                          className={
-                            live
-                              ? "bg-red-600 hover:bg-red-700 text-white shrink-0"
-                              : "bg-amber-600 hover:bg-amber-700 text-white shrink-0"
-                          }
-                        >
-                          <Link href={`/host/stream/${p.stream.room_code}`}>
-                            <Radio className="w-4 h-4 mr-1" />
-                            {live ? "Open Control Room" : "Enter Control Room"}
-                          </Link>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Create / Schedule Stream Card — hidden for cohost-only role */}
-          {canCreateStreams ? (
-          <Card className="lg:col-span-1">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="w-5 h-5" />
-                New Stream
-              </CardTitle>
-              <CardDescription>
-                Go live instantly or schedule for later
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="instant">
-                <TabsList className="w-full mb-4">
-                  <TabsTrigger value="instant" className="flex-1">
-                    <Video className="w-3.5 h-3.5 mr-1.5" />
-                    Instant
-                  </TabsTrigger>
-                  <TabsTrigger value="schedule" className="flex-1">
-                    <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
-                    Schedule
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="instant">
-                  <form onSubmit={handleCreateStream} className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="title">Stream Title</Label>
-                      <Input
-                        id="title"
-                        placeholder="My Live Event"
-                        value={newStreamTitle}
-                        onChange={(e) => setNewStreamTitle(e.target.value)}
-                      />
-                    </div>
-                    <Button type="submit" disabled={loading} className="w-full">
-                      {loading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Creating...
-                        </>
-                      ) : (
-                        <>
-                          <Video className="w-4 h-4 mr-2" />
-                          Go Live Now
-                        </>
-                      )}
-                    </Button>
-                  </form>
-                </TabsContent>
-
-                <TabsContent value="schedule">
-                  {host && (
-                    <ScheduleStreamForm
-                      currentHostId={host.id}
-                      onScheduled={(newStream) => {
-                        if (host) {
-                          supabase
-                            .from("streams")
-                            .select("*")
-                            .eq("host_id", host.id)
-                            .order("created_at", { ascending: false })
-                            .then(({ data }: { data: Stream[] | null }) => { if (data) setStreams(data); });
-                        }
-                        // Immediately prompt the host to attach operators
-                        // to the freshly-scheduled stream.
-                        if (newStream) setManageOperatorsFor(newStream);
-                      }}
-                    />
-                  )}
-                </TabsContent>
-              </Tabs>
             </CardContent>
           </Card>
-          ) : role === "super_user" ? (
-            /* Super User left-column card — shows assigned streams directly */
-            <Card className="lg:col-span-1 border-amber-200 bg-amber-50/40 dark:bg-amber-950/20">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-amber-500" />
-                  Operator Access
-                </CardTitle>
-                <CardDescription>
-                  You are a <strong>Super User</strong> operator. You can manage
-                  overlays, ticker, music, media, and branding for any stream
-                  you are assigned to. You cannot create your own streams.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {operatorStreams.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No streams assigned yet. Ask an admin or stream owner to add you
-                    as an operator.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {operatorStreams.map((op) => {
-                      const live = op.stream.status === "live";
-                      return (
-                        <Button
-                          key={op.id}
-                          asChild
-                          variant="outline"
-                          className={`justify-start gap-2 ${live ? "border-red-300 bg-red-50/40 dark:bg-red-950/20" : ""}`}
-                        >
-                          <Link href={`/host/stream/${op.stream.room_code}`}>
-                            <Radio className={`w-4 h-4 shrink-0 ${live ? "text-red-500 animate-pulse" : "text-amber-500"}`} />
-                            <span className="truncate flex-1 text-left">{op.stream.title}</span>
-                            {live && (
-                              <Badge className="ml-auto bg-red-500 text-white text-[10px] h-4 px-1.5 shrink-0">
-                                LIVE
-                              </Badge>
-                            )}
-                          </Link>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            /* Cohost left-column card */
-            <Card className="lg:col-span-1 border-purple-200 bg-purple-50/40 dark:bg-purple-950/20">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="w-5 h-5 text-purple-500" />
-                  Co-host Access
-                </CardTitle>
-                <CardDescription>
-                  You have the <strong>{ROLE_LABELS.cohost}</strong> role. You can only
-                  join streams you&apos;ve been invited to as a co-host — you can&apos;t
-                  create your own. Ask an admin if you need stream-creation access.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          )}
+        )}
 
-          {/* Streams List + Recent Replays */}
-          <div className="lg:col-span-2 flex flex-col gap-6">
-
-            {/* ── Live Now ── combined live streams (owned + co-hosting) */}
-            {(streams.some(s => s.status === "live") || cohostParticipants.some(p => p.stream.status === "live")) && (
-              <div>
-                <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
-                  <Radio className="w-5 h-5 text-red-500" />
-                  Live Now
-                </h2>
-                <div className="grid gap-3">
-                  {/* Streams the host OWNS that are live */}
-                  {streams.filter(s => s.status === "live").map((s) => (
-                    <Card key={s.id} className="border-red-300 bg-red-50/40 dark:bg-red-950/20">
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
-                              <h3 className="font-semibold text-foreground truncate">{s.title}</h3>
-                              <Badge className="bg-red-500 text-white text-xs shrink-0">● LIVE</Badge>
-                            </div>
-                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                              <span className="text-xs font-medium text-green-600">Hosting</span>
-                              <span className="flex items-center gap-1">
-                                <Users className="w-3.5 h-3.5" />
-                                {s.viewer_count} viewers
-                              </span>
-                              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{s.room_code}</span>
-                            </div>
-                          </div>
-                          <Button asChild size="sm" className="bg-red-600 hover:bg-red-700 text-white shrink-0">
-                            <Link href={`/host/stream/${s.room_code}`}>
-                              <Radio className="w-4 h-4 mr-1" />
-                              Manage
-                            </Link>
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                  {/* Streams the host is CO-HOSTING that are live */}
-                  {cohostParticipants.filter(p => p.stream.status === "live").map((p) => (
-                    <Card key={p.id} className="border-purple-300 bg-purple-50/40 dark:bg-purple-950/20">
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
-                              <h3 className="font-semibold text-foreground truncate">{p.stream.title}</h3>
-                              <Badge className="bg-red-500 text-white text-xs shrink-0">● LIVE</Badge>
-                            </div>
-                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                              <span className="text-xs font-medium text-purple-600">Co-Host · {p.slot_label}</span>
-                              <span className={`text-xs font-medium ${
-                                p.status === "live" ? "text-red-500" :
-                                p.status === "ready" ? "text-blue-500" : "text-yellow-600"
-                              }`}>
-                                {p.status === "live" ? "Broadcasting" : p.status === "ready" ? "Camera Ready" : "Invited"}
-                              </span>
-                              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">{p.stream.room_code}</span>
-                            </div>
-                          </div>
-                          <Button asChild size="sm" className="bg-purple-600 hover:bg-purple-700 text-white shrink-0">
-                            <Link href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}>
-                              <Video className="w-4 h-4 mr-1" />
-                              {p.status === "live" ? "Manage" : "Go Live"}
-                            </Link>
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+        {/* ─── Co-host invitations banner ─────────────────────────── */}
+        {cohostParticipants.filter(p => p.stream.status !== "live" && (p.status === "invited" || p.status === "ready")).length > 0 && (
+          <Card className="border-purple-400/40 bg-purple-500/5">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 bg-purple-500 rounded-full flex items-center justify-center shrink-0">
+                  <Users className="w-4 h-4 text-white" />
                 </div>
-              </div>
-            )}
-
-            {/* Upcoming Scheduled Streams */}
-            {streams.filter(s => s.status === "scheduled").length > 0 && (
-              <div>
-                <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <CalendarClock className="w-5 h-5 text-blue-500" />
-                  Upcoming Scheduled
-                </h2>
-                <div className="grid gap-3">
-                  {streams
-                    .filter(s => s.status === "scheduled")
-                    .sort((a, b) => new Date(a.scheduled_at!).getTime() - new Date(b.scheduled_at!).getTime())
-                    .map((stream) => (
-                      <Card key={stream.id} className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
-                        <CardContent className="p-4">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="font-semibold text-foreground truncate">{stream.title}</h3>
-                                {getStatusBadge(stream.status)}
-                              </div>
-                              {stream.description && (
-                                <p className="text-sm text-muted-foreground mb-2 line-clamp-1">{stream.description}</p>
-                              )}
-                              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                                <span className="flex items-center gap-1 font-medium text-blue-600">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  {stream.scheduled_at ? getCountdown(stream.scheduled_at) : ""}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <CalendarClock className="w-3.5 h-3.5" />
-                                  {stream.scheduled_at ? new Date(stream.scheduled_at).toLocaleString() : ""}
-                                </span>
-                                <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
-                                  {stream.room_code}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Button asChild size="sm">
-                                <Link href={`/host/stream/${stream.room_code}`}>
-                                  <Play className="w-4 h-4 mr-1" />
-                                  Start
-                                </Link>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  setManageOperatorsFor({ id: stream.id, title: stream.title })
-                                }
-                                title="Manage Super Users for this scheduled stream"
-                              >
-                                <ShieldCheck className="w-4 h-4 text-amber-500" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => copyShareLink(stream.room_code)}
-                                title="Copy viewer link"
-                              >
-                                <Copy className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">
+                    Co-host invitations pending
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {cohostParticipants.filter(p => p.stream.status !== "live").map((p) => (
+                      <Button key={p.id} asChild size="sm" variant="outline"
+                        className="h-7 text-xs gap-1.5 border-purple-300">
+                        <Link href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}>
+                          <Video className="w-3 h-3 text-purple-500" />
+                          {p.stream.title}
+                          <Badge variant="outline" className="ml-1 text-[9px] h-3.5 px-1">
+                            {p.status === "ready" ? "Ready" : "Invited"}
+                          </Badge>
+                        </Link>
+                      </Button>
                     ))}
+                  </div>
                 </div>
               </div>
-            )}
+            </CardContent>
+          </Card>
+        )}
 
-            {/* Recent Replays widget — compact list of top published replays
-                so the host can see their replay performance at a glance. */}
-            {canCreateStreams && (
-              <RecentReplaysWidget />
-            )}
+        {/* ─── GO LIVE hero card ───────────────────────────────────── */}
+        {canCreateStreams && (
+          <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-primary/3 to-transparent">
+            <CardContent className="p-5 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Radio className="w-4 h-4 text-primary" />
+                <h2 className="font-semibold">Start streaming</h2>
+              </div>
+              <form onSubmit={handleCreateStream} className="flex flex-col sm:flex-row gap-3">
+                <Input
+                  placeholder="What's your stream title? (optional)"
+                  value={newStreamTitle}
+                  onChange={(e) => setNewStreamTitle(e.target.value)}
+                  className="flex-1 bg-background"
+                />
+                <Button type="submit" disabled={loading} className="shrink-0 gap-2 sm:w-auto w-full">
+                  {loading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />Creating…</>
+                  ) : (
+                    <><Radio className="w-4 h-4" />Go Live Now</>
+                  )}
+                </Button>
+              </form>
+              <div className="mt-3 flex items-center gap-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs px-2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowScheduleDialog(true)}
+                >
+                  <CalendarClock className="w-3.5 h-3.5 mr-1.5" />
+                  Schedule for later
+                </Button>
+                <span className="text-xs text-muted-foreground hidden sm:block">
+                  Title is optional — you can update it from the control room
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-            <div>
-              {/* Co-Hosting Streams — invited/ready (non-live shown here; live appear in Live Now above) */}
-            {cohostParticipants.filter(p => p.stream.status !== "live").length > 0 && (
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <Users className="w-5 h-5 text-purple-500" />
-                  Streams You&apos;re Co-Hosting
+        {/* ─── Role card for non-creators ─────────────────────────── */}
+        {!canCreateStreams && role === "super_user" && (
+          <Card className="border-amber-400/40 bg-amber-500/5">
+            <CardContent className="p-5 flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Operator access</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  You can manage overlays, ticker, music, and branding for streams you're assigned to. Stream creation is reserved for admins.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        {!canCreateStreams && role === "cohost" && (
+          <Card className="border-purple-400/40 bg-purple-500/5">
+            <CardContent className="p-5 flex items-start gap-3">
+              <Users className="w-5 h-5 text-purple-500 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Co-host access</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Join streams you&apos;ve been invited to above. Ask an admin to upgrade your access if you need to create streams.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ─── Main content grid ───────────────────────────────────── */}
+        <div className="grid lg:grid-cols-3 gap-6">
+
+          {/* Left / main column */}
+          <div className="lg:col-span-2 space-y-6">
+
+            {/* Scheduled streams */}
+            {scheduledStreams.length > 0 && (
+              <div>
+                <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+                  <CalendarClock className="w-4 h-4 text-blue-500" />
+                  Upcoming
+                  <Badge variant="outline" className="ml-1 text-[10px]">{scheduledStreams.length}</Badge>
                 </h2>
-                <div className="grid gap-3">
-                  {cohostParticipants.filter(p => p.stream.status !== "live").map((p) => (
-                    <Card key={p.id} className="border-purple-200 bg-purple-50/50 dark:bg-purple-950/20">
+                <div className="space-y-2">
+                  {scheduledStreams.map((stream) => (
+                    <Card key={stream.id} className="border-blue-400/30 bg-blue-500/5">
                       <CardContent className="p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                              {p.status === "live" && (
-                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shrink-0" />
-                              )}
-                              <h3 className="font-semibold text-foreground truncate">{p.stream.title}</h3>
-                              {p.stream.status === "live" ? (
-                                <Badge className="bg-red-500 text-white text-xs shrink-0">Live</Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-xs shrink-0">Waiting</Badge>
-                              )}
+                              <span className="font-medium text-sm truncate">{stream.title}</span>
+                              {getStatusBadge(stream.status)}
                             </div>
-                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                              <span className="font-medium text-purple-600">{p.slot_label}</span>
-                              <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                                {p.stream.room_code}
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              <span className="text-blue-600 font-medium">
+                                {stream.scheduled_at ? getCountdown(stream.scheduled_at) : ""}
                               </span>
-                              <span className={`text-xs font-medium ${
-                                p.status === "live" ? "text-red-500" :
-                                p.status === "ready" ? "text-blue-500" :
-                                "text-yellow-600"
-                              }`}>
-                                {p.status === "live" ? "Broadcasting" : p.status === "ready" ? "Camera Ready" : "Invited"}
+                              <span>
+                                {stream.scheduled_at ? new Date(stream.scheduled_at).toLocaleString(undefined, {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : ""}
                               </span>
+                              <span className="font-mono bg-muted px-1.5 py-0.5 rounded">{stream.room_code}</span>
                             </div>
                           </div>
-                          <Button asChild size="sm" className="shrink-0 bg-purple-600 hover:bg-purple-700">
-                            <Link href={`/host/stream/${p.stream.room_code}/cohost/${p.id}`}>
-                              <Video className="w-4 h-4 mr-1" />
-                              {p.status === "live" ? "Manage" : "Go Live"}
-                            </Link>
-                          </Button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button asChild size="sm" className="h-8">
+                              <Link href={`/host/stream/${stream.room_code}`}>
+                                <Play className="w-3.5 h-3.5 mr-1" />Start
+                              </Link>
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
+                              onClick={() => setManageOperatorsFor({ id: stream.id, title: stream.title })}
+                              title="Manage operators">
+                              <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
+                              onClick={() => copyShareLink(stream.room_code)} title="Copy link">
+                              <Copy className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -1235,280 +982,231 @@ export function DashboardContent({
               </div>
             )}
 
-            <h2 className="text-xl font-semibold text-foreground mb-4">Your Streams</h2>
-            {streams.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <Video className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">
-                    No streams yet. Create your first stream to get started!
-                  </p>
-                </CardContent>
-              </Card>
-            ) : streams.filter(s => s.status !== "scheduled" && s.status !== "live").length === 0 ? (
-              <Card>
-                <CardContent className="py-8 text-center">
-                  <Radio className="w-8 h-8 text-red-400 mx-auto mb-3 animate-pulse" />
-                  <p className="text-muted-foreground text-sm">
-                    All your streams are currently live — see <span className="font-medium text-red-500">Live Now</span> above.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {streams.filter(s => s.status !== "scheduled" && s.status !== "live").map((stream) => (
-                  <Card key={stream.id} className="group hover:shadow-md transition-shadow duration-200">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-3">
-                            <div className="flex items-center gap-2">
-                              {stream.status === "live" && (
-                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                              )}
-                              <h3 className="font-semibold text-foreground text-lg truncate">
-                                {stream.title}
-                              </h3>
-                            </div>
-                            {getStatusBadge(stream.status)}
-                          </div>
-                          
-                          <div className="flex items-center gap-6 text-sm text-muted-foreground mb-3">
-                            <span className="flex items-center gap-2">
-                              <Users className="w-4 h-4" />
-                              <span className="font-medium">{stream.viewer_count}</span>
-                              <span>viewers</span>
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <Clock className="w-4 h-4" />
-                              <span>{new Date(stream.created_at).toLocaleDateString()}</span>
-                            </span>
-                            {stream.started_at && (
-                              <span className="flex items-center gap-2">
-                                <Play className="w-4 h-4" />
-                                <span>Started {new Date(stream.started_at).toLocaleTimeString()}</span>
-                              </span>
-                            )}
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-1 rounded">
-                              Code: {stream.room_code}
-                            </span>
-                            {stream.recording_url && (
-                              <Badge variant="outline" className="text-xs">
-                                <Download className="w-3 h-3 mr-1" />
-                                Recording Available
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
-                          <Button asChild size="sm" className="shrink-0">
-                            <Link href={`/host/stream/${stream.room_code}`}>
-                              {stream.status === "live" ? (
-                                <>
-                                  <Square className="w-4 h-4 mr-1" />
-                                  Manage
-                                </>
-                              ) : stream.status === "ended" ? (
-                                <>
-                                  {/* Same room_code -> same watch URL stays
-                                      valid. Host clicks this to land back in
-                                      the room and restart from there. */}
-                                  <RefreshCw className="w-4 h-4 mr-1" />
-                                  Go Live Again
-                                </>
-                              ) : (
-                                <>
-                                  <Play className="w-4 h-4 mr-1" />
-                                  Start
-                                </>
-                              )}
-                            </Link>
-                          </Button>
-                          {stream.status === "ended" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => copyShareLink(stream.room_code)}
-                              title="Copy viewer link (still valid after restart)"
-                              className="shrink-0"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </Button>
-                          )}
-                          
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="outline" size="sm" className="shrink-0">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuItem onClick={() => shareStream(stream)}>
-                                <Share2 className="w-4 h-4 mr-2" />
-                                Share Stream
-                              </DropdownMenuItem>
-                              
-                              <DropdownMenuItem onClick={() => copyShareLink(stream.room_code)}>
-                                <Copy className="w-4 h-4 mr-2" />
-                                Copy Link
-                              </DropdownMenuItem>
+            {/* Stream history */}
+            <div>
+              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+                <Video className="w-4 h-4 text-muted-foreground" />
+                Stream History
+                {pastStreams.length > 0 && (
+                  <Badge variant="outline" className="ml-1 text-[10px]">{pastStreams.length}</Badge>
+                )}
+              </h2>
 
-                              <DropdownMenuSeparator />
-
-                              {/* Summary — permanent recap page; especially
-                                  useful for ended streams to revisit the
-                                  cloud archive / YouTube link. */}
-                              <DropdownMenuItem asChild>
-                                <Link href={`/host/streams/${stream.id}/summary`}>
-                                  <ExternalLink className="w-4 h-4 mr-2" />
-                                  View Summary
-                                </Link>
-                              </DropdownMenuItem>
-
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  setManageOperatorsFor({ id: stream.id, title: stream.title })
-                                }
-                              >
-                                <ShieldCheck className="w-4 h-4 mr-2 text-amber-500" />
-                                Manage Super Users
-                              </DropdownMenuItem>
-
+              {streams.length === 0 ? (
+                <Card className="border-dashed">
+                  <CardContent className="py-12 text-center">
+                    <Radio className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+                    <p className="text-sm font-medium text-muted-foreground">No streams yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use the card above to go live — it only takes a second.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : pastStreams.length === 0 ? (
+                <Card className="border-dashed">
+                  <CardContent className="py-8 text-center">
+                    <Radio className="w-7 h-7 text-red-400 mx-auto mb-2 animate-pulse" />
+                    <p className="text-sm text-muted-foreground">
+                      All your streams are live — check <span className="text-red-500 font-medium">Live Right Now</span> above.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-2">
+                  {pastStreams.map((stream) => (
+                    <Card key={stream.id} className="group hover:border-border/80 transition-colors">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-sm truncate">{stream.title}</span>
+                              {getStatusBadge(stream.status)}
                               {stream.recording_url && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={() => handleDownloadRecording(stream)}>
-                                    <Download className="w-4 h-4 mr-2" />
-                                    Download Recording
-                                  </DropdownMenuItem>
-                                </>
+                                <Badge variant="outline" className="text-[10px] h-4 px-1">
+                                  <Download className="w-2.5 h-2.5 mr-0.5" />Rec
+                                </Badge>
                               )}
-                              
-                              <DropdownMenuSeparator />
-                              
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
-                                    onSelect={(e) => e.preventDefault()}
-                                  >
-                                    <Trash2 className="w-4 h-4 mr-2" />
-                                    Delete Stream
-                                  </DropdownMenuItem>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete Stream</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      Are you sure you want to delete "{stream.title}"? This action cannot be undone.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      onClick={() => handleDeleteStream(stream.id)}
-                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                    >
-                                      {deletingStream === stream.id ? (
-                                        <>
-                                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                          Deleting...
-                                        </>
-                                      ) : (
-                                        "Delete Stream"
-                                      )}
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Users className="w-3 h-3" />{stream.viewer_count}
+                              </span>
+                              <span>{new Date(stream.created_at).toLocaleDateString(undefined, {month:"short",day:"numeric",year:"numeric"})}</span>
+                              <span className="font-mono bg-muted px-1.5 py-0.5 rounded hidden sm:inline">{stream.room_code}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button asChild size="sm" className="h-8">
+                              <Link href={`/host/stream/${stream.room_code}`}>
+                                {stream.status === "ended" ? (
+                                  <><RefreshCw className="w-3.5 h-3.5 mr-1" />Go Live Again</>
+                                ) : (
+                                  <><Play className="w-3.5 h-3.5 mr-1" />Start</>
+                                )}
+                              </Link>
+                            </Button>
+                            {stream.status === "ended" && (
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
+                                onClick={() => copyShareLink(stream.room_code)} title="Copy link">
+                                <Copy className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreVertical className="w-3.5 h-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem onClick={() => shareStream(stream)}>
+                                  <Share2 className="w-3.5 h-3.5 mr-2" />Share stream
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => copyShareLink(stream.room_code)}>
+                                  <Copy className="w-3.5 h-3.5 mr-2" />Copy link
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/host/streams/${stream.id}/summary`}>
+                                    <ExternalLink className="w-3.5 h-3.5 mr-2" />View summary
+                                  </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setManageOperatorsFor({ id: stream.id, title: stream.title })}>
+                                  <ShieldCheck className="w-3.5 h-3.5 mr-2 text-amber-500" />Manage operators
+                                </DropdownMenuItem>
+                                {stream.recording_url && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => handleDownloadRecording(stream)}>
+                                      <Download className="w-3.5 h-3.5 mr-2" />Download recording
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                                <DropdownMenuSeparator />
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={e => e.preventDefault()}>
+                                      <Trash2 className="w-3.5 h-3.5 mr-2" />Delete stream
+                                    </DropdownMenuItem>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Delete stream?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        &ldquo;{stream.title}&rdquo; will be permanently deleted. This cannot be undone.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => handleDeleteStream(stream.id)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      >
+                                        {deletingStream === stream.id ? (
+                                          <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Deleting…</>
+                                        ) : "Delete"}
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </div>
+          </div>
+
+          {/* ─── Right sidebar ──────────────────────────────────────── */}
+          <div className="space-y-4">
+            {/* Creator Workspace modules */}
+            {canCreateStreams && (
+              <CreatorWorkspaceStrip
+                plan={effectivePlan?.plan ?? null}
+                isPlatformAdmin={effectivePlan?.isPlatformAdmin ?? false}
+              />
+            )}
+            {/* Recent Replays */}
+            {canCreateStreams && <RecentReplaysWidget />}
           </div>
         </div>
 
-        {/* Subscription + integration cards moved to /host/settings to keep
-            the dashboard focused on streams. The header has a Settings
-            link for direct access. */}
-
-        {/* Insider Circle \u2014 host's private subscriber list + email composer.
-            Hidden for cohost-only roles since they don't own a list of their
-            own subscribers; the list belongs to whichever host invited them. */}
-        {canCreateStreams && host && (
-          <InsiderCircleSection hostName={host.display_name || host.email || "Host"} />
-        )}
       </main>
 
-      {/* Emergency Panel Dialog */}
+      {/* ─── Schedule dialog ────────────────────────────────────────── */}
+      <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock className="w-4 h-4 text-blue-500" />
+              Schedule a stream
+            </DialogTitle>
+          </DialogHeader>
+          {host && (
+            <ScheduleStreamForm
+              currentHostId={host.id}
+              onScheduled={(newStream) => {
+                if (host) {
+                  supabase
+                    .from("streams")
+                    .select("*")
+                    .eq("host_id", host.id)
+                    .order("created_at", { ascending: false })
+                    .then(({ data }: { data: Stream[] | null }) => { if (data) setStreams(data); });
+                }
+                setShowScheduleDialog(false);
+                if (newStream) setManageOperatorsFor(newStream);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Emergency dialog ───────────────────────────────────────── */}
       <AlertDialog open={showEmergencyPanel} onOpenChange={setShowEmergencyPanel}>
-        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <AlertDialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              Emergency Messages ({emergencyMessages.length})
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+              Emergency messages
+              {emergencyMessages.length > 0 && (
+                <Badge className="bg-red-500 text-white ml-1">{emergencyMessages.length}</Badge>
+              )}
             </AlertDialogTitle>
-            <AlertDialogDescription>
-              Viewer emergency messages and technical issues reported
-            </AlertDialogDescription>
+            <AlertDialogDescription>Viewer-reported issues and alerts from your streams.</AlertDialogDescription>
           </AlertDialogHeader>
-          
-          <div className="space-y-4 py-4">
+          <div className="space-y-3 py-3">
             {emergencyMessages.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <AlertTriangle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No emergency messages reported</p>
+                <AlertTriangle className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">No emergency messages — all clear.</p>
               </div>
             ) : (
               emergencyMessages.map((msg) => (
-                <Card key={msg.id} className="border-red-200 bg-red-50">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Badge className="bg-red-500 text-white">
-                            Emergency
-                          </Badge>
-                          <span className="text-sm text-muted-foreground">
-                            From: {msg.sender_name.replace('SYSTEM - ', '')}
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            {new Date(msg.created_at).toLocaleString()}
+                <Card key={msg.id} className="border-red-200 bg-red-50 dark:bg-red-950/20">
+                  <CardContent className="p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge className="bg-red-500 text-white text-[10px]">Emergency</Badge>
+                          <span className="text-xs text-muted-foreground truncate">
+                            {msg.sender_name.replace("SYSTEM - ", "")} · {new Date(msg.created_at).toLocaleTimeString()}
                           </span>
                         </div>
-                        <p className="text-sm">
-                          {msg.message.replace('EMERGENCY: ', '')}
-                        </p>
+                        <p className="text-sm">{msg.message.replace("EMERGENCY: ", "")}</p>
                         {msg.stream_id && (
-                          <div className="mt-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => router.push(`/host/stream/${msg.stream_id}`)}
-                            >
-                              Go to Stream
-                            </Button>
-                          </div>
+                          <Button variant="outline" size="sm" className="mt-2 h-7 text-xs"
+                            onClick={() => router.push(`/host/stream/${msg.stream_id}`)}>
+                            Go to stream
+                          </Button>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEmergencyMessages(prev => prev.filter(m => m.id !== msg.id));
-                        }}
-                      >
-                        <X className="w-4 h-4" />
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0"
+                        onClick={() => setEmergencyMessages(prev => prev.filter(m => m.id !== msg.id))}>
+                        <X className="w-3.5 h-3.5" />
                       </Button>
                     </div>
                   </CardContent>
@@ -1516,17 +1214,13 @@ export function DashboardContent({
               ))
             )}
           </div>
-          
           <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setShowEmergencyPanel(false)}>
-              Close
-            </AlertDialogAction>
+            <AlertDialogAction onClick={() => setShowEmergencyPanel(false)}>Close</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Shared operator-assignment dialog — driven programmatically from
-          both the per-stream dropdown and the post-schedule auto-open. */}
+      {/* ─── Operator-assignment dialog ─────────────────────────────── */}
       {manageOperatorsFor && (
         <StreamOperatorsDialog
           streamId={manageOperatorsFor.id}
@@ -1535,8 +1229,6 @@ export function DashboardContent({
           onOpenChange={(next) => {
             if (!next) {
               setManageOperatorsFor(null);
-              // Instant-go-live handoff: navigate to the live stream page
-              // immediately after the host finishes (or skips) assignment.
               if (pendingGoLiveRoom) {
                 const room = pendingGoLiveRoom;
                 setPendingGoLiveRoom(null);

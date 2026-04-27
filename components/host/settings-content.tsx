@@ -34,6 +34,7 @@ import {
   Trash2,
   AlertTriangle,
   Loader2,
+  ExternalLink,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -80,8 +81,8 @@ interface Props {
 
 export function SettingsContent({ user, host }: Props) {
   const [tab, setTab] = useState<
-    "subscription" | "integrations" | "profile" | "notifications" | "privacy"
-  >("subscription");
+    "billing" | "integrations" | "profile" | "notifications" | "privacy"
+  >("billing");
 
   return (
     <div className="min-h-screen bg-background">
@@ -116,9 +117,9 @@ export function SettingsContent({ user, host }: Props) {
           {/* On mobile we let the list scroll horizontally; on desktop
               we constrain its width so it doesn't stretch awkwardly. */}
           <TabsList className="mb-6 h-auto w-full justify-start gap-1 overflow-x-auto bg-muted/50 p-1 sm:w-auto">
-            <TabsTrigger value="subscription" className="gap-1.5">
+            <TabsTrigger value="billing" className="gap-1.5">
               <CreditCard className="h-3.5 w-3.5" />
-              Subscription
+              Billing
             </TabsTrigger>
             <TabsTrigger value="integrations" className="gap-1.5">
               <Plug className="h-3.5 w-3.5" />
@@ -138,11 +139,25 @@ export function SettingsContent({ user, host }: Props) {
             </TabsTrigger>
           </TabsList>
 
-          {/* ─── Subscription ──────────────────────────────────── */}
-          <TabsContent value="subscription" className="space-y-4">
+          {/* ─── Billing ───────────────────────────────────────── */}
+          <TabsContent value="billing" className="space-y-4">
             <SubscriptionCard />
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3">
+              <div className="text-sm">
+                <p className="font-medium">Monetization &amp; Payouts</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Manage Stripe Connect, earnings, and replay paywalls in the Monetize Center.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" asChild className="shrink-0 gap-1.5">
+                <a href="/studio/monetize">
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Open
+                </a>
+              </Button>
+            </div>
             <p className="text-center text-xs text-muted-foreground">
-              Billing is handled by Stripe. Invoices and receipts arrive at{" "}
+              Invoices and receipts are sent to{" "}
               <span className="font-medium text-foreground">{host.email}</span>.
             </p>
           </TabsContent>
@@ -329,10 +344,10 @@ function ProfileForm({
   );
 }
 
-// Tiny convenience export so callers can hint at the YouTube tab
+// Tiny convenience export so callers can hint at a specific tab
 // without needing to know URL fragments.
 export const SETTINGS_TABS = {
-  subscription: "subscription",
+  billing: "billing",
   integrations: "integrations",
   profile: "profile",
   notifications: "notifications",
