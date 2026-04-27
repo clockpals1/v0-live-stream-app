@@ -13,6 +13,9 @@ import {
   CircleDollarSign,
   ArrowRight,
   Sparkles,
+  Radio,
+  CalendarClock,
+  CircleDot,
 } from "lucide-react";
 
 /**
@@ -104,9 +107,32 @@ async function renderStudioOverview() {
       return 0;
     }
   };
-  const [archiveCount, publishedCount] = await Promise.all([
+  const safeLatestStream = async () => {
+    try {
+      const { data } = await supabase
+        .from("streams")
+        .select("id, title, status, room_code, scheduled_at, created_at")
+        .eq("host_id", hostId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{
+          id: string;
+          title: string;
+          status: string;
+          room_code: string;
+          scheduled_at: string | null;
+          created_at: string;
+        }>();
+      return data ?? null;
+    } catch (err) {
+      console.warn("[studio/page] latest stream lookup failed:", err);
+      return null;
+    }
+  };
+  const [archiveCount, publishedCount, latestStream] = await Promise.all([
     safeArchiveCount(),
     safePublishedCount(),
+    safeLatestStream(),
   ]);
 
   const tiles = [
@@ -167,6 +193,9 @@ async function renderStudioOverview() {
         </div>
       </div>
 
+      {/* ─── live stream bridge ─────────────────────────────────────── */}
+      <LiveStatusCard latestStream={latestStream} />
+
       {/* ─── stats row ───────────────────────────────────────────────── */}
       <div className="mb-10 grid grid-cols-3 gap-3 sm:gap-4">
         <StatCard label="Archived streams" value={String(archiveCount ?? 0)} />
@@ -188,6 +217,127 @@ async function renderStudioOverview() {
         ))}
       </div>
     </main>
+  );
+}
+
+/**
+ * Live status bridge — the studio → live counterpart of the Creator
+ * Workspace strip on the live dashboard. Always visible so the host
+ * remembers the live surface exists, with copy that adapts to whether
+ * they're currently live, have a stream scheduled, or are idle.
+ *
+ * The "Go to live dashboard" CTA is a plain anchor (different host).
+ * Auth cookies are shared at .isunday.me so no re-login is required.
+ */
+function LiveStatusCard({
+  latestStream,
+}: {
+  latestStream: {
+    id: string;
+    title: string;
+    status: string;
+    room_code: string;
+    scheduled_at: string | null;
+    created_at: string;
+  } | null;
+}) {
+  const liveDashboardUrl = "https://live.isunday.me/host/dashboard";
+
+  // Branch on stream state. We pick a single banner per state rather
+  // than stacking everything — keeps the surface calm.
+  if (latestStream?.status === "live") {
+    const streamUrl = `https://live.isunday.me/host/stream/${latestStream.room_code}`;
+    return (
+      <Card className="mb-6 overflow-hidden border-red-500/40 bg-gradient-to-br from-red-500/10 via-red-500/5 to-transparent">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="relative mt-1 flex h-3 w-3 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Badge className="h-5 bg-red-500 text-[10px] uppercase tracking-wider text-white hover:bg-red-500">
+                  Live now
+                </Badge>
+                <span className="truncate text-sm font-medium">
+                  {latestStream.title}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                You're broadcasting on the live surface. Studio updates
+                will reflect here as soon as the stream ends.
+              </p>
+            </div>
+          </div>
+          <Button asChild size="sm" className="shrink-0">
+            <a href={streamUrl}>
+              <Radio className="mr-2 h-3.5 w-3.5" />
+              Open broadcast
+            </a>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (latestStream?.status === "scheduled" && latestStream.scheduled_at) {
+    const when = new Date(latestStream.scheduled_at);
+    const whenLabel = when.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return (
+      <Card className="mb-6 border-blue-500/30 bg-blue-500/5">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-blue-500" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">
+                Scheduled: {latestStream.title}
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Going live {whenLabel}.
+              </p>
+            </div>
+          </div>
+          <Button asChild size="sm" variant="outline" className="shrink-0">
+            <a href={liveDashboardUrl}>Manage on live dashboard</a>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Idle / no recent stream / ended stream — gentle CTA back to live.
+  return (
+    <Card className="mb-6 border-dashed">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <CircleDot className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium">
+              {latestStream
+                ? `Last stream: ${latestStream.title}`
+                : "No streams yet"}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              The studio surfaces what you create on the live side. Start
+              a broadcast and your archive, replays, and audience tools
+              all flow back here automatically.
+            </p>
+          </div>
+        </div>
+        <Button asChild size="sm" className="shrink-0">
+          <a href={liveDashboardUrl}>
+            <Radio className="mr-2 h-3.5 w-3.5" />
+            Go live
+          </a>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

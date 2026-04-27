@@ -2,10 +2,25 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DashboardContent } from "@/components/host/dashboard-content";
+import { ensureHostRow, getBootstrapAdminEmail } from "@/lib/host/bootstrap";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 
-// Admin email that is always allowed — bootstrap for initial setup
-const ADMIN_EMAIL = "sunday@isunday.me";
-
+/**
+ * Host dashboard — entry point for the live surface.
+ *
+ * Three responsibilities:
+ *   1. Auth gate (redirect to login if no session).
+ *   2. Provision the host row if missing — shared with the studio
+ *      layout via `ensureHostRow`. Two surfaces, ONE bootstrap path,
+ *      so a host who lands on either side first gets identical state.
+ *   3. Resolve effective plan + admin status (same path the studio
+ *      uses), and load the host's streams for the dashboard UI.
+ *
+ * Admin bootstrap is opt-in via the HOST_BOOTSTRAP_ADMIN_EMAIL env
+ * var. We no longer hard-code an address into the source. If the env
+ * is unset, no auto-promotion happens and admins are minted via the
+ * admin client by hand.
+ */
 export default async function HostDashboardPage() {
   const supabase = await createClient();
 
@@ -16,22 +31,13 @@ export default async function HostDashboardPage() {
   } catch {
     redirect("/auth/login");
   }
+  if (!user) redirect("/auth/login");
 
-  if (!user) {
-    redirect("/auth/login");
-  }
-
-  // Try to use the service-role admin client (bypasses RLS, can auto-create record).
-  // If SUPABASE_SERVICE_ROLE_KEY is missing, createAdminClient() throws synchronously —
-  // we catch that and fall back to the regular anon client.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let host: any = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let streams: any[] | null = null;
-
-  let db: ReturnType<typeof createAdminClient> | Awaited<ReturnType<typeof createClient>>;
+  // Prefer the service-role client when available (bypasses RLS,
+  // cleaner error messages). Fall back to the user-scoped client —
+  // migration 024 lets it self-insert anyway.
   let usingAdminClient = false;
-
+  let db: ReturnType<typeof createAdminClient> | typeof supabase;
   try {
     db = createAdminClient();
     usingAdminClient = true;
@@ -39,89 +45,45 @@ export default async function HostDashboardPage() {
     db = supabase;
   }
 
-  const { data: hostData } = await db
-    .from("hosts")
-    .select("*")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // Shared bootstrap. The studio layout calls the same helper.
+  let host = await ensureHostRow(db, user);
 
-  host = hostData;
-
-  // Auto-create the host record on first dashboard visit.
-  //
-  // Why server-side here (not a Supabase trigger): a Postgres trigger on
-  // auth.users would need elevated privileges to write to public.hosts and
-  // also wouldn't have access to the user's chosen display_name from
-  // user_metadata in a clean way. Doing it here keeps the rule trivially
-  // visible alongside the dashboard guard.
-  //
-  // Every authenticated user who reaches this page is a confirmed host
-  // (Supabase enforces email confirmation before getUser() returns a
-  // session). They land on plan_slug='free' via the column default; the
-  // migration-019 trigger then resolves billing_config.default_plan_slug.
-  // ADMIN_EMAIL additionally gets is_admin=true.
-  if (!host && user.email) {
-    try {
-      const isAdmin =
-        user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-      // Self-insert is allowed by the migration-024 RLS policy
-      // (auth.uid() = user_id), so we can create the row through
-      // either the admin client (bypasses RLS) or the regular client.
-      const { data: created } = await db
-        .from("hosts")
-        .insert({
-          user_id: user.id,
-          email: user.email,
-          display_name:
-            (user.user_metadata?.display_name as string) ||
-            user.email.split("@")[0],
-        })
-        .select()
-        .single();
-
-      if (created) {
-        // is_admin can ONLY be set via service role — RLS update policy
-        // is just `auth.uid() = user_id`, but the column has no
-        // dedicated check on is_admin and we don't want users to be
-        // able to escalate. Skip if no admin client is available.
-        if (isAdmin && usingAdminClient) {
-          await db
-            .from("hosts")
-            .update({ is_admin: true } as any)
-            .eq("id", (created as any).id);
-          host = { ...created, is_admin: true };
-        } else {
-          host = created;
-        }
+  // Optional admin bootstrap. Only flips is_admin if (a) we actually
+  // have the service-role client (RLS would reject from the user
+  // client) and (b) the configured bootstrap email matches.
+  if (host && usingAdminClient) {
+    const bootstrapEmail = getBootstrapAdminEmail();
+    if (
+      bootstrapEmail &&
+      user.email?.toLowerCase() === bootstrapEmail &&
+      !host.is_admin
+    ) {
+      try {
+        await db.from("hosts").update({ is_admin: true }).eq("id", host.id);
+        host = { ...host, is_admin: true };
+      } catch (err) {
+        console.warn("[host/dashboard] admin bootstrap failed:", err);
       }
-    } catch (err) {
-      // Auto-create failed (e.g., race with another tab inserting the same
-      // user_id, or RLS surprise). Re-fetch once before falling through to
-      // the access-required UI — the row may now exist.
-      console.error("[host/dashboard] auto-create failed:", err);
-      const { data: retry } = await db
-        .from("hosts")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (retry) host = retry;
     }
   }
 
-  // Get streams
+  // Streams owned OR co-hosted by this host. The .or() variant covers
+  // both relationships in a single query; we fall back to a simple
+  // host_id filter when the column isn't present.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let streams: any[] | null = null;
   if (host) {
     try {
       const { data: fullData, error: fullErr } = await db
         .from("streams")
         .select("*")
-        .or(`host_id.eq.${(host as any).id},assigned_host_id.eq.${(host as any).id}`)
+        .or(`host_id.eq.${host.id},assigned_host_id.eq.${host.id}`)
         .order("created_at", { ascending: false });
-
       if (fullErr) {
         const { data: fallbackData } = await db
           .from("streams")
           .select("*")
-          .eq("host_id", (host as any).id)
+          .eq("host_id", host.id)
           .order("created_at", { ascending: false });
         streams = fallbackData;
       } else {
@@ -132,11 +94,18 @@ export default async function HostDashboardPage() {
     }
   }
 
+  // Effective plan — same resolver the studio layout uses, so the
+  // host sees a consistent "Plan: X" label across both surfaces.
+  const effective = host
+    ? await getEffectivePlan(db, user.id)
+    : null;
+
   return (
     <DashboardContent
       user={user}
       host={host}
       streams={streams || []}
+      effectivePlan={effective}
     />
   );
 }

@@ -17,7 +17,9 @@ import { ScheduleStreamForm } from "@/components/host/schedule-stream-form";
 import { StreamOperatorsDialog } from "@/components/admin/stream-operators-dialog";
 import { InsiderCircleSection } from "@/components/host/insider-circle-section";
 import { OnboardingChecklist } from "@/components/host/onboarding-checklist";
+import { CreatorWorkspaceStrip } from "@/components/host/creator-workspace-strip";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { EffectivePlan } from "@/lib/billing/entitlements";
 import {
   Radio,
   Video,
@@ -100,9 +102,16 @@ interface DashboardContentProps {
   user: User;
   host: Host | null;
   streams: Stream[];
+  /** Resolved entitlements — used by the Creator Workspace strip. */
+  effectivePlan?: EffectivePlan | null;
 }
 
-export function DashboardContent({ user, host, streams: initialStreams }: DashboardContentProps) {
+export function DashboardContent({
+  user,
+  host,
+  streams: initialStreams,
+  effectivePlan,
+}: DashboardContentProps) {
   const router = useRouter();
   const [streams, setStreams] = useState<Stream[]>(initialStreams || []);
   const [loading, setLoading] = useState(false);
@@ -667,6 +676,16 @@ export function DashboardContent({ user, host, streams: initialStreams }: Dashbo
             displayName={host.display_name}
             streamCount={streams.length}
             planSlug={host.plan_slug ?? null}
+          />
+        )}
+
+        {/* Creator Workspace — links the live dashboard to the studio
+            modules (Replay, Distribution, Audience, Monetize). The strip
+            reuses STUDIO_NAV so the surfaces stay in lockstep. */}
+        {canCreateStreams && host && (
+          <CreatorWorkspaceStrip
+            plan={effectivePlan?.plan ?? null}
+            isPlatformAdmin={effectivePlan?.isPlatformAdmin ?? false}
           />
         )}
 

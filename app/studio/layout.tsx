@@ -6,6 +6,7 @@ import { featureEnabled } from "@/lib/billing/plans";
 import { STUDIO_NAV } from "@/lib/studio/nav";
 import { StudioSidebar, type StudioSidebarItem } from "@/components/studio/sidebar";
 import { isNextControlFlowSignal } from "@/lib/next/control-flow";
+import { ensureHostRow, type HostRow } from "@/lib/host/bootstrap";
 
 /**
  * Studio layout — auth + plan gate + sidebar shell.
@@ -87,48 +88,14 @@ async function renderStudioLayout({
   }
 
   // Host row — studio is host-only. Auto-create on first visit using
-  // the same self-insert path the live dashboard uses (allowed by
-  // migration 024's RLS policy: auth.uid() = user_id). We do NOT do a
-  // cross-origin redirect to live.isunday.me here: in Next 16 on
-  // OpenNext + Cloudflare Workers, redirect() to an absolute external
-  // URL inside a server component sometimes leaks the throw without
-  // emitting a Location header, surfacing as a 500 in the browser.
-  // Auto-create + inline fallback is more robust and means a host who
-  // came straight to studio.isunday.me without ever opening the live
-  // dashboard still gets a usable session.
-  type HostRow = {
-    id: string;
-    display_name: string | null;
-    email: string;
-    plan_slug?: string | null;
-  };
-  let host: HostRow | null = null;
-
-  const { data: existing } = await supabase
-    .from("hosts")
-    .select("id, display_name, email, plan_slug")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  host = (existing as HostRow | null) ?? null;
-
-  if (!host && user.email) {
-    try {
-      const { data: created } = await supabase
-        .from("hosts")
-        .insert({
-          user_id: user.id,
-          email: user.email,
-          display_name:
-            (user.user_metadata?.display_name as string) ||
-            user.email.split("@")[0],
-        })
-        .select("id, display_name, email, plan_slug")
-        .single();
-      if (created) host = created as HostRow;
-    } catch (err) {
-      console.error("[studio/layout] auto-create host failed:", err);
-    }
-  }
+  // the same shared bootstrap helper the live dashboard uses. Two
+  // surfaces, one provisioning path: a host who lands on studio first
+  // ends up in the same row state as one who lands on live first.
+  // We do NOT cross-origin redirect to live.isunday.me here: in Next
+  // 16 on OpenNext + Cloudflare Workers, redirect() to an absolute
+  // external URL inside a server component sometimes leaks the throw
+  // without emitting a Location header, surfacing as a 500.
+  let host: HostRow | null = await ensureHostRow(supabase, user);
 
   if (!host) {
     // Last-resort inline page. Don't throw, don't cross-origin redirect.

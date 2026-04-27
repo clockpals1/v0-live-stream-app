@@ -22,7 +22,7 @@ import type { StudioIconKey, StudioNavItem } from "@/lib/studio/nav";
  * string keys (`iconKey`) across the RSC boundary without serializing
  * a forwardRef component object — Next.js refuses to do that.
  */
-const STUDIO_ICONS: Record<StudioIconKey, LucideIcon> = {
+export const STUDIO_ICONS: Record<StudioIconKey, LucideIcon> = {
   overview: LayoutDashboard,
   replay: Film,
   distribution: Share2,
