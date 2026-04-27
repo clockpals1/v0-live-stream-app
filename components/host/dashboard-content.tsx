@@ -361,14 +361,36 @@ export function DashboardContent({
         { event: "*", schema: "public", table: "stream_operators" },
         (payload: any) => {
           const row = payload.new ?? payload.old;
-          if (row && row.host_id === host.id) {
-            if (payload.eventType === "INSERT") {
-              toast.success("You have been assigned as a Super User on a stream.", {
-                duration: 5000,
+          if (!row || row.host_id !== host.id) return;
+
+          if (payload.eventType === "INSERT") {
+            // Fetch the stream name + room_code so the toast is actionable.
+            supabase
+              .from("streams")
+              .select("title, room_code")
+              .eq("id", row.stream_id)
+              .single()
+              .then(({ data: s }: { data: { title: string; room_code: string } | null }) => {
+                const name = s?.title ?? "a stream";
+                const code = s?.room_code;
+                toast.success(`You've been added as Super User operator on "${name}"`, {
+                  duration: 12000,
+                  description: "You can now manage overlays, ticker, music, media and branding for this stream.",
+                  action: code
+                    ? {
+                        label: "Open Control Room →",
+                        onClick: () => {
+                          window.location.href = `/host/stream/${code}`;
+                        },
+                      }
+                    : undefined,
+                });
               });
-            }
-            refreshOps();
+          } else if (payload.eventType === "DELETE") {
+            toast.info("You have been removed as operator from a stream.", { duration: 6000 });
           }
+
+          refreshOps();
         },
       )
       .subscribe();
