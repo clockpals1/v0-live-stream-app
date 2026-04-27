@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS ai_config (
   -- ─── Text / LLM ──────────────────────────────────────────────────
   groq_api_key           TEXT,
   groq_enabled           BOOLEAN NOT NULL DEFAULT FALSE,
-  groq_default_model     TEXT    NOT NULL DEFAULT 'llama-3.1-70b-versatile',
+  groq_default_model     TEXT    NOT NULL DEFAULT 'llama-3.3-70b-versatile',
 
   nvidia_api_key         TEXT,
   nvidia_enabled         BOOLEAN NOT NULL DEFAULT FALSE,

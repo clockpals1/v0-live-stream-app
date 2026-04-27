@@ -67,6 +67,21 @@ export type AiGenerateResult =
   | { ok: true; content: string; provider: AiProvider; model: string; tokensUsed: number }
   | { ok: false; error: string; provider: AiProvider; model: string };
 
+// ─── Decommissioned-model safety map ────────────────────────────────────────
+// When a stored model name is retired by a provider, map it to its current
+// successor so existing DB rows keep working without a manual DB update.
+
+const DEPRECATED_MODELS: Record<string, string> = {
+  // Groq deprecations — https://console.groq.com/docs/deprecations
+  "llama-3.1-70b-versatile": "llama-3.3-70b-versatile",
+  "llama-3.1-70b-specdec": "llama-3.3-70b-specdec",
+  "llama-3.2-90b-text-preview": "llama-3.3-70b-versatile",
+};
+
+function resolveModel(model: string): string {
+  return DEPRECATED_MODELS[model] ?? model;
+}
+
 // ─── Provider routing table ───────────────────────────────────────────────
 
 interface ProviderDef {
@@ -145,9 +160,9 @@ export async function generateText(
     };
   }
 
-  // Resolve model
+  // Resolve model — remap any decommissioned model names transparently
   const defaultModel = cfg ? (cfg[def.modelKey] as string) : null;
-  const model = opts.model ?? defaultModel ?? "default";
+  const model = resolveModel(opts.model ?? defaultModel ?? "default");
 
   if (def.style === "gemini") {
     return callGemini({ apiKey, model, opts, provider });
