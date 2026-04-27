@@ -7,13 +7,39 @@ main = ".open-next/worker.js"
 directory = ".open-next/assets"
 binding = "ASSETS"
 
-# ─── Cron triggers ────────────────────────────────────────────────────
-# Cloudflare invokes the Worker with these schedules in addition to
-# normal HTTP traffic. OpenNext currently routes scheduled events via
-# its own handler, so we ALSO support driving the cleanup from any
-# external scheduler that POSTs to /api/cron/archives/cleanup with
-# `Authorization: Bearer ${CRON_SECRET}`.
+# ─── Custom domains ───────────────────────────────────────────────────
+# One Worker handles all three product surfaces. The middleware at
+# lib/supabase/middleware.ts reads the `host` header and routes each
+# subdomain to its Next.js route group:
 #
-# Schedule: every day at 03:30 UTC (10:30 PM ET, low-traffic window).
+#   live.isunday.me   →  /host/*    (viewer + host streaming surface)
+#   studio.isunday.me →  /studio/*  (creator workspace)
+#   ai.isunday.me     →  /ai/*      (AI Automation Hub)
+#
+# Auth cookies use domain=.isunday.me so a single login works on all
+# three subdomains (see lib/supabase/cookie-options.ts).
+#
+# IMPORTANT: These routes only take effect after you add the domains
+# in the Cloudflare dashboard (Workers & Pages → your worker → Custom Domains)
+# AND add matching CNAME/A DNS records. See the activation guide.
+routes = [
+  { pattern = "live.isunday.me/*", custom_domain = true },
+  { pattern = "studio.isunday.me/*", custom_domain = true },
+  { pattern = "ai.isunday.me/*", custom_domain = true },
+]
+
+# ─── Cron triggers ────────────────────────────────────────────────────
+# Two scheduled jobs:
+#
+#   03:30 UTC daily  — archive/stream cleanup
+#   07:00 UTC daily  — AI automation: content ideas, weekly summaries,
+#                      affiliate campaigns, God-mode agent chains
+#
+# OpenNext routes cron events to their matching /api/cron/* route.
+# You can also POST manually:
+#   POST /api/cron/archives/cleanup   Authorization: Bearer $CRON_SECRET
+#   POST /api/cron/ai/daily-jobs      Authorization: Bearer $CRON_SECRET
+#
+# God-mode only runs if agent_mode_enabled=true in the ai_config table.
 [triggers]
-crons = ["30 3 * * *"]
+crons = ["30 3 * * *", "0 7 * * *"]
