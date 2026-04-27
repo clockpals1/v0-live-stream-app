@@ -29,7 +29,23 @@ import {
   Radio,
   Youtube,
   Cloud,
+  Shield,
+  Download,
+  Trash2,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 /**
  * Host settings content — tabbed page that gathers everything that
@@ -63,9 +79,9 @@ interface Props {
 }
 
 export function SettingsContent({ user, host }: Props) {
-  const [tab, setTab] = useState<"subscription" | "integrations" | "profile" | "notifications">(
-    "subscription",
-  );
+  const [tab, setTab] = useState<
+    "subscription" | "integrations" | "profile" | "notifications" | "privacy"
+  >("subscription");
 
   return (
     <div className="min-h-screen bg-background">
@@ -115,6 +131,10 @@ export function SettingsContent({ user, host }: Props) {
             <TabsTrigger value="notifications" className="gap-1.5">
               <Bell className="h-3.5 w-3.5" />
               Notifications
+            </TabsTrigger>
+            <TabsTrigger value="privacy" className="gap-1.5">
+              <Shield className="h-3.5 w-3.5" />
+              Privacy
             </TabsTrigger>
           </TabsList>
 
@@ -184,7 +204,12 @@ export function SettingsContent({ user, host }: Props) {
             <ProfileForm host={host} userEmail={user.email ?? null} />
           </TabsContent>
 
-          {/* ─── Notifications ────────────────────────────────── */}
+          {/* ─── Privacy ────────────────────── */}
+          <TabsContent value="privacy" className="space-y-4">
+            <PrivacySection userEmail={user.email ?? null} />
+          </TabsContent>
+
+          {/* ─── Notifications ────────────────── */}
           <TabsContent value="notifications">
             <Card>
               <CardHeader className="pb-3">
@@ -311,7 +336,213 @@ export const SETTINGS_TABS = {
   integrations: "integrations",
   profile: "profile",
   notifications: "notifications",
+  privacy: "privacy",
 } as const;
+
+// ─────────────────────────────────────────────────────────────────────
+// Privacy section — GDPR data export + account deletion
+// ─────────────────────────────────────────────────────────────────────
+
+function PrivacySection({ userEmail }: { userEmail: string | null }) {
+  const [exporting, setExporting] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function downloadExport() {
+    setExporting(true);
+    try {
+      // Use POST instead of GET so the request can't be triggered by
+      // a stray <a href> or img-src tag and so credentials don't leak
+      // into browser history.
+      const res = await fetch("/api/host/me/export", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error ?? "Export failed.");
+      }
+      const blob = await res.blob();
+      // Server already sets Content-Disposition; we extract the
+      // filename for the download attribute.
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const match = cd.match(/filename="?([^";]+)"?/);
+      const filename = match?.[1] ?? `live-stream-export-${Date.now()}.json`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Export downloaded.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function deleteAccount() {
+    if (!userEmail) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/host/me", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmEmail }),
+      });
+      const json = await res.json().catch(() => ({}));
+      // 207 = partial success; still clear the session and let the user know.
+      if (res.status === 200 || res.status === 207) {
+        toast.success(
+          res.status === 207
+            ? "Account deletion started — some cleanup deferred."
+            : "Account deleted.",
+        );
+        // Session cookies are cleared server-side; redirect home.
+        window.location.href = "/?account=deleted";
+        return;
+      }
+      throw new Error(
+        (json as { error?: string }).error ?? "Deletion failed.",
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deletion failed.");
+      setDeleting(false);
+    }
+  }
+
+  const confirmMatches =
+    !!userEmail &&
+    confirmEmail.trim().toLowerCase() === userEmail.toLowerCase();
+
+  return (
+    <>
+      {/* ─── Export ─────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Download className="h-4 w-4" />
+            Download your data
+          </CardTitle>
+          <CardDescription>
+            A JSON file containing everything we store about you — profile,
+            streams, archives, subscribers, broadcasts, grants. Connected
+            integration tokens are redacted for security.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={downloadExport} disabled={exporting} variant="outline">
+            {exporting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Preparing…
+              </>
+            ) : (
+              <>
+                <Download className="mr-2 h-4 w-4" />
+                Download export
+              </>
+            )}
+          </Button>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Stripe holds its own copy of your billing data; export it from{" "}
+            <a
+              href="https://dashboard.stripe.com/settings/data"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              the Stripe dashboard
+            </a>
+            .
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* ─── Delete account ───────────────────── */}
+      <Card className="border-destructive/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base text-destructive">
+            <Trash2 className="h-4 w-4" />
+            Delete account
+          </CardTitle>
+          <CardDescription>
+            Permanently delete your account and all associated data. This
+            cannot be undone.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+            <li>Your active subscription (if any) is canceled immediately.</li>
+            <li>Every cloud-archived recording is deleted from storage.</li>
+            <li>Connected YouTube account is disconnected (your YouTube channel itself is unaffected).</li>
+            <li>Insider Circle subscribers are removed from your list.</li>
+            <li>Streams, chat history, and your auth account are erased.</li>
+          </ul>
+
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm">
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete my account…
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                  Are you absolutely sure?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will immediately and permanently destroy your account.
+                  Type your email below to confirm.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="space-y-2 py-2">
+                <Label htmlFor="confirm-email" className="text-xs">
+                  Type <span className="font-mono font-medium text-foreground">{userEmail}</span> to confirm
+                </Label>
+                <Input
+                  id="confirm-email"
+                  value={confirmEmail}
+                  onChange={(e) => setConfirmEmail(e.target.value)}
+                  placeholder={userEmail ?? ""}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!confirmMatches || deleting) return;
+                    deleteAccount();
+                  }}
+                  disabled={!confirmMatches || deleting}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {deleting ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Deleting…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                      Permanently delete
+                    </>
+                  )}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
 
 // Re-export YouTube icon from this module for the dashboard nav so
 // downstream files don't need to import from lucide-react directly.
