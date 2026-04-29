@@ -6,6 +6,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // @supabase/ssr and @supabase/supabase-js are compiled with tsup/esbuild
+  // using keepNames:true, which injects a `__name` helper into their dist
+  // files. Turbopack (Next 16 default) strips or misorders that helper,
+  // causing "ReferenceError: __name is not defined" in the browser bundle.
+  // Listing these packages here forces Next.js to re-compile them through
+  // its own transform pipeline, which handles the helper correctly.
+  transpilePackages: ["@supabase/ssr", "@supabase/supabase-js"],
   // Cloudflare Workers caps the worker bundle at 10 MiB compressed on
   // the paid plan (3 MiB on free). Next.js eagerly bundles @vercel/og
   // (used by `next/og` ImageResponse) into the server runtime even

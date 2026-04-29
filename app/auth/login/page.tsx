@@ -51,7 +51,16 @@ function LoginForm() {
     });
 
     if (error) {
-      setError(error.message);
+      const msg = error.message ?? "";
+      const isRateLimit =
+        msg.toLowerCase().includes("rate limit") ||
+        msg.toLowerCase().includes("too many") ||
+        error.status === 429;
+      setError(
+        isRateLimit
+          ? "Too many sign-in attempts. Please wait a few minutes before trying again."
+          : msg,
+      );
       setLoading(false);
       return;
     }

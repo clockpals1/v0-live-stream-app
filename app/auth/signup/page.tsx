@@ -46,7 +46,16 @@ export default function SignupPage() {
     });
 
     if (error) {
-      setError(error.message);
+      const msg = error.message ?? "";
+      const isRateLimit =
+        msg.toLowerCase().includes("rate limit") ||
+        msg.toLowerCase().includes("too many") ||
+        error.status === 429;
+      setError(
+        isRateLimit
+          ? "Too many sign-up attempts from this address. Please wait a few minutes before trying again."
+          : msg,
+      );
       setLoading(false);
       return;
     }
