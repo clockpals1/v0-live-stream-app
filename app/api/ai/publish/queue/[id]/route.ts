@@ -18,7 +18,8 @@ export async function PATCH(
   try { body = await req.json(); } catch { /* ignore */ }
 
   const PATCHABLE = ["title", "body", "platform_meta", "status", "scheduled_for",
-    "platform_post_id", "platform_post_url", "last_error", "ai_suggested_time", "ai_suggestion_reason"] as const;
+    "published_at", "platform_post_id", "platform_post_url", "last_error",
+    "ai_suggested_time", "ai_suggestion_reason"] as const;
   type PatchKey = typeof PATCHABLE[number];
   const update: Partial<Record<PatchKey, unknown>> = {};
   for (const key of PATCHABLE) {
