@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import {
   Sparkles, Copy, Check, Loader2, Star, Video,
   Radio, Megaphone, Layers, Zap, Target,
@@ -418,10 +419,12 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
   const [productName, setProductName]   = useState("");
   const [productDesc, setProductDesc]   = useState("");
   const [targetAudience, setTargetAud]  = useState("");
+  const router = useRouter();
   const [loading, setLoading]           = useState(false);
   const [sections, setSections]         = useState<OutputSection[]>([]);
   const [rawResult, setRawResult]       = useState<string | null>(null);
   const [assetId, setAssetId]           = useState<string | null>(null);
+  const [redirecting, setRedirecting]   = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [copiedLabel, setCopiedLabel]   = useState<string | null>(null);
   const [copiedAll, setCopiedAll]       = useState(false);
@@ -472,12 +475,19 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ taskType, input }),
       });
-      const data = (await res.json()) as { ok?: boolean; content?: string; assetId?: string; error?: string };
+      const data = (await res.json()) as { ok?: boolean; content?: string; assetId?: string; videoProjectId?: string; error?: string };
       if (!res.ok || !data.ok) {
         setError(data.error ?? "Generation failed. Please try again.");
       } else {
         const text = data.content ?? "";
-        setRawResult(text); setSections(parseSections(text)); setAssetId(data.assetId ?? null);
+        setAssetId(data.assetId ?? null);
+        // For short video tasks redirect straight to the project workspace
+        if (isVideoProject && data.videoProjectId) {
+          setRedirecting(true);
+          router.push(`/ai/video/${data.videoProjectId}`);
+          return;
+        }
+        setRawResult(text); setSections(parseSections(text));
       }
     } catch { setError("Network error. Please check your connection."); }
     finally  { setLoading(false); }
@@ -682,8 +692,10 @@ export function GeneratorForm({ hostId: _ }: { hostId: string }) {
           )}
 
           {/* Generate button */}
-          <Button onClick={handleGenerate} disabled={loading || !topic.trim()} className="w-full gap-2" size="lg">
-            {loading
+          <Button onClick={handleGenerate} disabled={loading || redirecting || !topic.trim()} className="w-full gap-2" size="lg">
+            {redirecting
+              ? <><Loader2 className="h-4 w-4 animate-spin" />Opening project…</>
+              : loading
               ? <><Loader2 className="h-4 w-4 animate-spin" />Generating…</>
               : <><Sparkles className="h-4 w-4" />{generateLabel[taskType] ?? "Generate"}</>}
           </Button>

@@ -5,6 +5,7 @@ import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled, featureQuota } from "@/lib/billing/plans";
 import { generateText, getAvailableTextProvider } from "@/lib/ai/provider";
 import { getPromptForTask, type TaskType } from "@/lib/ai/prompts";
+import { parseVideoScript } from "@/lib/ai/parse-video-script";
 
 /**
  * POST /api/ai/generate
@@ -165,6 +166,7 @@ export async function POST(req: NextRequest) {
   // Persist the generated asset
   const assetType = taskTypeToAssetType(taskType);
   const platform = (input.platform as string) ?? null;
+  const isVideoTask = taskType === "short_video_script" || taskType === "short_video_ad";
 
   const { data: assetRow } = await admin
     .from("ai_generated_assets")
@@ -181,16 +183,56 @@ export async function POST(req: NextRequest) {
         model: result.model,
         provider: result.provider,
         tokens_used: result.tokensUsed,
-        workflow_type: (taskType === "short_video_script" || taskType === "short_video_ad") ? "video_project" : undefined,
+        workflow_type: isVideoTask ? "video_project" : undefined,
       },
     })
     .select("id")
     .single();
 
+  // For short video tasks: parse the output and create a real video_project row
+  let videoProjectId: string | null = null;
+  if (isVideoTask && assetRow) {
+    const videoLength = (input.videoLength as string) ?? (input.video_length as string) ?? "30";
+    const parsed = parseVideoScript(result.content, videoLength);
+
+    const sanitizedPlatform = platform && VALID_PLATFORMS.includes(platform) ? platform : "generic";
+
+    const { data: vpRow } = await admin
+      .from("video_projects")
+      .insert({
+        host_id: host.id,
+        asset_id: assetRow.id,
+        title: buildAssetTitle(taskType, input),
+        platform: sanitizedPlatform,
+        video_length: videoLength,
+        status: "script_ready",
+        hook: parsed.hook || null,
+        concept: parsed.concept || null,
+        script_body: parsed.script_body || null,
+        cta: parsed.cta || null,
+        caption: parsed.caption || null,
+        scenes: parsed.scenes,
+        metadata: {
+          tone: input.tone,
+          niche: input.niche,
+          audience: input.audience,
+          monetization_angle: input.monetAngle,
+          task_type: taskType,
+          model: result.model,
+          provider: result.provider,
+        },
+      })
+      .select("id")
+      .single();
+
+    videoProjectId = vpRow?.id ?? null;
+  }
+
   return NextResponse.json({
     ok: true,
     content: result.content,
     assetId: assetRow?.id ?? null,
+    videoProjectId,
     tokensUsed: result.tokensUsed,
     provider: result.provider,
     model: result.model,

@@ -77,16 +77,35 @@ async function renderPage() {
     platform: string | null;
     created_at: string;
     is_starred: boolean;
+    video_project_id: string | null;
+    video_project_status: string | null;
   };
 
+  // Fetch recent assets + join video_project id/status for short_video rows
   const { data: recentAssets } = await admin
     .from("ai_generated_assets")
-    .select("id, asset_type, title, content, platform, created_at, is_starred")
+    .select(`
+      id, asset_type, title, content, platform, created_at, is_starred,
+      video_projects!asset_id ( id, status )
+    `)
     .eq("host_id", host.id)
     .is("archived_at", null)
     .order("created_at", { ascending: false })
     .limit(6)
-    .returns<AssetRow[]>();
+    .then(({ data, error }) => ({
+      data: (data ?? []).map((row: Record<string, unknown>) => {
+        const vp = Array.isArray(row.video_projects)
+          ? (row.video_projects[0] as { id: string; status: string } | undefined)
+          : (row.video_projects as { id: string; status: string } | null | undefined);
+        return {
+          ...row,
+          video_projects: undefined,
+          video_project_id: vp?.id ?? null,
+          video_project_status: vp?.status ?? null,
+        } as AssetRow;
+      }),
+      error,
+    }));
 
   // Monthly usage count
   const startOfMonth = new Date();
@@ -182,7 +201,7 @@ async function renderPage() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: string | null; content: string; platform: string | null; created_at: string; is_starred: boolean } }) {
+function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: string | null; content: string; platform: string | null; created_at: string; is_starred: boolean; video_project_id: string | null; video_project_status: string | null } }) {
   const preview = asset.content.slice(0, 120).replace(/\n/g, " ");
   const ago = formatDistanceToNow(new Date(asset.created_at), { addSuffix: true });
 
@@ -211,7 +230,20 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
   };
 
   const TypeIcon = typeIcons[asset.asset_type] ?? FileText;
-  const isVideoProject = asset.asset_type === "short_video";
+  const isVideoProject = asset.asset_type === "short_video" && !!asset.video_project_id;
+
+  const VIDEO_STATUS_LABELS: Record<string, string> = {
+    script_ready:      "Script ready",
+    scenes_generated:  "Scenes set",
+    visuals_pending:   "Visuals pending",
+    voiceover_pending: "Voiceover pending",
+    preview_ready:     "Preview ready",
+    rendering:         "Rendering",
+    published:         "Published",
+  };
+  const videoStatusLabel = asset.video_project_status
+    ? (VIDEO_STATUS_LABELS[asset.video_project_status] ?? asset.video_project_status)
+    : "Script ready";
 
   return (
     <Card className={cn(
@@ -244,9 +276,19 @@ function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: 
         </div>
         {isVideoProject && (
           <div className="mt-3 flex items-center justify-between border-t border-violet-500/20 pt-2.5">
-            <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400">Video Project</span>
-            <a href="/ai" className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
-              Continue <ArrowRight className="h-3 w-3" />
+            <span className={cn(
+              "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+              asset.video_project_status === "published"
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                : "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+            )}>
+              {videoStatusLabel}
+            </span>
+            <a
+              href={`/ai/video/${asset.video_project_id}`}
+              className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+            >
+              Open project <ArrowRight className="h-3 w-3" />
             </a>
           </div>
         )}
