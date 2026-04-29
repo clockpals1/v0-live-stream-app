@@ -69,7 +69,7 @@ export async function POST(
 
   const { data: project } = await admin
     .from("video_projects")
-    .select("id, scenes")
+    .select("id, scenes, concept, platform, metadata")
     .eq("id", id)
     .eq("host_id", host.id)
     .maybeSingle();
@@ -87,6 +87,22 @@ export async function POST(
       { error: "Scene has no visual_prompt." },
       { status: 400 },
     );
+
+  // ── Build context-enriched prompt for visual consistency ──────────
+  const meta = (project.metadata ?? {}) as Record<string, unknown>;
+  const concept  = typeof project.concept === "string" ? project.concept.slice(0, 120) : "";
+  const tone     = typeof meta.tone === "string"  ? meta.tone  : "";
+  const niche    = typeof meta.niche === "string" ? meta.niche : "";
+  const platform = typeof project.platform === "string" ? project.platform : "";
+  const contextParts = [
+    concept && `Concept: ${concept}`,
+    tone    && `Tone: ${tone}`,
+    niche   && `Niche: ${niche}`,
+    platform && platform !== "generic" && `Platform: ${platform}`,
+  ].filter(Boolean);
+  const enrichedPrompt = contextParts.length
+    ? `${prompt}. ${contextParts.join(". ")}`
+    : prompt;
 
   // ── AI config ──────────────────────────────────────────────────────
   const cfg = await getAiConfig(admin);
@@ -132,7 +148,7 @@ export async function POST(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            inputs: prompt,
+            inputs: enrichedPrompt,
             parameters: { num_inference_steps: 4 },
           }),
         },
@@ -160,7 +176,7 @@ export async function POST(
           Accept: "application/json",
         },
         body: JSON.stringify({
-          text_prompts: [{ text: prompt, weight: 1 }],
+          text_prompts: [{ text: enrichedPrompt, weight: 1 }],
           width: 896,
           height: 512,
           steps: 20,
@@ -223,7 +239,7 @@ export async function POST(
   //    This avoids the Cloudflare Worker 30s wall-clock timeout entirely.
   if (!imageUrl) {
     const encodedPrompt = encodeURIComponent(
-      `${prompt}, high quality, cinematic, short video thumbnail`,
+      `${enrichedPrompt}, high quality, cinematic, short video thumbnail`,
     );
     imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=896&height=512&nologo=true&model=flux-schnell&seed=${Date.now()}`;
   }

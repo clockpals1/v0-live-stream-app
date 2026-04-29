@@ -111,11 +111,30 @@ export async function POST(
     }
   }
 
+  // ── Fall back to StreamElements TTS (free, no key required) ──────
+  if (!audioBuffer) {
+    try {
+      const seText = text.trim().slice(0, 500);
+      const seRes = await fetch(
+        `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(seText)}`,
+        { headers: { "User-Agent": "Mozilla/5.0", Accept: "audio/mpeg, audio/*" } },
+      );
+      if (seRes.ok && (seRes.headers.get("content-type") ?? "").includes("audio")) {
+        audioBuffer = await seRes.arrayBuffer();
+        contentType = "audio/mpeg";
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
   if (!audioBuffer) {
     return NextResponse.json(
       {
-        error:
-          "No AI audio provider configured. Add an OpenAI or ElevenLabs API key in Admin → AI Configuration.",
+        error: "no_provider",
+        message:
+          "No audio provider available. Add an OpenAI or ElevenLabs key in Admin → AI Configuration, or use the Record tab to narrate the script yourself.",
+        noProvider: true,
       },
       { status: 400 },
     );
@@ -135,12 +154,12 @@ export async function POST(
       headers,
       body: audioBuffer,
     });
-    if (!r2.ok)
-      return NextResponse.json(
-        { error: `R2 upload failed with HTTP ${r2.status}.` },
-        { status: 502 },
-      );
-    audioUrl = publicUrl ?? objectKey;
+    if (r2.ok && publicUrl) {
+      audioUrl = publicUrl;
+    } else {
+      // No public URL — encode as data URL so the client can play it
+      throw new Error("no-public-url");
+    }
   } catch {
     // R2 not configured — return as data URL for preview
     const bytes = new Uint8Array(audioBuffer);

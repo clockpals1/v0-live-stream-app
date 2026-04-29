@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -479,6 +479,13 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   );
   const [newImageUrl, setNewImageUrl] = useState("");
 
+  // Restore recorded voice from sessionStorage on mount (survives page nav)
+  useEffect(() => {
+    const saved = sessionStorage.getItem(`vp-voice-${initial.id}`);
+    if (saved) setAudioUrl(saved);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const missingFields = useMemo(() => {
     const f: string[] = [];
     if (!project.hook?.trim())        f.push("Hook");
@@ -524,8 +531,10 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   const handleConfirmScenes = async () => {
     setConfirmingScenes(true);
     await save({ status: "scenes_generated" });
-    toast.success("Scenes confirmed — storyboard locked in");
     setConfirmingScenes(false);
+    toast.success("Scenes confirmed — generating visuals automatically…");
+    // Auto-kick off visual generation so user doesn't have to manually trigger it
+    void handleGenerateVisuals();
   };
 
   const handleRegenerate = async (fields: "full" | "script" | "scenes") => {
@@ -656,7 +665,16 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
         body: JSON.stringify({ text: voiceoverScript, voice: "alloy" }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "TTS generation failed"); return; }
+      if (!res.ok) {
+        if (data.noProvider) {
+          // No TTS provider — switch to Record tab so user can narrate directly
+          setVoiceMode("record");
+          toast.error("No TTS provider configured — record your own voice using the mic below");
+        } else {
+          toast.error(data.error ?? data.message ?? "TTS generation failed");
+        }
+        return;
+      }
       setTtsAudioUrl(data.audioUrl);
       setProject((prev) => ({
         ...prev,
@@ -679,8 +697,15 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
         if (audioUrl) URL.revokeObjectURL(audioUrl);
-        setAudioUrl(URL.createObjectURL(blob));
+        const blobUrl = URL.createObjectURL(blob);
+        setAudioUrl(blobUrl);
         setRecording(false);
+        // Persist to sessionStorage so the recording survives page navigations
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try { sessionStorage.setItem(`vp-voice-${project.id}`, e.target?.result as string); } catch {}
+        };
+        reader.readAsDataURL(blob);
       };
       recorder.start(200);
       setRecorderRef(recorder);
