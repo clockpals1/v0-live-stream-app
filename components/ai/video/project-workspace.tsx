@@ -450,6 +450,12 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   const [recorderRef, setRecorderRef] = useState<MediaRecorder | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [uploadedVoiceName, setUploadedVoiceName] = useState<string | null>(null);
+  const [editingPreviewUrl, setEditingPreviewUrl] = useState(false);
+  const [previewUrlDraft, setPreviewUrlDraft] = useState(project.preview_url ?? "");
+  const [savingPreviewUrl, setSavingPreviewUrl] = useState(false);
+  const [editingRenderUrl, setEditingRenderUrl] = useState(false);
+  const [renderUrlDraft, setRenderUrlDraft] = useState(project.render_url ?? "");
+  const [savingRenderUrl, setSavingRenderUrl] = useState(false);
   const [showRefImages, setShowRefImages] = useState(false);
   const [refImages, setRefImages] = useState<RefImage[]>(
     (project.metadata?.reference_images as RefImage[] | undefined) ?? []
@@ -588,6 +594,32 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
       setActiveTab("produce");
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const handleSavePreviewUrl = async () => {
+    const url = previewUrlDraft.trim();
+    if (!url) return;
+    setSavingPreviewUrl(true);
+    try {
+      await save({ preview_url: url });
+      setEditingPreviewUrl(false);
+      toast.success("Preview URL saved");
+    } finally {
+      setSavingPreviewUrl(false);
+    }
+  };
+
+  const handleSaveRenderUrl = async () => {
+    const url = renderUrlDraft.trim();
+    if (!url) return;
+    setSavingRenderUrl(true);
+    try {
+      await save({ render_url: url, render_status: "ready" });
+      setEditingRenderUrl(false);
+      toast.success("Render URL saved");
+    } finally {
+      setSavingRenderUrl(false);
     }
   };
 
@@ -1322,25 +1354,85 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               onAction={() => setActiveTab("voiceover")}
             />
 
+            {/* ── Preview ─────────────────────────────────────────────── */}
             <PipelineStep step={5} icon={Eye} label="Preview"
               sublabel={
                 project.preview_url
-                  ? "Preview is ready — click to review before final render"
-                  : "Upload your assembled clips to get a preview link — or use any editor to compose the scenes"
+                  ? "Preview link saved — open to review before final render"
+                  : isScenesDone
+                  ? "Paste your assembled preview link below to continue"
+                  : "Complete Scene Breakdown to unlock Preview"
               }
-              state={project.preview_url ? "active" : "locked"}
+              state={
+                project.preview_url ? "done" :
+                isScenesDone ? "active" :
+                "locked"
+              }
               action={!!project.preview_url}
               actionLabel="View Preview"
               onAction={() => project.preview_url && window.open(project.preview_url, "_blank")}
             />
 
+            {/* Preview URL input — auto-shown when no URL and scenes done */}
+            {isScenesDone && (!project.preview_url || editingPreviewUrl) && (
+              <div className="ml-10 -mt-1 mb-1 rounded-lg border border-border/60 bg-muted/20 p-3">
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  Paste a preview link — Google Drive, YouTube (unlisted), Dropbox, Vimeo, or any direct URL.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://..."
+                    value={previewUrlDraft}
+                    onChange={(e) => setPreviewUrlDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSavePreviewUrl()}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSavePreviewUrl}
+                    disabled={!previewUrlDraft.trim() || savingPreviewUrl}
+                    className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                  >
+                    {savingPreviewUrl ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    Save
+                  </button>
+                  {editingPreviewUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditingPreviewUrl(false); setPreviewUrlDraft(project.preview_url ?? ""); }}
+                      className="rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Change preview URL link (shown when URL already exists) */}
+            {project.preview_url && !editingPreviewUrl && (
+              <div className="ml-10 -mt-1 mb-1 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setEditingPreviewUrl(true); setPreviewUrlDraft(project.preview_url ?? ""); }}
+                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Change URL
+                </button>
+              </div>
+            )}
+
+            {/* ── Render ──────────────────────────────────────────────── */}
             <PipelineStep step={6} icon={RefreshCw} label="Render"
               sublabel={
                 project.render_status === "ready" && project.render_url
                   ? "Render complete — download your final video file"
                   : project.render_status === "rendering"
                   ? "Render in progress…"
-                  : "Final render — available once you have approved the preview"
+                  : project.preview_url
+                  ? "Paste your final render download link below"
+                  : "Set a preview link first to unlock this step"
               }
               state={
                 project.render_status === "ready" ? "done" :
@@ -1352,6 +1444,56 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               actionLabel="Download"
               onAction={() => project.render_url && window.open(project.render_url, "_blank")}
             />
+
+            {/* Render URL input — auto-shown when preview set but no render URL */}
+            {project.preview_url && (!project.render_url || editingRenderUrl) && project.render_status !== "rendering" && (
+              <div className="ml-10 -mt-1 mb-1 rounded-lg border border-border/60 bg-muted/20 p-3">
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  Paste your final render download link — Google Drive, Dropbox, direct .mp4, or any URL.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://..."
+                    value={renderUrlDraft}
+                    onChange={(e) => setRenderUrlDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSaveRenderUrl()}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveRenderUrl}
+                    disabled={!renderUrlDraft.trim() || savingRenderUrl}
+                    className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                  >
+                    {savingRenderUrl ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    Save
+                  </button>
+                  {editingRenderUrl && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditingRenderUrl(false); setRenderUrlDraft(project.render_url ?? ""); }}
+                      className="rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Change render URL link (shown when URL already exists) */}
+            {project.render_url && !editingRenderUrl && (
+              <div className="ml-10 -mt-1 mb-1">
+                <button
+                  type="button"
+                  onClick={() => { setEditingRenderUrl(true); setRenderUrlDraft(project.render_url ?? ""); }}
+                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Change URL
+                </button>
+              </div>
+            )}
 
             {/* Publish */}
             <div className={cn(
