@@ -31,7 +31,7 @@
  *   coloured background if the image load fails.
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   Play,
   StopCircle,
@@ -78,13 +78,16 @@ const SCENE_BG_COLORS = [
   "#1c1917", "#0c4a6e", "#3b0764", "#064e3b",
 ];
 
-/** Load an image element from a URL, resolving to null on error/timeout. */
+/** Load an image element from a URL, resolving to null on error/timeout.
+ * NOTE: crossOrigin is intentionally NOT set — Pollinations.ai and similar
+ * CDNs do not return CORS headers, so setting crossOrigin="anonymous" causes
+ * an immediate network error. The canvas will be tainted for toDataURL/toBlob
+ * but captureStream() + MediaRecorder still works correctly. */
 function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (!src) return resolve(null);
     const img = new Image();
-    img.crossOrigin = "anonymous";
-    const timer = setTimeout(() => resolve(null), 8000);
+    const timer = setTimeout(() => resolve(null), 12000);
     img.onload = () => { clearTimeout(timer); resolve(img); };
     img.onerror = () => { clearTimeout(timer); resolve(null); };
     img.src = src;
@@ -187,21 +190,36 @@ export function VideoComposer({
   const [savedPublicUrl, setSavedPublicUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const sortedScenes = [...scenes].sort((a, b) => a.order - b.order);
-  const totalDuration = sortedScenes.reduce((s, sc) => s + sc.duration, 0);
+  const sortedScenes = useMemo(
+    () => [...scenes].sort((a, b) => a.order - b.order),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scenes.map((s) => `${s.id}:${s.image_url}`).join(",")],
+  );
+  const totalDuration = useMemo(
+    () => sortedScenes.reduce((s, sc) => s + sc.duration, 0),
+    [sortedScenes],
+  );
 
-  // Pre-load images when scenes change
+  // Pre-load images sequentially (staggered) to avoid CDN rate limits
   useEffect(() => {
     if (sortedScenes.length === 0) return;
+    let cancelled = false;
     setImagesLoading(true);
-    Promise.all(
-      sortedScenes.map((sc) => loadImage(sc.image_url ?? "")),
-    ).then((imgs) => {
-      setImages(imgs);
-      setImagesLoading(false);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenes.map((s) => s.image_url).join(",")]);
+    (async () => {
+      const imgs: (HTMLImageElement | null)[] = [];
+      for (let i = 0; i < sortedScenes.length; i++) {
+        if (cancelled) return;
+        if (i > 0) await new Promise((r) => setTimeout(r, 600));
+        imgs.push(await loadImage(sortedScenes[i].image_url ?? ""));
+      }
+      if (!cancelled) {
+        setImages(imgs);
+        setImagesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedScenes]);
 
   // ── Animation loop ────────────────────────────────────────────────
   const runAnimation = useCallback(
