@@ -103,3 +103,51 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true, project: updated });
 }
+
+/**
+ * DELETE /api/ai/video/[id]
+ * Archives (soft-deletes) a video project and its linked asset.
+ */
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+
+  const admin = createAdminClient();
+
+  const { data: host } = await admin
+    .from("hosts")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!host) return NextResponse.json({ error: "Host not found." }, { status: 404 });
+
+  const { data: project } = await admin
+    .from("video_projects")
+    .select("id, asset_id")
+    .eq("id", id)
+    .eq("host_id", host.id)
+    .maybeSingle();
+  if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
+
+  const now = new Date().toISOString();
+
+  const { error } = await admin
+    .from("video_projects")
+    .update({ archived_at: now })
+    .eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (project.asset_id) {
+    await admin
+      .from("ai_generated_assets")
+      .update({ archived_at: now })
+      .eq("id", project.asset_id);
+  }
+
+  return NextResponse.json({ ok: true });
+}

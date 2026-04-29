@@ -5,27 +5,18 @@ import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled } from "@/lib/billing/plans";
 import { isNextControlFlowSignal } from "@/lib/next/control-flow";
 import { GeneratorForm } from "@/components/ai/studio/generator-form";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { AssetCardClient } from "@/components/ai/studio/asset-card-client";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
   Sparkles,
-  FileText,
   Clock,
   ArrowRight,
   Zap,
   Lock,
   Send,
-  TrendingUp,
-  Clapperboard,
-  Hash,
-  ListOrdered,
-  Lightbulb,
-  Star,
   CircleDollarSign,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
@@ -175,7 +166,7 @@ async function renderPage() {
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {recentAssets.map((asset) => (
-              <AssetCard key={asset.id} asset={asset} />
+              <AssetCardClient key={asset.id} asset={asset} />
             ))}
           </div>
         </section>
@@ -215,153 +206,6 @@ async function renderPage() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function AssetCard({ asset }: { asset: { id: string; asset_type: string; title: string | null; content: string; platform: string | null; created_at: string; is_starred: boolean; video_project_id: string | null; video_project_status: string | null } }) {
-  // Strip markdown formatting from preview text
-  const preview = asset.content
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/#+\s/g, "")
-    .replace(/\n+/g, " ")
-    .trim()
-    .slice(0, 140);
-
-  const ago = formatDistanceToNow(new Date(asset.created_at), { addSuffix: true });
-
-  const typeLabels: Record<string, string> = {
-    script:             "Stream Script",
-    caption:            "Caption Pack",
-    hashtags:           "Hashtag Pack",
-    title:              "Title Variants",
-    content_ideas:      "Content Ideas",
-    campaign_copy:      "Campaign / Ad",
-    short_video:        "Short Video Project",
-    short_video_script: "Short Video Script",
-    summary:            "Summary",
-  };
-
-  const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-    script:             FileText,
-    caption:            FileText,
-    hashtags:           Hash,
-    title:              ListOrdered,
-    content_ideas:      Lightbulb,
-    campaign_copy:      TrendingUp,
-    short_video:        Clapperboard,
-    short_video_script: Clapperboard,
-    summary:            Sparkles,
-  };
-
-  const VIDEO_STATUS_LABELS: Record<string, string> = {
-    script_ready:      "Script ready",
-    scenes_generated:  "Scenes set",
-    visuals_pending:   "Visuals pending",
-    voiceover_pending: "Voiceover pending",
-    preview_ready:     "Preview ready",
-    rendering:         "Rendering",
-    published:         "Published",
-  };
-
-  const TypeIcon = typeIcons[asset.asset_type] ?? FileText;
-
-  // Styling applies to any short_video asset regardless of migration state
-  const isShortVideo        = asset.asset_type === "short_video";
-  // Workspace link only available when project row exists
-  const hasProjectWorkspace = isShortVideo && !!asset.video_project_id;
-
-  const videoStatusLabel = asset.video_project_status
-    ? (VIDEO_STATUS_LABELS[asset.video_project_status] ?? asset.video_project_status)
-    : "Script ready";
-
-  const isPublished = asset.video_project_status === "published";
-
-  return (
-    <Card className={cn(
-      "group relative flex flex-col overflow-hidden transition-all",
-      isShortVideo
-        ? "border-violet-500/30 bg-gradient-to-br from-violet-500/5 via-background to-background hover:border-violet-500/50 hover:shadow-sm hover:shadow-violet-500/10"
-        : "hover:border-primary/40 hover:shadow-sm"
-    )}>
-      <CardContent className="flex flex-1 flex-col p-4">
-        {/* Header row */}
-        <div className="mb-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <TypeIcon className={cn("h-3.5 w-3.5 shrink-0", isShortVideo ? "text-violet-500" : "text-muted-foreground")} />
-            <span className={cn(
-              "truncate text-[11px] font-semibold uppercase tracking-wider",
-              isShortVideo ? "text-violet-600 dark:text-violet-400" : "text-muted-foreground",
-            )}>
-              {typeLabels[asset.asset_type] ?? asset.asset_type}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {isShortVideo && (
-              <span className={cn(
-                "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-                isPublished
-                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                  : "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-              )}>
-                {videoStatusLabel}
-              </span>
-            )}
-            {asset.platform && !isShortVideo && (
-              <Badge variant="outline" className="h-4 px-1.5 text-[10px] font-normal capitalize">
-                {asset.platform}
-              </Badge>
-            )}
-            {asset.platform && isShortVideo && (
-              <Badge variant="outline" className="h-4 border-violet-500/20 px-1.5 text-[10px] font-normal capitalize text-muted-foreground">
-                {asset.platform}
-              </Badge>
-            )}
-          </div>
-        </div>
-
-        {/* Title */}
-        {asset.title && (
-          <p className="mb-1.5 text-sm font-semibold leading-snug line-clamp-1">{asset.title}</p>
-        )}
-
-        {/* Preview — stripped of markdown */}
-        <p className="flex-1 text-xs text-muted-foreground line-clamp-2 leading-relaxed">{preview}{preview.length >= 140 ? "…" : ""}</p>
-
-        {/* Footer */}
-        <div className={cn(
-          "mt-3 flex items-center justify-between gap-2 border-t pt-2.5",
-          isShortVideo ? "border-violet-500/20" : "border-border/50",
-        )}>
-          <div className="flex items-center gap-1 min-w-0">
-            <p className="text-[11px] text-muted-foreground">{ago}</p>
-            {asset.is_starred && <Star className="ml-1 h-3 w-3 fill-amber-400 text-amber-400" />}
-          </div>
-
-          {/* CTA */}
-          {hasProjectWorkspace ? (
-            <a
-              href={`/ai/video/${asset.video_project_id}`}
-              className="flex shrink-0 items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-700 transition-colors"
-            >
-              Open project <ArrowRight className="h-3 w-3" />
-            </a>
-          ) : isShortVideo ? (
-            <span className="flex shrink-0 items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-700 dark:text-violet-300">
-              <Clapperboard className="h-3 w-3" />
-              Video Script
-            </span>
-          ) : (
-            <a
-              href="/ai/publish"
-              className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Add to queue <ArrowRight className="h-3 w-3" />
-            </a>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function HubLink({
   href,
