@@ -186,69 +186,49 @@ export async function POST(
     }
   }
 
-  // 3. Pollinations.ai — free, no API key, always available
-  if (!imageBuffer) {
+  // ── Upload buffer to R2 (only when a provider returned bytes) ─────
+  let imageUrl: string | null = null;
+
+  if (imageBuffer) {
+    const ext = contentType.includes("png") ? "png" : "jpg";
+    const objectKey = `video-projects/${id}/scenes/${scene.id}.${ext}`;
     try {
-      const encodedPrompt = encodeURIComponent(
-        `${prompt}, high quality, cinematic, short video thumbnail`,
-      );
-      const polRes = await fetch(
-        `https://image.pollinations.ai/prompt/${encodedPrompt}?width=896&height=512&nologo=true&model=flux-schnell`,
-        { signal: AbortSignal.timeout(28_000) },
-      );
-      if (polRes.ok) {
-        imageBuffer = await polRes.arrayBuffer();
-        contentType = polRes.headers.get("content-type") ?? "image/jpeg";
+      const { uploadUrl, headers, publicUrl } = await presignUpload({
+        objectKey,
+        contentType,
+      });
+      const r2 = await fetch(uploadUrl, {
+        method: "PUT",
+        headers,
+        body: imageBuffer,
+      });
+      if (r2.ok) {
+        imageUrl = publicUrl ?? objectKey;
       }
     } catch {
-      // fall through — will return error below
+      // R2 not configured — encode as data URL
+      const bytes = new Uint8Array(imageBuffer);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++)
+        bin += String.fromCharCode(bytes[i]);
+      imageUrl = `data:${contentType};base64,${btoa(bin)}`;
     }
   }
 
-  if (!imageBuffer) {
-    return NextResponse.json(
-      {
-        error:
-          "All image providers failed. Check your HuggingFace / Stability AI key in Admin → AI Configuration, or retry in 30s (model may be cold-starting).",
-      },
-      { status: 502 },
+  // 3. Pollinations.ai — free, no API key, no server fetch needed.
+  //    Return the URL directly so the browser loads it from Pollinations CDN.
+  //    This avoids the Cloudflare Worker 30s wall-clock timeout entirely.
+  if (!imageUrl) {
+    const encodedPrompt = encodeURIComponent(
+      `${prompt}, high quality, cinematic, short video thumbnail`,
     );
+    imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=896&height=512&nologo=true&model=flux-schnell&seed=${Date.now()}`;
   }
-
-  // ── Upload to R2 ───────────────────────────────────────────────────
-  const ext = contentType.includes("png") ? "png" : "jpg";
-  const objectKey = `video-projects/${id}/scenes/${scene.id}.${ext}`;
-  let imageUrl: string;
-
-  try {
-    const { uploadUrl, headers, publicUrl } = await presignUpload({
-      objectKey,
-      contentType,
-    });
-    const r2 = await fetch(uploadUrl, {
-      method: "PUT",
-      headers,
-      body: imageBuffer,
-    });
-    if (!r2.ok)
-      return NextResponse.json(
-        { error: `R2 upload failed with HTTP ${r2.status}.` },
-        { status: 502 },
-      );
-    // Use public URL if bucket is public; otherwise store object key and
-    // serve via signed GET URL when displaying.
-    imageUrl = publicUrl ?? objectKey;
-  } catch {
-    // R2 not configured — encode as data URL (works for preview/dev)
-    const bytes = new Uint8Array(imageBuffer);
-    let bin = "";
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    imageUrl = `data:${contentType};base64,${btoa(bin)}`;
-  }
+  const finalImageUrl: string = imageUrl;
 
   // ── Persist updated scene ──────────────────────────────────────────
   const updatedScenes = scenes.map((s, i) =>
-    i === sceneIndex ? { ...s, image_url: imageUrl } : s,
+    i === sceneIndex ? { ...s, image_url: finalImageUrl } : s,
   );
   await admin
     .from("video_projects")
@@ -259,6 +239,6 @@ export async function POST(
     ok: true,
     sceneIndex,
     sceneId: scene.id,
-    imageUrl,
+    imageUrl: finalImageUrl,
   });
 }
