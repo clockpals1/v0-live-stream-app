@@ -45,6 +45,30 @@ export default function RootLayout({
     // for elements known to be touched outside React's control:
     // https://nextjs.org/docs/messages/react-hydration-error
     <html lang="en" className="bg-background" suppressHydrationWarning>
+      {/*
+        esbuild `__name` polyfill — must run before ANY module code.
+        @supabase/ssr (and several other tsup-compiled packages) are built
+        with keepNames:true, which emits `__name(Fn, "Fn")` calls.
+        When Turbopack or @opennextjs/cloudflare reprocess those bundles the
+        helper definition gets separated from its call sites, causing:
+          ReferenceError: __name is not defined
+        Defining it here as a synchronous inline script makes it available
+        on `window` before any deferred or module script executes.
+      */}
+      <head>
+        {/* eslint-disable-next-line @next/next/no-before-interactive-script-outside-document */}
+        <script
+          // biome-ignore lint: polyfill must use dangerouslySetInnerHTML
+          dangerouslySetInnerHTML={{
+            __html:
+              "var __defProp=Object.defineProperty;" +
+              "var __name=function(t,v){" +
+              "  __defProp(t,'name',{value:v,configurable:true});" +
+              "  return t;" +
+              "};",
+          }}
+        />
+      </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
         <ThemeProvider
           attribute="class"

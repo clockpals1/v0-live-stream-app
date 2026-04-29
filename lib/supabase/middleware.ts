@@ -60,11 +60,30 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   const path = request.nextUrl.pathname;
+
+  // Auth pages are always public — skip the Supabase network call so we
+  // don't hammer the token endpoint with refresh attempts from pages that
+  // don't need an authenticated session.
+  const isAuthPath = path.startsWith("/auth");
+
+  let user = null;
+  if (!isAuthPath) {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+
+    // If getUser() returned no user but the browser sent stale sb-* auth
+    // cookies (e.g. an expired / revoked refresh token), delete them from
+    // the response now.  Without this the browser re-sends the same broken
+    // tokens on every subsequent request, triggering repeated
+    // POST /auth/v1/token?grant_type=refresh_token → 400 loops.
+    if (!user) {
+      const stale = request.cookies.getAll().filter((c) => c.name.startsWith("sb-"));
+      if (stale.length > 0) {
+        stale.forEach((c) => supabaseResponse.cookies.delete(c.name));
+      }
+    }
+  }
 
   // ─── Surface-aware rewrites ───────────────────────────────────────────
   // ─── AI surface rewrites ─────────────────────────────────────────────
