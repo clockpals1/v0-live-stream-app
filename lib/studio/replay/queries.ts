@@ -125,7 +125,7 @@ export async function listReplaysForHost(
     );
   }
 
-  return (archives ?? []).map((a) => {
+  const archiveItems = (archives ?? []).map((a) => {
     const row = a as Record<string, unknown>;
     const streamRel = row.streams as { title?: string } | null;
     return {
@@ -139,6 +139,47 @@ export async function listReplaysForHost(
       publication: publications[row.id as string] ?? null,
     } satisfies ReplayItem;
   });
+
+  // ── Video project renders ───────────────────────────────────────────────────
+  // AI Short Video Creator renders are stored in video_renders. We surface them
+  // in the Replay Library so they can be published, shared, or distributed just
+  // like live-stream archives.
+  const { data: renders } = await supabase
+    .from("video_renders")
+    .select(
+      "id, project_id, public_url, byte_size, created_at, video_projects(title)",
+    )
+    .eq("host_id", hostId)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  const renderItems: ReplayItem[] = (renders ?? []).map((r) => {
+    const row = r as Record<string, unknown>;
+    const projectRel = row.video_projects as { title?: string } | null;
+    return {
+      archiveId: row.id as string,
+      streamId: null,
+      streamTitle: projectRel?.title
+        ? `📹 ${projectRel.title}`
+        : "AI Short Video",
+      archivedAt: row.created_at as string,
+      sizeBytes: Number(row.byte_size ?? 0),
+      archiveUrl: (row.public_url as string | null) ?? null,
+      archiveExpired: false,
+      publication: null,
+    } satisfies ReplayItem;
+  });
+
+  // Merge: stream archives first (newest first), then video renders
+  // Both sets are already ordered by created_at DESC so a simple concat
+  // followed by a single sort keeps the final list in chronological order.
+  const combined = [...archiveItems, ...renderItems].sort(
+    (a, b) =>
+      new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime(),
+  );
+
+  return combined;
 }
 
 /**

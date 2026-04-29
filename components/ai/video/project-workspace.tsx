@@ -11,8 +11,9 @@ import {
   CircleDot, Lock, Wand2, Subtitles, Play, MoreHorizontal,
   Trash2, RotateCcw, AlertTriangle, Download, ExternalLink,
   PlusCircle, Upload, StopCircle, ChevronDown, ChevronUp,
-  Image as ImageIcon,
+  Image as ImageIcon, Sparkles, BookOpen,
 } from "lucide-react";
+import { VideoComposer } from "./video-composer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +37,7 @@ export interface VideoScene {
   shot_type: "close-up" | "mid-shot" | "wide";
   on_screen_text: string;
   notes: string;
+  image_url?: string;
 }
 
 export interface VideoProject {
@@ -274,6 +276,16 @@ function SceneCard({
 
       {expanded && !editing && (
         <div className="mt-3 space-y-2.5 border-t border-border/40 pt-3">
+          {scene.image_url && (
+            <div className="overflow-hidden rounded-lg border border-border/40">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={scene.image_url}
+                alt={`Scene ${scene.order} visual`}
+                className="h-32 w-full object-cover"
+              />
+            </div>
+          )}
           {scene.visual_prompt && (
             <div>
               <div className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -450,12 +462,17 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   const [recorderRef, setRecorderRef] = useState<MediaRecorder | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [uploadedVoiceName, setUploadedVoiceName] = useState<string | null>(null);
-  const [editingPreviewUrl, setEditingPreviewUrl] = useState(false);
-  const [previewUrlDraft, setPreviewUrlDraft] = useState(project.preview_url ?? "");
-  const [savingPreviewUrl, setSavingPreviewUrl] = useState(false);
-  const [editingRenderUrl, setEditingRenderUrl] = useState(false);
-  const [renderUrlDraft, setRenderUrlDraft] = useState(project.render_url ?? "");
-  const [savingRenderUrl, setSavingRenderUrl] = useState(false);
+  const [generatingVisuals, setGeneratingVisuals] = useState(false);
+  const [visualProgress, setVisualProgress] = useState<{ current: number; total: number } | null>(null);
+  const [visualErrors, setVisualErrors] = useState<string[]>([]);
+  const [generatingTts, setGeneratingTts] = useState(false);
+  const [ttsAudioUrl, setTtsAudioUrl] = useState<string | null>(
+    (project.metadata?.voiceover_url as string | null) ?? null,
+  );
+  const [showComposer, setShowComposer] = useState(false);
+  const [renderSavedId, setRenderSavedId] = useState<string | null>(
+    (project.metadata?.render_id as string | null) ?? null,
+  );
   const [showRefImages, setShowRefImages] = useState(false);
   const [refImages, setRefImages] = useState<RefImage[]>(
     (project.metadata?.reference_images as RefImage[] | undefined) ?? []
@@ -597,29 +614,58 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
     }
   };
 
-  const handleSavePreviewUrl = async () => {
-    const url = previewUrlDraft.trim();
-    if (!url) return;
-    setSavingPreviewUrl(true);
-    try {
-      await save({ preview_url: url });
-      setEditingPreviewUrl(false);
-      toast.success("Preview URL saved");
-    } finally {
-      setSavingPreviewUrl(false);
+  const handleGenerateVisuals = async () => {
+    setGeneratingVisuals(true);
+    setVisualErrors([]);
+    setVisualProgress({ current: 0, total: sortedScenes.length });
+    const errs: string[] = [];
+    for (let i = 0; i < sortedScenes.length; i++) {
+      setVisualProgress({ current: i + 1, total: sortedScenes.length });
+      try {
+        const res = await fetch(`/api/ai/video/${project.id}/generate-visuals`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sceneIndex: i }),
+        });
+        const data = await res.json();
+        if (!res.ok) { errs.push(`Scene ${i + 1}: ${data.error ?? "Failed"}`); continue; }
+        setProject((prev) => ({
+          ...prev,
+          scenes: prev.scenes.map((s) =>
+            s.id === data.sceneId ? { ...s, image_url: data.imageUrl } : s,
+          ),
+        }));
+      } catch (err) {
+        errs.push(`Scene ${i + 1}: ${err instanceof Error ? err.message : "Network error"}`);
+      }
     }
+    setVisualErrors(errs);
+    setGeneratingVisuals(false);
+    setVisualProgress(null);
+    if (errs.length === 0) toast.success(`All ${sortedScenes.length} scene images generated`);
+    else toast.error(`${errs.length} scene(s) failed — check pipeline details`);
   };
 
-  const handleSaveRenderUrl = async () => {
-    const url = renderUrlDraft.trim();
-    if (!url) return;
-    setSavingRenderUrl(true);
+  const handleGenerateTts = async () => {
+    if (!voiceoverScript) { toast.error("No voiceover script available."); return; }
+    setGeneratingTts(true);
     try {
-      await save({ render_url: url, render_status: "ready" });
-      setEditingRenderUrl(false);
-      toast.success("Render URL saved");
+      const res = await fetch(`/api/ai/video/${project.id}/voiceover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: voiceoverScript, voice: "alloy" }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "TTS generation failed"); return; }
+      setTtsAudioUrl(data.audioUrl);
+      setProject((prev) => ({
+        ...prev,
+        voiceover_status: "ready",
+        metadata: { ...prev.metadata, voiceover_url: data.audioUrl },
+      }));
+      toast.success("AI voiceover generated — review it below");
     } finally {
-      setSavingRenderUrl(false);
+      setGeneratingTts(false);
     }
   };
 
@@ -953,25 +999,37 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
                   </button>
                 )}
                 {hasScenesAny && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const text = sortedScenes
-                        .map((s, i) =>
-                          `[Scene ${i + 1} — ${SCENE_TYPE_LABELS[s.type]} · ${s.duration}s]\nVisual: ${s.visual_prompt}\nShot: ${s.shot_type}${
-                            refImages.length > 0
-                              ? `\nReference: ${refImages.map((r) => r.url).join(", ")}`
-                              : ""
-                          }`
-                        )
-                        .join("\n\n");
-                      navigator.clipboard.writeText(text);
-                      toast.success("All visual prompts copied");
-                    }}
-                    className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors"
-                  >
-                    <Copy className="h-3 w-3" />Copy Prompts
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleGenerateVisuals}
+                      disabled={generatingVisuals}
+                      className="flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-violet-700 transition-colors disabled:opacity-50"
+                    >
+                      {generatingVisuals
+                        ? <><Loader2 className="h-3 w-3 animate-spin" />{visualProgress ? `${visualProgress.current}/${visualProgress.total}` : "…"}</>
+                        : <><Sparkles className="h-3 w-3" />Generate Images</>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const text = sortedScenes
+                          .map((s, i) =>
+                            `[Scene ${i + 1} — ${SCENE_TYPE_LABELS[s.type]} · ${s.duration}s]\nVisual: ${s.visual_prompt}\nShot: ${s.shot_type}${
+                              refImages.length > 0
+                                ? `\nReference: ${refImages.map((r) => r.url).join(", ")}`
+                                : ""
+                            }`
+                          )
+                          .join("\n\n");
+                        navigator.clipboard.writeText(text);
+                        toast.success("All visual prompts copied");
+                      }}
+                      className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors"
+                    >
+                      <Copy className="h-3 w-3" />Copy Prompts
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"
@@ -1243,49 +1301,43 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               {voiceMode === "ai" && (
                 <div className="space-y-3 p-4">
                   <p className="text-[11px] text-muted-foreground">
-                    Generate AI narration from your voiceover script. Configure a provider API key in Admin → AI Configuration.
+                    Generate narration from your voiceover script using the AI audio provider configured in Admin → AI Configuration (OpenAI TTS or ElevenLabs).
                   </p>
-                  <div className="space-y-2">
-                    {[
-                      {
-                        name: "ElevenLabs",
-                        badge: "Best",
-                        badgeColor: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-                        desc: "Human-quality voices + voice cloning from a 1-min sample. 10,000 chars/mo free.",
-                        href: "https://elevenlabs.io",
-                      },
-                      {
-                        name: "PlayHT",
-                        badge: "Alternative",
-                        badgeColor: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-                        desc: "Clone any voice from 5 s of audio. Good free tier.",
-                        href: "https://play.ht",
-                      },
-                    ].map((p) => (
-                      <div key={p.name} className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 p-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[12px] font-medium">{p.name}</span>
-                            <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider", p.badgeColor)}>{p.badge}</span>
-                          </div>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">{p.desc}</p>
-                        </div>
-                        <a
-                          href={p.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="shrink-0 flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
-                        >
-                          <ExternalLink className="h-2.5 w-2.5" />Get key
-                        </a>
+                  {ttsAudioUrl ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+                        <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+                        AI voiceover generated
                       </div>
-                    ))}
-                  </div>
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <audio src={ttsAudioUrl} controls className="h-9 w-full" />
+                      <button
+                        type="button"
+                        onClick={handleGenerateTts}
+                        disabled={generatingTts}
+                        className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                      >
+                        {generatingTts ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                        Regenerate
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleGenerateTts}
+                      disabled={generatingTts || !voiceoverScript}
+                      className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-violet-700 transition-colors disabled:opacity-50"
+                    >
+                      {generatingTts
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Generating…</>
+                        : <><Sparkles className="h-3.5 w-3.5" />Generate AI Voice</>}
+                    </button>
+                  )}
                   <a
                     href="/admin/ai"
-                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
                   >
-                    Configure API key in Admin → AI Configuration <ExternalLink className="h-2.5 w-2.5" />
+                    Configure audio provider <ExternalLink className="h-2.5 w-2.5" />
                   </a>
                 </div>
               )}
@@ -1401,22 +1453,54 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               onAction={() => { setActiveTab("scenes"); }}
             />
 
-            <PipelineStep step={3} icon={Camera} label="Scene Visuals"
-              sublabel={hasScenesAny
-                ? "Review visual direction notes on each scene — use for stock footage, AI images, or your own media"
-                : "Generate scenes from your script to unlock visual direction"}
-              state={hasScenesAny ? "active" : "locked"}
-              action={hasScenesAny}
-              actionLabel="Review Visuals"
-              onAction={() => setActiveTab("scenes")}
-            />
+            {/* ── Step 3: Generate Visuals ──────────────────────────── */}
+            {(() => {
+              const withImages = project.scenes.filter((s) => (s as VideoScene).image_url).length;
+              const allImaged = withImages === project.scenes.length && project.scenes.length > 0;
+              return (
+                <>
+                  <PipelineStep step={3} icon={Camera} label="Generate Scene Visuals"
+                    sublabel={
+                      !hasScenesAny ? "Generate scenes first to unlock visual creation" :
+                      allImaged ? `All ${project.scenes.length} scene images generated` :
+                      generatingVisuals && visualProgress
+                        ? `Generating scene ${visualProgress.current} of ${visualProgress.total}…`
+                        : `${withImages}/${project.scenes.length} scenes have images — click Generate to run AI image creation`
+                    }
+                    state={!hasScenesAny ? "locked" : allImaged ? "done" : generatingVisuals ? "loading" : "active"}
+                    action={hasScenesAny && !generatingVisuals}
+                    actionLabel={allImaged ? "Regenerate" : "Generate"}
+                    onAction={handleGenerateVisuals}
+                    acting={generatingVisuals}
+                  />
+                  {visualErrors.length > 0 && (
+                    <div className="ml-10 -mt-1 space-y-1">
+                      {visualErrors.map((e, i) => (
+                        <p key={i} className="text-[11px] text-destructive">{e}</p>
+                      ))}
+                    </div>
+                  )}
+                  {generatingVisuals && visualProgress && (
+                    <div className="ml-10 -mt-1 mb-1">
+                      <div className="h-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-violet-500 transition-all duration-300"
+                          style={{ width: `${Math.round((visualProgress.current / visualProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
+            {/* ── Step 4: Voiceover ─────────────────────────────────── */}
             <PipelineStep step={4} icon={Mic} label="Voiceover"
               sublabel={
                 project.voiceover_status === "ready"
-                  ? "Voiceover recorded — ready for the next stage"
+                  ? ttsAudioUrl ? "AI voiceover generated — ready to assemble" : "Voiceover recorded — ready to assemble"
                   : hasScenesAny
-                  ? "Record, upload, or generate AI narration from your voiceover script"
+                  ? "Record your voice, upload audio, or generate AI narration in-app"
                   : "Generate scenes first to build your voiceover script"
               }
               state={project.voiceover_status === "ready" ? "done" : hasScenesAny ? "active" : "locked"}
@@ -1425,173 +1509,89 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               onAction={() => setActiveTab("voiceover")}
             />
 
-            {/* ── Preview ─────────────────────────────────────────────── */}
-            <PipelineStep step={5} icon={Eye} label="Preview"
+            {/* ── Step 5: Assemble & Preview ────────────────────────── */}
+            <PipelineStep step={5} icon={Eye} label="Assemble & Preview"
               sublabel={
-                project.preview_url
-                  ? "Preview link saved — open to review before final render"
-                  : "Assemble your clips, then paste a preview link below"
+                renderSavedId
+                  ? "Video assembled and saved to Replay Library"
+                  : "Compose scenes + voiceover into a video and preview it here"
               }
-              state={project.preview_url ? "done" : "active"}
-              action={!!project.preview_url}
-              actionLabel="View Preview"
-              onAction={() => project.preview_url && window.open(project.preview_url, "_blank")}
+              state={renderSavedId ? "done" : hasScenesAny ? "active" : "locked"}
+              action={hasScenesAny && !showComposer && !renderSavedId}
+              actionLabel="Open Composer"
+              onAction={() => setShowComposer(true)}
             />
 
-            {/* Preview URL input — always shown when no URL or editing */}
-            {(!project.preview_url || editingPreviewUrl) && (
-              <div className="ml-10 -mt-1 mb-1 rounded-lg border border-border/60 bg-muted/20 p-3">
-                <p className="mb-2 text-[11px] text-muted-foreground">
-                  Paste a preview link — Google Drive, YouTube (unlisted), Dropbox, Vimeo, or any direct URL.
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    value={previewUrlDraft}
-                    onChange={(e) => setPreviewUrlDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSavePreviewUrl()}
-                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                  />
+            {/* Inline canvas composer */}
+            {showComposer && (
+              <div className="ml-10 -mt-1 mb-1 rounded-xl border border-border/60 bg-muted/10 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Video Composer</p>
                   <button
                     type="button"
-                    onClick={handleSavePreviewUrl}
-                    disabled={!previewUrlDraft.trim() || savingPreviewUrl}
-                    className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                    onClick={() => setShowComposer(false)}
+                    className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                   >
-                    {savingPreviewUrl ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                    Save
+                    <X className="h-3.5 w-3.5" />
                   </button>
-                  {editingPreviewUrl && (
-                    <button
-                      type="button"
-                      onClick={() => { setEditingPreviewUrl(false); setPreviewUrlDraft(project.preview_url ?? ""); }}
-                      className="rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
-                    >
-                      Cancel
-                    </button>
-                  )}
                 </div>
+                <VideoComposer
+                  projectId={project.id}
+                  scenes={sortedScenes}
+                  voiceoverUrl={ttsAudioUrl ?? audioUrl}
+                  onSaved={(renderId, publicUrl) => {
+                    setRenderSavedId(renderId);
+                    setShowComposer(false);
+                    setProject((prev) => ({
+                      ...prev,
+                      render_status: "ready",
+                      render_url: publicUrl ?? prev.render_url,
+                      status: "published",
+                      metadata: { ...prev.metadata, render_id: renderId },
+                    }));
+                    toast.success("Video saved to Replay Library");
+                  }}
+                />
               </div>
             )}
 
-            {/* Change preview URL link (shown when URL already exists) */}
-            {project.preview_url && !editingPreviewUrl && (
-              <div className="ml-10 -mt-1 mb-1 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setEditingPreviewUrl(true); setPreviewUrlDraft(project.preview_url ?? ""); }}
-                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Change URL
-                </button>
-              </div>
-            )}
-
-            {/* ── Render ──────────────────────────────────────────────── */}
-            <PipelineStep step={6} icon={RefreshCw} label="Render"
-              sublabel={
-                project.render_status === "ready" && project.render_url
-                  ? "Render complete — download your final video"
-                  : project.render_status === "rendering"
-                  ? "Render in progress…"
-                  : "Once you have your final video file, paste the download link below"
-              }
-              state={
-                project.render_status === "ready" ? "done" :
-                project.render_status === "rendering" ? "loading" :
-                "active"
-              }
-              action={project.render_status === "ready" && !!project.render_url}
-              actionLabel="Download"
-              onAction={() => project.render_url && window.open(project.render_url, "_blank")}
-            />
-
-            {/* Render URL input — always shown when no render URL */}
-            {(!project.render_url || editingRenderUrl) && project.render_status !== "rendering" && (
-              <div className="ml-10 -mt-1 mb-1 rounded-lg border border-border/60 bg-muted/20 p-3">
-                <p className="mb-2 text-[11px] text-muted-foreground">
-                  Paste your final render download link — Google Drive, Dropbox, direct .mp4, or any URL.
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    value={renderUrlDraft}
-                    onChange={(e) => setRenderUrlDraft(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSaveRenderUrl()}
-                    className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveRenderUrl}
-                    disabled={!renderUrlDraft.trim() || savingRenderUrl}
-                    className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
-                  >
-                    {savingRenderUrl ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                    Save
-                  </button>
-                  {editingRenderUrl && (
-                    <button
-                      type="button"
-                      onClick={() => { setEditingRenderUrl(false); setRenderUrlDraft(project.render_url ?? ""); }}
-                      className="rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Change render URL link (shown when URL already exists) */}
-            {project.render_url && !editingRenderUrl && (
-              <div className="ml-10 -mt-1 mb-1">
-                <button
-                  type="button"
-                  onClick={() => { setEditingRenderUrl(true); setRenderUrlDraft(project.render_url ?? ""); }}
-                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Change URL
-                </button>
-              </div>
-            )}
-
-            {/* Publish */}
+            {/* ── Step 6: Save & Publish ────────────────────────────── */}
             <div className={cn(
               "flex items-start gap-3 rounded-lg border p-3.5 transition-colors",
-              isPublished ? "border-emerald-500/30 bg-emerald-500/5" : "border-violet-500/30 bg-violet-500/5",
+              renderSavedId ? "border-emerald-500/30 bg-emerald-500/5" : "border-violet-500/30 bg-violet-500/5",
             )}>
               <div className={cn(
                 "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs",
-                isPublished
+                renderSavedId
                   ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600"
                   : "border-violet-500/50 bg-violet-500/10 text-violet-600",
               )}>
-                {isPublished ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+                {renderSavedId ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium">Publish</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {isPublished ? "Added to your Publishing Hub queue" : "Queue to Publishing Hub to schedule & post"}
-                    </p>
-                  </div>
-                  {!isPublished && (
-                    <button type="button" onClick={handlePublish} disabled={publishing}
-                      className="shrink-0 flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-60">
-                      {publishing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                      {publishing ? "Queuing…" : "Publish Now"}
-                    </button>
-                  )}
-                  {isPublished && (
-                    <a href="/ai/publish"
-                      className="shrink-0 flex items-center gap-1 rounded-md border border-emerald-500/40 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10">
-                      <ChevronRight className="h-3 w-3" />View Queue
+                <p className="text-sm font-medium">{renderSavedId ? "Saved & Ready" : "Save & Publish"}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {renderSavedId
+                    ? "Video is in your Replay Library. Queue it for Distribution or push to Publishing Hub."
+                    : "Assemble your video above, then save it to Replay Library and queue for distribution."}
+                </p>
+                {renderSavedId && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <a href="/studio/replay"
+                      className="flex items-center gap-1 rounded-md border border-emerald-500/40 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors">
+                      <BookOpen className="h-3 w-3" />Replay Library
                     </a>
-                  )}
-                </div>
+                    <button type="button" onClick={handlePublish} disabled={publishing || isPublished}
+                      className="flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-60 transition-colors">
+                      {publishing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                      {isPublished ? "In Distribution Queue" : "Queue for Distribution"}
+                    </button>
+                    <a href="/ai/publish"
+                      className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted transition-colors">
+                      <ChevronRight className="h-3 w-3" />Publishing Hub
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
 
