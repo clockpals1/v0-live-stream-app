@@ -697,6 +697,7 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   const ago = formatDistanceToNow(new Date(project.created_at), { addSuffix: true });
 
   const isScenesDone  = project.status !== "script_ready";
+  const hasScenesAny  = project.scenes.length > 0;
   const isPublished   = project.status === "published";
   const totalDuration = sortedScenes.reduce((sum, s) => sum + s.duration, 0);
 
@@ -949,6 +950,27 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
                   >
                     {confirmingScenes ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                     Confirm Scenes
+                  </button>
+                )}
+                {hasScenesAny && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = sortedScenes
+                        .map((s, i) =>
+                          `[Scene ${i + 1} — ${SCENE_TYPE_LABELS[s.type]} · ${s.duration}s]\nVisual: ${s.visual_prompt}\nShot: ${s.shot_type}${
+                            refImages.length > 0
+                              ? `\nReference: ${refImages.map((r) => r.url).join(", ")}`
+                              : ""
+                          }`
+                        )
+                        .join("\n\n");
+                      navigator.clipboard.writeText(text);
+                      toast.success("All visual prompts copied");
+                    }}
+                    className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors"
+                  >
+                    <Copy className="h-3 w-3" />Copy Prompts
                   </button>
                 )}
                 <button
@@ -1269,6 +1291,53 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               )}
             </div>
 
+            {/* Mark voiceover done */}
+            {voiceoverScript && (
+              <div className={cn(
+                "flex items-center justify-between gap-3 rounded-lg border p-3",
+                project.voiceover_status === "ready"
+                  ? "border-emerald-500/30 bg-emerald-500/5"
+                  : "border-border/60 bg-muted/10",
+              )}>
+                <div className="flex items-center gap-2">
+                  {project.voiceover_status === "ready" ? (
+                    <BadgeCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+                  ) : (
+                    <CircleDot className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    {project.voiceover_status === "ready"
+                      ? "Voiceover marked as recorded — proceed to Produce"
+                      : "Once you have recorded or generated your narration, mark it done"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (project.voiceover_status === "ready") {
+                      await save({ voiceover_status: "pending" });
+                      toast.success("Voiceover status cleared");
+                    } else {
+                      await save({ voiceover_status: "ready" });
+                      toast.success("Voiceover marked as done");
+                    }
+                  }}
+                  className={cn(
+                    "shrink-0 flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                    project.voiceover_status === "ready"
+                      ? "border border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                      : "bg-emerald-600 text-white hover:bg-emerald-700",
+                  )}
+                >
+                  {project.voiceover_status === "ready" ? (
+                    <><RotateCcw className="h-3 w-3" />Undo</>
+                  ) : (
+                    <><Check className="h-3 w-3" />Mark Done</>
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* Subtitle / caption structure */}
             <div className="rounded-xl border border-border bg-background/60">
               <div className="flex items-center gap-1.5 border-b border-border/60 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1333,11 +1402,11 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
             />
 
             <PipelineStep step={3} icon={Camera} label="Scene Visuals"
-              sublabel={isScenesDone
-                ? "Review visual direction notes on each scene — use them for stock footage, AI images, or your own media"
-                : "Confirm your scene breakdown first"}
-              state={isScenesDone ? "active" : "locked"}
-              action={isScenesDone}
+              sublabel={hasScenesAny
+                ? "Review visual direction notes on each scene — use for stock footage, AI images, or your own media"
+                : "Generate scenes from your script to unlock visual direction"}
+              state={hasScenesAny ? "active" : "locked"}
+              action={hasScenesAny}
               actionLabel="Review Visuals"
               onAction={() => setActiveTab("scenes")}
             />
@@ -1345,12 +1414,14 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
             <PipelineStep step={4} icon={Mic} label="Voiceover"
               sublabel={
                 project.voiceover_status === "ready"
-                  ? "Voiceover script ready — copy and use your preferred TTS or record yourself"
-                  : "Build your narration script from scene dialogue — copy for TTS or recording"
+                  ? "Voiceover recorded — ready for the next stage"
+                  : hasScenesAny
+                  ? "Record, upload, or generate AI narration from your voiceover script"
+                  : "Generate scenes first to build your voiceover script"
               }
-              state={isScenesDone ? "active" : "locked"}
-              action={isScenesDone}
-              actionLabel="Open Script"
+              state={project.voiceover_status === "ready" ? "done" : hasScenesAny ? "active" : "locked"}
+              action={hasScenesAny}
+              actionLabel="Open Voiceover"
               onAction={() => setActiveTab("voiceover")}
             />
 
@@ -1359,22 +1430,16 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               sublabel={
                 project.preview_url
                   ? "Preview link saved — open to review before final render"
-                  : isScenesDone
-                  ? "Paste your assembled preview link below to continue"
-                  : "Complete Scene Breakdown to unlock Preview"
+                  : "Assemble your clips, then paste a preview link below"
               }
-              state={
-                project.preview_url ? "done" :
-                isScenesDone ? "active" :
-                "locked"
-              }
+              state={project.preview_url ? "done" : "active"}
               action={!!project.preview_url}
               actionLabel="View Preview"
               onAction={() => project.preview_url && window.open(project.preview_url, "_blank")}
             />
 
-            {/* Preview URL input — auto-shown when no URL and scenes done */}
-            {isScenesDone && (!project.preview_url || editingPreviewUrl) && (
+            {/* Preview URL input — always shown when no URL or editing */}
+            {(!project.preview_url || editingPreviewUrl) && (
               <div className="ml-10 -mt-1 mb-1 rounded-lg border border-border/60 bg-muted/20 p-3">
                 <p className="mb-2 text-[11px] text-muted-foreground">
                   Paste a preview link — Google Drive, YouTube (unlisted), Dropbox, Vimeo, or any direct URL.
@@ -1427,26 +1492,23 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
             <PipelineStep step={6} icon={RefreshCw} label="Render"
               sublabel={
                 project.render_status === "ready" && project.render_url
-                  ? "Render complete — download your final video file"
+                  ? "Render complete — download your final video"
                   : project.render_status === "rendering"
                   ? "Render in progress…"
-                  : project.preview_url
-                  ? "Paste your final render download link below"
-                  : "Set a preview link first to unlock this step"
+                  : "Once you have your final video file, paste the download link below"
               }
               state={
                 project.render_status === "ready" ? "done" :
                 project.render_status === "rendering" ? "loading" :
-                project.preview_url ? "active" :
-                "locked"
+                "active"
               }
               action={project.render_status === "ready" && !!project.render_url}
               actionLabel="Download"
               onAction={() => project.render_url && window.open(project.render_url, "_blank")}
             />
 
-            {/* Render URL input — auto-shown when preview set but no render URL */}
-            {project.preview_url && (!project.render_url || editingRenderUrl) && project.render_status !== "rendering" && (
+            {/* Render URL input — always shown when no render URL */}
+            {(!project.render_url || editingRenderUrl) && project.render_status !== "rendering" && (
               <div className="ml-10 -mt-1 mb-1 rounded-lg border border-border/60 bg-muted/20 p-3">
                 <p className="mb-2 text-[11px] text-muted-foreground">
                   Paste your final render download link — Google Drive, Dropbox, direct .mp4, or any URL.
