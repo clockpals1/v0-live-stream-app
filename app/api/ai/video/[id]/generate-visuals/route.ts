@@ -203,7 +203,10 @@ export async function POST(
         body: imageBuffer,
       });
       if (r2.ok) {
-        imageUrl = publicUrl ?? objectKey;
+        // Only use R2 URL when we have a public base URL; otherwise fall
+        // through to the Pollinations CDN fallback below so we never
+        // store a bare object key (which renders as a broken relative path).
+        imageUrl = publicUrl ?? null;
       }
     } catch {
       // R2 not configured — encode as data URL

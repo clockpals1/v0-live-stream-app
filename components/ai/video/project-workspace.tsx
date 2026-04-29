@@ -276,7 +276,7 @@ function SceneCard({
 
       {expanded && !editing && (
         <div className="mt-3 space-y-2.5 border-t border-border/40 pt-3">
-          {scene.image_url && (
+          {scene.image_url && (scene.image_url.startsWith("http") || scene.image_url.startsWith("data:")) && (
             <div className="overflow-hidden rounded-lg border border-border/40">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
