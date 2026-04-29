@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
+import type { AuthChangeEvent } from "@supabase/supabase-js";
 
 /**
  * Compute the cookie domain attribute Supabase auth cookies should
@@ -54,6 +55,21 @@ export function createClient() {
         }
       : undefined,
   );
+
+  // When the SDK signs out (including after a failed refresh-token exchange),
+  // purge every sb-* / supabase-* entry from localStorage so the
+  // auto-refresh interval does not keep hammering POST /auth/v1/token
+  // with the now-invalid refresh token, which triggers 429 storms.
+  client.auth.onAuthStateChange((event: AuthChangeEvent) => {
+    if (event !== "SIGNED_OUT") return;
+    if (typeof window === "undefined") return;
+    const stale: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && (k.startsWith("sb-") || k.includes("supabase"))) stale.push(k);
+    }
+    stale.forEach((k) => window.localStorage.removeItem(k));
+  });
 
   return client;
 }

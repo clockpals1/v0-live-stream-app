@@ -158,18 +158,24 @@ export function AssetCardClient({ asset: initial }: { asset: AssetCardData }) {
   };
 
   const handleDelete = async () => {
-    if (!confirm("Delete this project? This cannot be undone.")) return;
+    if (!confirm("Delete this generation? This cannot be undone.")) return;
     setLoadingAction("delete");
     try {
       const url = asset.video_project_id
         ? `/api/ai/video/${asset.video_project_id}`
         : `/api/ai/assets/${asset.id}`;
       const res = await fetch(url, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error || "Delete failed"); return; }
+      if (!res.ok) {
+        let msg = "Delete failed";
+        try { const body = await res.json(); msg = body?.error || msg; } catch { /* non-JSON body */ }
+        toast.error(msg);
+        return;
+      }
       toast.success("Deleted");
       setRemoved(true);
       router.refresh();
+    } catch {
+      toast.error("Delete failed — check your connection and try again");
     } finally {
       setLoadingAction(null);
     }

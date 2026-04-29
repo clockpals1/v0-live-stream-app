@@ -80,7 +80,7 @@ export async function PATCH(
   const ALLOWED = [
     "title", "hook", "concept", "script_body", "cta", "caption",
     "scenes", "status", "voiceover_status", "render_status",
-    "preview_url", "render_url", "publish_queue_id",
+    "preview_url", "render_url", "publish_queue_id", "metadata",
   ];
 
   const updates: Record<string, unknown> = {};

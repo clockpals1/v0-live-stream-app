@@ -6,6 +6,7 @@ import { featureEnabled } from "@/lib/billing/plans";
 import { isNextControlFlowSignal } from "@/lib/next/control-flow";
 import { GeneratorForm } from "@/components/ai/studio/generator-form";
 import { AssetCardClient } from "@/components/ai/studio/asset-card-client";
+import { RecentGenerations } from "@/components/ai/studio/recent-generations";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
@@ -79,7 +80,7 @@ async function renderPage() {
     .eq("host_id", host.id)
     .is("archived_at", null)
     .order("created_at", { ascending: false })
-    .limit(6);
+    .limit(12);
 
   // Step 2: try to enrich short_video rows with video_project data.
   // Gracefully skipped if the video_projects table doesn't exist yet.
@@ -164,11 +165,7 @@ async function renderPage() {
               <h2 className="text-sm font-semibold">Recent generations</h2>
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {recentAssets.map((asset) => (
-              <AssetCardClient key={asset.id} asset={asset} />
-            ))}
-          </div>
+            <RecentGenerations assets={recentAssets} />
         </section>
       )}
 

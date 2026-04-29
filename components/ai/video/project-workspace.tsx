@@ -10,7 +10,8 @@ import {
   StickyNote, Copy, RefreshCw, Loader2, BadgeCheck,
   CircleDot, Lock, Wand2, Subtitles, Play, MoreHorizontal,
   Trash2, RotateCcw, AlertTriangle, Download, ExternalLink,
-  PlusCircle,
+  PlusCircle, Upload, StopCircle, ChevronDown, ChevronUp,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,8 @@ export interface VideoProject {
   created_at: string;
   updated_at: string;
 }
+
+interface RefImage { id: string; url: string; label: string }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -442,6 +445,16 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   const [duplicating, setDuplicating] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(project.title);
+  const [voiceMode, setVoiceMode] = useState<"record" | "upload" | "ai">("record");
+  const [recording, setRecording] = useState(false);
+  const [recorderRef, setRecorderRef] = useState<MediaRecorder | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [uploadedVoiceName, setUploadedVoiceName] = useState<string | null>(null);
+  const [showRefImages, setShowRefImages] = useState(false);
+  const [refImages, setRefImages] = useState<RefImage[]>(
+    (project.metadata?.reference_images as RefImage[] | undefined) ?? []
+  );
+  const [newImageUrl, setNewImageUrl] = useState("");
 
   const missingFields = useMemo(() => {
     const f: string[] = [];
@@ -576,6 +589,57 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
     } finally {
       setPublishing(false);
     }
+  };
+
+  const handleStartRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: Blob[] = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        setAudioUrl(URL.createObjectURL(blob));
+        setRecording(false);
+      };
+      recorder.start(200);
+      setRecorderRef(recorder);
+      setAudioUrl(null);
+      setRecording(true);
+    } catch {
+      toast.error("Could not access microphone — check browser permissions");
+    }
+  };
+
+  const handleStopRecording = () => {
+    recorderRef?.stop();
+    setRecorderRef(null);
+  };
+
+  const handleVoiceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    setAudioUrl(URL.createObjectURL(file));
+    setUploadedVoiceName(file.name);
+  };
+
+  const handleAddRefImage = async () => {
+    if (!newImageUrl.trim()) return;
+    const img: RefImage = { id: Date.now().toString(), url: newImageUrl.trim(), label: "" };
+    const next = [...refImages, img];
+    setRefImages(next);
+    setNewImageUrl("");
+    await save({ metadata: { ...project.metadata, reference_images: next } });
+    toast.success("Reference image added");
+  };
+
+  const handleRemoveRefImage = async (imgId: string) => {
+    const next = refImages.filter((i) => i.id !== imgId);
+    setRefImages(next);
+    await save({ metadata: { ...project.metadata, reference_images: next } });
   };
 
   const sortedScenes = useMemo(
@@ -865,6 +929,75 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               </div>
             </div>
 
+            {/* ── Reference Images ─────────────────────────────────── */}
+            <div className="mb-4 rounded-xl border border-border">
+              <button
+                type="button"
+                onClick={() => setShowRefImages((v) => !v)}
+                className="flex w-full items-center justify-between px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-muted/30 transition-colors"
+              >
+                <div className="flex items-center gap-1.5">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Reference Images
+                  {refImages.length > 0 && (
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground">
+                      {refImages.length}
+                    </span>
+                  )}
+                </div>
+                {showRefImages
+                  ? <ChevronUp className="h-3.5 w-3.5" />
+                  : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+
+              {showRefImages && (
+                <div className="border-t border-border/60 p-4 space-y-3">
+                  <p className="text-[11px] text-muted-foreground">
+                    Add reference images for visual consistency — product photos, character references, or brand assets. Share these with your visual AI tool alongside each scene&apos;s prompt.
+                  </p>
+
+                  {refImages.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {refImages.map((img) => (
+                        <div key={img.id} className="group relative aspect-video rounded-lg border border-border overflow-hidden bg-muted">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.url} alt={img.label || "Reference"} className="h-full w-full object-cover" />
+                          <div className="absolute inset-0 flex items-center justify-center bg-background/70 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRefImage(img.id)}
+                              className="flex items-center gap-1 rounded-md bg-destructive px-2 py-1 text-[10px] font-medium text-white"
+                            >
+                              <X className="h-2.5 w-2.5" />Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="Paste image URL (https://...)" 
+                      value={newImageUrl}
+                      onChange={(e) => setNewImageUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddRefImage()}
+                      className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-[12px] outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddRefImage}
+                      disabled={!newImageUrl.trim()}
+                      className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                    >
+                      <PlusCircle className="h-3 w-3" />Add
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {project.scenes.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/60 py-16">
                 <Film className="mb-3 h-8 w-8 text-muted-foreground/30" />
@@ -948,25 +1081,160 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
               )}
             </div>
 
-            {/* TTS generation — coming soon */}
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground/50">
-                  <Wand2 className="h-4 w-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-muted-foreground">AI Voiceover Generation</p>
-                    <span className="rounded-full border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Coming soon
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                    Generate AI narration from your voiceover script — multiple voices, speeds, and styles.
-                    Copy the script above to record yourself or use any TTS tool in the meantime.
-                  </p>
-                </div>
+            {/* Voice input options */}
+            <div className="rounded-xl border border-border">
+              {/* Tab bar */}
+              <div className="flex border-b border-border/60">
+                {([
+                  { id: "record", label: "Record",  icon: Mic      },
+                  { id: "upload", label: "Upload",  icon: Upload   },
+                  { id: "ai",     label: "AI Voice", icon: Wand2    },
+                ] as { id: "record"|"upload"|"ai"; label: string; icon: React.ComponentType<{className?:string}> }[]).map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setVoiceMode(id)}
+                    className={cn(
+                      "flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-[11px] font-medium transition-colors",
+                      voiceMode === id
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3 w-3" />{label}
+                  </button>
+                ))}
               </div>
+
+              {/* ── Record ───────────────────────── */}
+              {voiceMode === "record" && (
+                <div className="space-y-3 p-4">
+                  <p className="text-[11px] text-muted-foreground">
+                    Record your narration directly in the browser. Use the voiceover script above as your guide.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    {!recording ? (
+                      <button
+                        type="button"
+                        onClick={handleStartRecording}
+                        className="flex items-center gap-1.5 rounded-md bg-rose-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-rose-700 transition-colors"
+                      >
+                        <Mic className="h-3.5 w-3.5" />Start Recording
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleStopRecording}
+                        className="flex animate-pulse items-center gap-1.5 rounded-md bg-rose-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-rose-700 transition-colors"
+                      >
+                        <StopCircle className="h-3.5 w-3.5" />Stop Recording
+                      </button>
+                    )}
+                    {recording && (
+                      <span className="flex items-center gap-1.5 text-[11px] text-rose-600">
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+                        Recording…
+                      </span>
+                    )}
+                  </div>
+                  {audioUrl && !recording && (
+                    <div className="flex items-center gap-2">
+                      <audio src={audioUrl} controls className="h-9 flex-1 min-w-0" />
+                      <a
+                        href={audioUrl}
+                        download="voiceover.webm"
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors"
+                      >
+                        <Download className="h-3 w-3" />Save
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Upload ───────────────────────── */}
+              {voiceMode === "upload" && (
+                <div className="space-y-3 p-4">
+                  <p className="text-[11px] text-muted-foreground">
+                    Upload a pre-recorded voice file (.mp3, .wav, .m4a, .ogg, .webm).
+                  </p>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed border-border/60 px-4 py-5 hover:border-primary/40 hover:bg-muted/20 transition-colors">
+                    <Upload className="h-5 w-5 shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-[12px] font-medium">
+                        {uploadedVoiceName ?? "Click to choose audio file"}
+                      </p>
+                      {uploadedVoiceName && (
+                        <p className="text-[10px] text-muted-foreground">Click to replace</p>
+                      )}
+                    </div>
+                    <input type="file" accept="audio/*" className="hidden" onChange={handleVoiceUpload} />
+                  </label>
+                  {audioUrl && uploadedVoiceName && (
+                    <div className="flex items-center gap-2">
+                      <audio src={audioUrl} controls className="h-9 flex-1 min-w-0" />
+                      <button
+                        type="button"
+                        onClick={() => { setAudioUrl(null); setUploadedVoiceName(null); }}
+                        className="shrink-0 rounded-md border border-border px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── AI Voice ─────────────────────── */}
+              {voiceMode === "ai" && (
+                <div className="space-y-3 p-4">
+                  <p className="text-[11px] text-muted-foreground">
+                    Generate AI narration from your voiceover script. Configure a provider API key in Admin → AI Configuration.
+                  </p>
+                  <div className="space-y-2">
+                    {[
+                      {
+                        name: "ElevenLabs",
+                        badge: "Best",
+                        badgeColor: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+                        desc: "Human-quality voices + voice cloning from a 1-min sample. 10,000 chars/mo free.",
+                        href: "https://elevenlabs.io",
+                      },
+                      {
+                        name: "PlayHT",
+                        badge: "Alternative",
+                        badgeColor: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+                        desc: "Clone any voice from 5 s of audio. Good free tier.",
+                        href: "https://play.ht",
+                      },
+                    ].map((p) => (
+                      <div key={p.name} className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[12px] font-medium">{p.name}</span>
+                            <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider", p.badgeColor)}>{p.badge}</span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{p.desc}</p>
+                        </div>
+                        <a
+                          href={p.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+                        >
+                          <ExternalLink className="h-2.5 w-2.5" />Get key
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                  <a
+                    href="/admin/ai"
+                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                  >
+                    Configure API key in Admin → AI Configuration <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                </div>
+              )}
             </div>
 
             {/* Subtitle / caption structure */}
