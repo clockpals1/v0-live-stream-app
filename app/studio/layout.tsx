@@ -84,7 +84,7 @@ async function renderStudioLayout({
   }
   const user = userData?.user;
   if (!user) {
-    redirect("/auth/login");
+    redirect("/auth/login?next=%2Fstudio");
   }
 
   // Host row — studio is host-only. Auto-create on first visit using

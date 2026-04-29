@@ -58,7 +58,7 @@ async function renderAiLayout({ children }: { children: React.ReactNode }) {
   const { data: userData, error: authErr } = await supabase.auth.getUser();
   if (authErr) console.error("[ai/layout] auth.getUser error:", authErr);
 
-  if (!userData?.user) redirect("/auth/login");
+  if (!userData?.user) redirect("/auth/login?next=%2Fai");
 
   const host = await ensureHostRow(supabase, userData.user);
   if (!host) {

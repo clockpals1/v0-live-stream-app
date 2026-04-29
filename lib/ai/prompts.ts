@@ -207,13 +207,19 @@ export function buildShortVideoScriptPrompt(ctx: BasePromptContext) {
   const systemPrompt = `You are a short-form video script writer for TikTok, Instagram Reels, and YouTube Shorts.
 Target length: ${lengthLabel}.
 ${angleNote} ${monetNote}
-Output format — each section on its own line with label:
-  HOOK (first 3 seconds): One sentence that stops the scroll — make it irresistible
-  CONCEPT: One sentence summary of what this video is really about
-  SCRIPT BODY: The full script body — punchy, conversational, no fluff
-  CTA: Closing call to action (follow / buy / click / comment)
-  CAPTION: A ready-to-post social caption with 2–3 relevant emojis
-Tone: ${ctx.tone ?? 'energetic'}. Write as if speaking directly to camera. No stage directions. No meta-commentary.`;
+Output EXACTLY the following five labelled sections in order. Each label must appear at the start of its own line, in ALL CAPS, followed by a colon and a space:
+
+HOOK (first 3 seconds): One sentence that stops the scroll — make it irresistible
+CONCEPT: One sentence summary of what this video is really about
+SCRIPT BODY: The full script body — punchy, conversational, no fluff
+CTA: Closing call to action (follow / buy / click / comment)
+CAPTION: A ready-to-post social caption with 2–3 relevant emojis
+
+CRITICAL RULES:
+- Output PLAIN TEXT ONLY. Do NOT use markdown (no **, no ##, no bullet points, no dashes).
+- Do NOT add any commentary, introduction, or explanation outside the five sections.
+- Every section must have real content — never leave a section empty.
+Tone: ${ctx.tone ?? 'energetic'}. Write as if speaking directly to camera.`;
 
   const userPrompt = `Write a short video script about: "${ctx.topic}"
 ${ctx.niche ? `Creator niche: ${ctx.niche}` : ''}
@@ -233,13 +239,19 @@ export function buildShortVideoAdPrompt(ctx: BasePromptContext) {
   const systemPrompt = `You are a performance-focused short-form video ad scriptwriter.
 Target: ${lengthLabel} on ${platform}.
 This is a PAID AD — every word must work toward conversion. Be direct, benefit-first.
-Output format — each section on its own line with label:
-  HOOK (3 seconds): Pattern-interrupt opening that stops the scroll — make it surprising or provocative
-  PROBLEM: One sentence naming the exact pain point your viewer recognises
-  SOLUTION: Your offer as the solution — 1–2 sentences, focus on the outcome
-  PROOF POINT: Social proof or result hook (e.g. "Over 10,000 creators have used this…")
-  CTA: Strong direct call to action — max 8 words, starts with a verb
-  VISUAL DIRECTION: 2–3 sentence direction for what should appear on screen (no stage directions in script above)
+Output EXACTLY the following six labelled sections in order. Each label must appear at the start of its own line, in ALL CAPS, followed by a colon and a space:
+
+HOOK (3 seconds): Pattern-interrupt opening that stops the scroll — surprising or provocative
+PROBLEM: One sentence naming the exact pain point your viewer recognises
+SOLUTION: Your offer as the solution — 1–2 sentences, focus on the outcome
+PROOF POINT: Social proof or result hook (e.g. "Over 10,000 creators have used this…")
+CTA: Strong direct call to action — max 8 words, starts with a verb
+SCRIPT BODY: Combine PROBLEM + SOLUTION + PROOF into a flowing 2–3 sentence script body
+
+CRITICAL RULES:
+- Output PLAIN TEXT ONLY. Do NOT use markdown (no **, no ##, no bullet points, no dashes).
+- Do NOT add any commentary, introduction, or explanation outside the sections.
+- Every section must have real content — never leave a section empty.
 Tone: ${ctx.tone ?? 'energetic'}. No fluff, no hype words, benefit-focused.`;
 
   const userPrompt = `Write a short video ad for: "${ctx.topic}"

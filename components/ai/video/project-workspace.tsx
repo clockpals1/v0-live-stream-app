@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Clapperboard, ArrowLeft, Check, Pencil, Save, X,
-  Send, ChevronRight, Film, Mic, Eye, Cpu, Globe,
+  Send, ChevronRight, Film, Mic, Eye, Globe,
   Clock, Camera, AlignLeft, MousePointerClick, Type,
   StickyNote, Copy, RefreshCw, Loader2, BadgeCheck,
-  CircleDot, Lock, AlertCircle,
+  CircleDot, Lock, Wand2, Subtitles, Play,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -415,13 +415,19 @@ function PipelineStep({
   );
 }
 
+// ─── Tab type ─────────────────────────────────────────────────────────────────
+
+type Tab = "script" | "scenes" | "voiceover" | "produce";
+
 // ─── Main workspace ────────────────────────────────────────────────────────────
 
 export function ProjectWorkspace({ project: initial }: { project: VideoProject }) {
   const router = useRouter();
   const [project, setProject] = useState<VideoProject>(initial);
+  const [activeTab, setActiveTab] = useState<Tab>("script");
   const [publishing, setPublishing] = useState(false);
   const [confirmingScenes, setConfirmingScenes] = useState(false);
+  const [copiedVoiceover, setCopiedVoiceover] = useState(false);
 
   const save = useCallback(async (updates: Partial<VideoProject>) => {
     const res = await fetch(`/api/ai/video/${project.id}`, {
@@ -430,7 +436,7 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
       body: JSON.stringify(updates),
     });
     if (!res.ok) {
-      const { error } = await res.json();
+      const { error } = await res.json().catch(() => ({}));
       toast.error(error || "Save failed");
       return;
     }
@@ -458,7 +464,7 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
   const handleConfirmScenes = async () => {
     setConfirmingScenes(true);
     await save({ status: "scenes_generated" });
-    toast.success("Scenes confirmed — your storyboard is locked in");
+    toast.success("Scenes confirmed — storyboard locked in");
     setConfirmingScenes(false);
   };
 
@@ -480,250 +486,414 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
         }),
       });
       if (!res.ok) {
-        const { error } = await res.json();
+        const { error } = await res.json().catch(() => ({}));
         toast.error(error || "Failed to add to queue");
         return;
       }
       const { item } = await res.json();
       await save({ status: "published", publish_queue_id: item?.id ?? null });
-      toast.success("Added to publish queue — go to Publishing Hub to schedule");
+      toast.success("Added to publish queue — open Publishing Hub to schedule");
+      setActiveTab("produce");
     } finally {
       setPublishing(false);
     }
   };
 
+  const sortedScenes = useMemo(
+    () => project.scenes.slice().sort((a, b) => a.order - b.order),
+    [project.scenes],
+  );
+
+  const voiceoverScript = useMemo(
+    () =>
+      sortedScenes
+        .map((s, i) => `[Scene ${i + 1} — ${SCENE_TYPE_LABELS[s.type]} · ${s.duration}s]\n${s.script}`)
+        .join("\n\n"),
+    [sortedScenes],
+  );
+
+  const subtitleLines = useMemo(
+    () => sortedScenes.map((s) => s.on_screen_text).filter(Boolean),
+    [sortedScenes],
+  );
+
   const statusMeta = STATUS_META[project.status] ?? STATUS_META.script_ready;
   const platformLabel = PLATFORM_LABELS[project.platform] ?? project.platform;
   const ago = formatDistanceToNow(new Date(project.created_at), { addSuffix: true });
 
-  const isScenesDone = project.status !== "script_ready";
-  const isPublished  = project.status === "published";
+  const isScenesDone  = project.status !== "script_ready";
+  const isPublished   = project.status === "published";
+  const totalDuration = sortedScenes.reduce((sum, s) => sum + s.duration, 0);
+
+  const tabs: { id: Tab; label: string; badge?: string }[] = [
+    { id: "script",    label: "Script" },
+    { id: "scenes",    label: "Scenes", badge: String(project.scenes.length) },
+    { id: "voiceover", label: "Voiceover" },
+    { id: "produce",   label: "Produce" },
+  ];
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
+    <div className="flex min-h-screen flex-col bg-background">
 
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="mb-6">
-        <button
-          type="button"
-          onClick={() => router.push("/ai")}
-          className="mb-4 flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Studio
-        </button>
+      {/* ── Studio header ─────────────────────────────────────────────── */}
+      <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20">
+        <div className="mx-auto max-w-5xl px-4 sm:px-8">
+          {/* Top row */}
+          <div className="flex items-center gap-3 py-3">
+            <button
+              type="button"
+              onClick={() => router.push("/ai")}
+              className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              AI Hub
+            </button>
+            <span className="text-muted-foreground/40">/</span>
 
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-500 text-white shadow-sm">
-              <Clapperboard className="h-5 w-5" />
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-500 text-white">
+                <Clapperboard className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-sm font-semibold leading-none">{project.title}</h1>
+                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="flex items-center gap-0.5"><Globe className="h-3 w-3" />{platformLabel}</span>
+                  <span>·</span>
+                  <span className="flex items-center gap-0.5"><Clock className="h-3 w-3" />{totalDuration}s / {project.video_length}s target</span>
+                  <span>·</span>
+                  <span>{ago}</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-semibold leading-tight">{project.title}</h1>
-                <span className={cn(
-                  "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                  statusMeta.color, statusMeta.bg,
-                )}>
-                  {statusMeta.label}
-                </span>
-              </div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Globe className="h-3 w-3" />
-                  {platformLabel}
-                </span>
-                <span>·</span>
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {project.video_length}s video
-                </span>
-                <span>·</span>
-                <span>Created {ago}</span>
-              </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <span className={cn(
+                "hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider sm:inline-flex",
+                statusMeta.color, statusMeta.bg,
+              )}>
+                {statusMeta.label}
+              </span>
+              {isPublished ? (
+                <Badge className="border-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                  <BadgeCheck className="mr-1 h-3.5 w-3.5" />
+                  Published
+                </Badge>
+              ) : (
+                <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={handlePublish} disabled={publishing}>
+                  {publishing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                  {publishing ? "Queuing…" : "Publish"}
+                </Button>
+              )}
             </div>
           </div>
 
-          {!isPublished && (
-            <Button
-              size="sm"
-              className="gap-2"
-              onClick={handlePublish}
-              disabled={publishing}
-            >
-              {publishing
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Adding to queue…</>
-                : <><Send className="h-3.5 w-3.5" />Publish</>
-              }
-            </Button>
-          )}
-          {isPublished && (
-            <Badge className="border-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-              <BadgeCheck className="mr-1 h-3.5 w-3.5" />
-              In Publish Queue
-            </Badge>
-          )}
+          {/* Tab bar */}
+          <div className="flex gap-0.5 pb-px">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTab(t.id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-t-md border-b-2 px-4 py-2.5 text-[12px] font-medium transition-colors",
+                  activeTab === t.id
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
+                )}
+              >
+                {t.label}
+                {t.badge !== undefined && (
+                  <span className={cn(
+                    "flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold",
+                    activeTab === t.id
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground",
+                  )}>
+                    {t.badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── Two-column workspace ─────────────────────────────────────── */}
-      <div className="grid gap-6 lg:grid-cols-5">
+      {/* ── Tab content ───────────────────────────────────────────────── */}
+      <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-8">
 
-        {/* Left: Script + Scenes ─────────────────────────────────────── */}
-        <div className="space-y-6 lg:col-span-3">
-
-          {/* Script panel */}
-          <section>
-            <div className="mb-3 flex items-center gap-2">
-              <AlignLeft className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Script</h2>
-              <span className="text-[11px] text-muted-foreground">Click the pencil icon on any field to edit</span>
-            </div>
-            <div className="space-y-2.5">
-              <EditableField
-                label="Hook" icon={MousePointerClick}
-                value={project.hook ?? ""}
-                onSave={handleFieldSave("hook")}
-              />
-              <EditableField
-                label="Concept" icon={CircleDot}
-                value={project.concept ?? ""}
-                onSave={handleFieldSave("concept")}
-              />
-              <EditableField
-                label="Script Body" icon={AlignLeft}
-                value={project.script_body ?? ""}
-                multiline
-                onSave={handleFieldSave("script_body")}
-              />
-              <EditableField
-                label="CTA" icon={MousePointerClick}
-                value={project.cta ?? ""}
-                onSave={handleFieldSave("cta")}
-              />
-              <EditableField
-                label="Caption" icon={Type}
-                value={project.caption ?? ""}
-                onSave={handleFieldSave("caption")}
-              />
-            </div>
-          </section>
-
-          {/* Scenes panel */}
-          <section>
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Film className="h-4 w-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">Scene Breakdown</h2>
-                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                  {project.scenes.length} scenes · {project.video_length}s total
-                </Badge>
+        {/* ── SCRIPT TAB ──────────────────────────────────────────────── */}
+        {activeTab === "script" && (
+          <div className="mx-auto max-w-2xl space-y-3">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Script Package</h2>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  AI-generated script — click the pencil on any field to edit
+                </p>
               </div>
-              {!isScenesDone && project.scenes.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("scenes")}
+                className="flex items-center gap-1 rounded-md bg-primary/10 px-3 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/15 transition-colors"
+              >
+                Review Scenes <ChevronRight className="h-3 w-3" />
+              </button>
+            </div>
+
+            <EditableField label="Hook" icon={MousePointerClick}
+              value={project.hook ?? ""}
+              onSave={handleFieldSave("hook")} />
+
+            <EditableField label="Concept" icon={CircleDot}
+              value={project.concept ?? ""}
+              onSave={handleFieldSave("concept")} />
+
+            <EditableField label="Script Body" icon={AlignLeft}
+              value={project.script_body ?? ""}
+              multiline
+              onSave={handleFieldSave("script_body")} />
+
+            <EditableField label="CTA" icon={MousePointerClick}
+              value={project.cta ?? ""}
+              onSave={handleFieldSave("cta")} />
+
+            <EditableField label="Caption" icon={Type}
+              value={project.caption ?? ""}
+              onSave={handleFieldSave("caption")} />
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setActiveTab("scenes")}
+                className="flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-sky-700 transition-colors"
+              >
+                <Film className="h-3.5 w-3.5" />
+                Continue to Scenes
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── SCENES TAB ──────────────────────────────────────────────── */}
+        {activeTab === "scenes" && (
+          <div>
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold">Scene Breakdown</h2>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {project.scenes.length} scenes · {totalDuration}s total · expand any scene to edit
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {isScenesDone ? (
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    <Check className="h-3.5 w-3.5" />Scenes confirmed
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleConfirmScenes}
+                    disabled={confirmingScenes || project.scenes.length === 0}
+                    className="flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-50 transition-colors"
+                  >
+                    {confirmingScenes ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    Confirm Scenes
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={handleConfirmScenes}
-                  disabled={confirmingScenes}
-                  className="flex items-center gap-1 rounded-md bg-sky-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-60"
+                  onClick={() => setActiveTab("voiceover")}
+                  className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  {confirmingScenes
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <Check className="h-3 w-3" />}
-                  Confirm Scenes
+                  <Mic className="h-3 w-3" />Voiceover
                 </button>
-              )}
-              {isScenesDone && (
-                <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                  <Check className="h-3 w-3" />
-                  Scenes confirmed
-                </span>
-              )}
+              </div>
             </div>
 
             {project.scenes.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center">
-                <Film className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">No scenes yet</p>
-                <p className="text-xs text-muted-foreground/60">Scenes are auto-generated when the script is created</p>
+              <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border/60 py-16">
+                <Film className="mb-3 h-8 w-8 text-muted-foreground/30" />
+                <p className="text-sm font-medium text-muted-foreground">No scenes generated</p>
+                <p className="mt-1 text-xs text-muted-foreground/60">Go back to Script and ensure the hook, concept, and script body have content</p>
+                <button type="button" onClick={() => setActiveTab("script")}
+                  className="mt-4 flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground">
+                  <ArrowLeft className="h-3 w-3" />Back to Script
+                </button>
               </div>
             ) : (
               <div className="space-y-2">
-                {project.scenes
-                  .slice()
-                  .sort((a, b) => a.order - b.order)
-                  .map((scene) => (
-                    <SceneCard key={scene.id} scene={scene} onUpdate={handleSceneUpdate} />
-                  ))}
+                {sortedScenes.map((scene) => (
+                  <SceneCard key={scene.id} scene={scene} onUpdate={handleSceneUpdate} />
+                ))}
               </div>
             )}
-          </section>
-        </div>
 
-        {/* Right: Production Pipeline ─────────────────────────────────── */}
-        <div className="lg:col-span-2">
-          <div className="sticky top-6 space-y-3">
-            <div className="mb-3 flex items-center gap-2">
-              <Cpu className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Production Pipeline</h2>
+            {!isScenesDone && project.scenes.length > 0 && (
+              <div className="mt-4 rounded-lg border border-sky-500/20 bg-sky-500/5 p-3">
+                <p className="text-[11px] text-sky-700 dark:text-sky-300">
+                  <strong>Next step:</strong> Review and edit the scene cards above, then click <strong>Confirm Scenes</strong> to lock in the storyboard and continue to Voiceover.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── VOICEOVER TAB ───────────────────────────────────────────── */}
+        {activeTab === "voiceover" && (
+          <div className="mx-auto max-w-2xl space-y-5">
+            <div className="mb-2">
+              <h2 className="text-sm font-semibold">Voiceover & Subtitles</h2>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Full narration script derived from your scenes — use this for recording or TTS generation
+              </p>
             </div>
 
-            <PipelineStep
-              step={1}
-              label="Script Ready"
-              sublabel="Hook, concept, script, CTA & caption generated"
-              state="done"
-              icon={AlignLeft}
-            />
+            {/* Full voiceover script */}
+            <div className="rounded-xl border border-border bg-background/60">
+              <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Mic className="h-3.5 w-3.5" />
+                  Full Voiceover Script
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(voiceoverScript);
+                    setCopiedVoiceover(true);
+                    setTimeout(() => setCopiedVoiceover(false), 1800);
+                  }}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  {copiedVoiceover ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                  {copiedVoiceover ? "Copied!" : "Copy"}
+                </button>
+              </div>
+              {voiceoverScript ? (
+                <pre className="whitespace-pre-wrap px-4 py-3 text-[12px] leading-relaxed text-foreground font-sans">
+                  {voiceoverScript}
+                </pre>
+              ) : (
+                <div className="px-4 py-8 text-center">
+                  <Mic className="mx-auto mb-2 h-6 w-6 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">No scenes yet — add scenes first</p>
+                </div>
+              )}
+            </div>
 
-            <PipelineStep
-              step={2}
-              label="Scenes"
-              sublabel={isScenesDone ? `${project.scenes.length} scenes confirmed` : `${project.scenes.length} scenes ready — review and confirm`}
-              state={isScenesDone ? "done" : "active"}
-              icon={Film}
-              action={!isScenesDone}
+            {/* TTS generation — coming soon */}
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground/50">
+                  <Wand2 className="h-4 w-4" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-muted-foreground">AI Voiceover Generation</p>
+                    <span className="rounded-full border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Coming soon
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                    Generate AI narration from your voiceover script — multiple voices, speeds, and styles.
+                    Copy the script above to record yourself or use any TTS tool in the meantime.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Subtitle / caption structure */}
+            <div className="rounded-xl border border-border bg-background/60">
+              <div className="flex items-center gap-1.5 border-b border-border/60 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <Subtitles className="h-3.5 w-3.5" />
+                On-Screen Text by Scene
+              </div>
+              {subtitleLines.length > 0 ? (
+                <ul className="divide-y divide-border/40">
+                  {sortedScenes
+                    .filter((s) => s.on_screen_text)
+                    .map((s, i) => (
+                      <li key={s.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                          {i + 1}
+                        </span>
+                        <span className="flex-1 text-[12px]">{s.on_screen_text}</span>
+                        <span className="text-[10px] text-muted-foreground">{s.duration}s</span>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="px-4 py-5 text-center text-[12px] text-muted-foreground/60">
+                  No on-screen text set — edit scene cards to add text overlays
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setActiveTab("produce")}
+                className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-violet-700 transition-colors"
+              >
+                <Play className="h-3.5 w-3.5" />Continue to Produce
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── PRODUCE TAB ─────────────────────────────────────────────── */}
+        {activeTab === "produce" && (
+          <div className="mx-auto max-w-xl space-y-3">
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold">Production Pipeline</h2>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Progress through each stage to take your project from script to published
+              </p>
+            </div>
+
+            <PipelineStep step={1} icon={AlignLeft} label="Script Ready"
+              sublabel={`Hook, concept, ${project.script_body ? "script body," : "script,"} CTA & caption all generated`}
+              state="done" />
+
+            <PipelineStep step={2} icon={Film} label="Scene Breakdown"
+              sublabel={isScenesDone
+                ? `${project.scenes.length} scenes confirmed · ${totalDuration}s storyboard`
+                : `${project.scenes.length} scenes ready — review on the Scenes tab, then confirm`}
+              state={isScenesDone ? "done" : project.scenes.length > 0 ? "active" : "active"}
+              action={!isScenesDone && project.scenes.length > 0}
               actionLabel="Confirm"
-              onAction={handleConfirmScenes}
-              acting={confirmingScenes}
+              onAction={() => { setActiveTab("scenes"); }}
             />
 
-            <PipelineStep
-              step={3}
-              label="Visuals"
-              sublabel="Generate AI visuals or attach media for each scene"
-              state="locked"
-              icon={Camera}
+            <PipelineStep step={3} icon={Camera} label="Visuals"
+              sublabel={isScenesDone
+                ? "Scenes confirmed — ready to attach media or generate AI visuals per scene"
+                : "Confirm your scene breakdown first"}
+              state={isScenesDone ? "active" : "locked"}
+              action={isScenesDone}
+              actionLabel="Attach Media"
+              onAction={() => toast.info("Visual asset attachment is coming in the next release")}
             />
 
-            <PipelineStep
-              step={4}
-              label="Voiceover"
-              sublabel="AI narration from your script body"
-              state="locked"
-              icon={Mic}
+            <PipelineStep step={4} icon={Mic} label="Voiceover"
+              sublabel="Record yourself or copy the voiceover script for TTS — AI voice generation coming soon"
+              state={isScenesDone ? "active" : "locked"}
+              action={isScenesDone}
+              actionLabel="View Script"
+              onAction={() => setActiveTab("voiceover")}
             />
 
-            <PipelineStep
-              step={5}
-              label="Preview"
-              sublabel="Assemble scenes into a preview sequence"
-              state="locked"
-              icon={Eye}
-            />
+            <PipelineStep step={5} icon={Eye} label="Preview"
+              sublabel="Assemble scenes + visuals + voiceover into a preview — requires visual assets"
+              state="locked" />
 
-            <PipelineStep
-              step={6}
-              label="Render"
-              sublabel="Export the final short video file"
-              state="locked"
-              icon={RefreshCw}
-            />
+            <PipelineStep step={6} icon={RefreshCw} label="Render"
+              sublabel="Export the final video file — requires preview approval"
+              state="locked" />
 
+            {/* Publish */}
             <div className={cn(
-              "flex items-start gap-3 rounded-lg border p-3 transition-colors",
-              isPublished
-                ? "border-emerald-500/30 bg-emerald-500/5"
-                : "border-violet-500/30 bg-violet-500/5",
+              "flex items-start gap-3 rounded-lg border p-3.5 transition-colors",
+              isPublished ? "border-emerald-500/30 bg-emerald-500/5" : "border-violet-500/30 bg-violet-500/5",
             )}>
               <div className={cn(
                 "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs",
@@ -731,87 +901,54 @@ export function ProjectWorkspace({ project: initial }: { project: VideoProject }
                   ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600"
                   : "border-violet-500/50 bg-violet-500/10 text-violet-600",
               )}>
-                {isPublished
-                  ? <Check className="h-3.5 w-3.5" />
-                  : <Send className="h-3.5 w-3.5" />
-                }
+                {isPublished ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-sm font-medium leading-snug">Publish</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">
-                      {isPublished
-                        ? "Added to your publishing queue"
-                        : "Send to Publishing Hub to schedule & post"}
+                    <p className="text-sm font-medium">Publish</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {isPublished ? "Added to your Publishing Hub queue" : "Queue to Publishing Hub to schedule & post"}
                     </p>
                   </div>
                   {!isPublished && (
-                    <button
-                      type="button"
-                      onClick={handlePublish}
-                      disabled={publishing}
-                      className="shrink-0 flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-60"
-                    >
+                    <button type="button" onClick={handlePublish} disabled={publishing}
+                      className="shrink-0 flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-60">
                       {publishing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                      Publish
+                      {publishing ? "Queuing…" : "Publish Now"}
                     </button>
                   )}
                   {isPublished && (
-                    <a
-                      href="/ai/publish"
-                      className="shrink-0 flex items-center gap-1 rounded-md border border-emerald-500/40 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
-                    >
-                      <ChevronRight className="h-3 w-3" />
-                      View Queue
+                    <a href="/ai/publish"
+                      className="shrink-0 flex items-center gap-1 rounded-md border border-emerald-500/40 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10">
+                      <ChevronRight className="h-3 w-3" />View Queue
                     </a>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Quick project info */}
-            <div className="mt-4 rounded-lg border border-border/50 bg-muted/20 p-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Project info</p>
-              <dl className="space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <dt className="text-muted-foreground">Platform</dt>
-                  <dd className="font-medium capitalize">{platformLabel}</dd>
-                </div>
-                <div className="flex items-center justify-between">
-                  <dt className="text-muted-foreground">Length</dt>
-                  <dd className="font-medium">{project.video_length}s</dd>
-                </div>
-                <div className="flex items-center justify-between">
-                  <dt className="text-muted-foreground">Scenes</dt>
-                  <dd className="font-medium">{project.scenes.length}</dd>
-                </div>
-                {(project.metadata?.tone as string) && (
-                  <div className="flex items-center justify-between">
-                    <dt className="text-muted-foreground">Tone</dt>
-                    <dd className="font-medium capitalize">{project.metadata.tone as string}</dd>
+            {/* Project info card */}
+            <div className="mt-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Project</p>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                {([
+                  ["Platform", platformLabel],
+                  ["Target length", `${project.video_length}s`],
+                  ["Scenes", `${project.scenes.length} (${totalDuration}s)`],
+                  ["Status", statusMeta.label],
+                  ...(project.metadata?.tone ? [["Tone", String(project.metadata.tone)]] : []),
+                  ...(project.metadata?.model ? [["Model", String(project.metadata.model).split("-").slice(0, 2).join("-")]] : []),
+                ] as [string, string][]).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between col-span-1">
+                    <dt className="text-muted-foreground">{k}</dt>
+                    <dd className="font-medium capitalize truncate max-w-[8rem]">{v}</dd>
                   </div>
-                )}
-                {(project.metadata?.model as string) && (
-                  <div className="flex items-center justify-between">
-                    <dt className="text-muted-foreground">AI Model</dt>
-                    <dd className="font-medium text-[10px] truncate max-w-28">{project.metadata.model as string}</dd>
-                  </div>
-                )}
+                ))}
               </dl>
             </div>
-
-            {/* Insights hint */}
-            <div className="rounded-lg border border-border/40 bg-muted/10 p-3">
-              <p className="text-[11px] text-muted-foreground">
-                After publishing, track performance in{" "}
-                <a href="/ai/insights" className="font-medium text-primary hover:underline">
-                  AI Insights <AlertCircle className="inline h-3 w-3" />
-                </a>
-              </p>
-            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

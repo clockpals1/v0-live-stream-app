@@ -74,6 +74,13 @@ export async function updateSession(request: NextRequest) {
       url.host = "live.isunday.me";
       return NextResponse.redirect(url);
     }
+    // ai.isunday.me/studio/* → cross-surface redirect to studio subdomain
+    if (path.startsWith("/studio")) {
+      const url = request.nextUrl.clone();
+      url.host = "studio.isunday.me";
+      url.pathname = path.replace(/^\/studio/, "") || "/";
+      return NextResponse.redirect(url);
+    }
     const isShared =
       path.startsWith("/auth") ||
       path.startsWith("/api") ||
@@ -91,6 +98,13 @@ export async function updateSession(request: NextRequest) {
     if (path.startsWith("/host")) {
       const url = request.nextUrl.clone();
       url.host = "live.isunday.me";
+      return NextResponse.redirect(url);
+    }
+    // studio.isunday.me/ai/* → cross-surface redirect to AI subdomain
+    if (path.startsWith("/ai")) {
+      const url = request.nextUrl.clone();
+      url.host = "ai.isunday.me";
+      url.pathname = path.replace(/^\/ai/, "") || "/";
       return NextResponse.redirect(url);
     }
     // Skip rewrites for shared paths (auth, api, admin, _next assets,
@@ -134,13 +148,17 @@ export async function updateSession(request: NextRequest) {
   // actually serve (/studio/replay, /studio/audience, …).
   if (path.startsWith("/host") && !user) {
     const url = request.nextUrl.clone();
+    const returnTo = request.nextUrl.pathname + request.nextUrl.search;
     url.pathname = "/auth/login";
+    url.searchParams.set("next", returnTo);
     return NextResponse.redirect(url);
   }
   // /ai/* gate — same pattern; richer role/plan checks in the layout.
   if (path.startsWith("/ai") && !user) {
     const url = request.nextUrl.clone();
+    const returnTo = request.nextUrl.pathname + request.nextUrl.search;
     url.pathname = "/auth/login";
+    url.searchParams.set("next", returnTo);
     return NextResponse.redirect(url);
   }
   // Note: /studio gate runs in the layout (server component) for richer

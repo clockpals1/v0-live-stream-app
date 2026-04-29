@@ -95,6 +95,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  const isVideoTask = taskType === "short_video_script" || taskType === "short_video_ad";
+
   // Validate task type has a prompt
   const prompts = getPromptForTask(taskType, input);
   if (!prompts) {
@@ -132,12 +134,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to create task." }, { status: 500 });
   }
 
+  // Video tasks need more tokens for 5-section structured output
+  const maxTokens = isVideoTask ? 2500 : 1500;
+
   // Call AI provider
   const result = await generateText({
     systemPrompt: prompts.systemPrompt,
     userPrompt: prompts.userPrompt,
     provider,
-    maxTokens: 1500,
+    maxTokens,
     temperature: 0.72,
   });
 
@@ -166,7 +171,6 @@ export async function POST(req: NextRequest) {
   // Persist the generated asset
   const assetType = taskTypeToAssetType(taskType);
   const platform = (input.platform as string) ?? null;
-  const isVideoTask = taskType === "short_video_script" || taskType === "short_video_ad";
 
   const { data: assetRow } = await admin
     .from("ai_generated_assets")

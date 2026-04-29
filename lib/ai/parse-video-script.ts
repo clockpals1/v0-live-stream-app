@@ -1,21 +1,19 @@
 /**
  * lib/ai/parse-video-script.ts
  *
- * Parses the raw AI text output from short_video_script / short_video_ad tasks
- * into a structured video project: discrete content fields + an ordered scene list.
+ * Robust parser for AI-generated short video scripts.
  *
- * The parser handles the labelled-section format used by buildShortVideoScriptPrompt:
- *   HOOK (first 3 seconds): ...
- *   CONCEPT: ...
- *   SCRIPT BODY: ...
- *   CTA: ...
- *   CAPTION: ...
+ * Handles every realistic LLM output variation:
+ *   • Plain:    HOOK (first 3 seconds): text
+ *   • Bold:     **HOOK (first 3 seconds):** text
+ *   • Header:   ## HOOK\ntext
+ *   • No qual:  HOOK: text
+ *   • Any case: hook: text
  *
- * For the ad variant it also handles:
- *   PROBLEM: ...  SOLUTION: ...  PROOF POINT: ...  VISUAL DIRECTION: ...
- *
- * Scenes are auto-derived from the parsed sections based on video length.
- * This gives an immediately useful storyboard without requiring a second AI call.
+ * Guarantees non-empty scenes even on partial parse failures:
+ *   1. Tries structured section extraction.
+ *   2. Falls back to chunking the raw text if sections are empty.
+ *   3. Returns template placeholder scenes as a last resort.
  */
 
 export interface VideoScene {
@@ -39,27 +37,50 @@ export interface ParsedVideoScript {
   scenes: VideoScene[];
 }
 
+// ─── Text normalisation ────────────────────────────────────────────────────────
+
+/**
+ * Strip markdown formatting so the regex doesn't need to handle it inline.
+ * Handles: **bold**, *italic*, ## headers, --- dividers, leading bullets.
+ */
+function normalizeAiOutput(text: string): string {
+  return text
+    .replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1")   // **bold** → bold
+    .replace(/^#{1,6}\s*/gm, "")                  // ## Header → Header
+    .replace(/^[-─]{3,}\s*$/gm, "")               // --- dividers → empty
+    .replace(/^\s*[-•*]\s+/gm, "")                // - bullet → plain
+    .replace(/\r\n/g, "\n")
+    .trim();
+}
+
 // ─── Section extraction ────────────────────────────────────────────────────────
 
-const SECTION_LABELS = [
-  "HOOK", "CONCEPT", "SCRIPT BODY", "CTA", "CAPTION",
-  "PROBLEM", "SOLUTION", "PROOF POINT", "VISUAL DIRECTION",
-];
+// Alternation used in lookahead — covers every section label as a regex pattern
+const SECTION_ALT = "HOOK|CONCEPT|SCRIPT\\s+BODY|CTA|CAPTION|PROBLEM|SOLUTION|PROOF\\s+POINT|VISUAL\\s+DIRECTION";
 
-function extractSection(text: string, label: string): string {
-  // Match label (with optional qualifier like "(first 3 seconds)"), colon, then content
-  // until the next known section label or end of string
-  const labelsAlt = SECTION_LABELS.join("|");
+function extractSection(normalizedText: string, labelPattern: string): string {
+  // Strategy 1: LABEL (optional qualifier): content — until next section or EOF
   const re = new RegExp(
-    `${label}(?:\\s*\\([^)]*\\))?\\s*:\\s*([\\s\\S]+?)(?=\\n(?:${labelsAlt})(?:\\s*\\([^)]*\\))?\\s*:|$)`,
+    `(?:^|\\n)\\s*${labelPattern}(?:\\s*\\([^)]*\\))?\\s*:[ \\t]*([\\s\\S]+?)(?=\\n\\s*(?:${SECTION_ALT})(?:\\s*\\([^)]*\\))?\\s*:|$)`,
     "i",
   );
-  const m = text.match(re);
+  const m = normalizedText.match(re);
   if (m?.[1]?.trim()) return m[1].trim();
 
-  // Fallback: single-line extraction
-  const reLine = new RegExp(`${label}(?:\\s*\\([^)]*\\))?\\s*:\\s*(.+)`, "i");
-  const ml = text.match(reLine);
+  // Strategy 2: LABEL on its own line, content follows on next line
+  const reHeader = new RegExp(
+    `(?:^|\\n)\\s*${labelPattern}(?:\\s*\\([^)]*\\))?\\s*\\n+([\\s\\S]+?)(?=\\n\\s*(?:${SECTION_ALT})(?:\\s*\\([^)]*\\))?\\s*(?:\\n|:)|$)`,
+    "i",
+  );
+  const mh = normalizedText.match(reHeader);
+  if (mh?.[1]?.trim()) return mh[1].trim();
+
+  // Strategy 3: single-line fallback
+  const reLine = new RegExp(
+    `(?:^|\\n)\\s*${labelPattern}(?:\\s*\\([^)]*\\))?\\s*:[ \\t]*(.+)`,
+    "i",
+  );
+  const ml = normalizedText.match(reLine);
   return ml?.[1]?.trim() ?? "";
 }
 
@@ -217,20 +238,110 @@ function deriveScenesFromScript(
   return scenes.filter((s) => s.script.length > 0);
 }
 
+// ─── Fallback scene generator ─────────────────────────────────────────────────
+
+/**
+ * Creates scenes from raw text chunks when section extraction fails entirely.
+ * Splits the raw text into meaningful sentences and maps them to scene types.
+ */
+function createFallbackScenes(rawText: string, videoLength: string): VideoScene[] {
+  const duration = parseInt(videoLength, 10) || 30;
+
+  const cleanText = rawText
+    .replace(/\*{1,2}/g, "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^[A-Z\s]+(?:\([^)]*\))?:\s*/gm, "") // strip labels themselves
+    .trim();
+
+  const sentences = cleanText
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 15);
+
+  if (sentences.length === 0) {
+    return createTemplateScenes(duration);
+  }
+
+  const total = duration <= 15 ? 3 : duration <= 30 ? 4 : 6;
+  const types: Array<VideoScene["type"]> = ["hook", "setup", "main", "main", "main", "cta"];
+  const shots: Array<VideoScene["shot_type"]> = ["close-up", "wide", "mid-shot", "mid-shot", "mid-shot", "close-up"];
+  const durations = duration <= 15
+    ? [3, 9, 3]
+    : duration <= 30
+      ? [3, 5, 14, 8]
+      : [3, 7, 11, 11, 11, 10];
+
+  const count = Math.min(total, sentences.length);
+  const chunkSize = Math.ceil(sentences.length / count);
+
+  return Array.from({ length: count }, (_, i) => {
+    const chunk = sentences.slice(i * chunkSize, (i + 1) * chunkSize).join(" ") || sentences[0];
+    return makeScene({
+      id: `scene_${i + 1}`,
+      order: i + 1,
+      duration: durations[i] ?? 5,
+      type: types[i] ?? "main",
+      script: chunk,
+      visual_prompt: `${shots[i] ?? "mid-shot"} — ${["Bold opener, stop the scroll", "Establish context", "Core point", "Supporting detail", "Supporting detail", "Drive action"][i] ?? "Supporting visual"}`,
+      shot_type: shots[i] ?? "mid-shot",
+      on_screen_text: i === 0 ? chunk.slice(0, 50) : "",
+      notes: ["Hook opening", "Setup & context", "Main point", "Supporting detail", "Supporting detail", "CTA close"][i] ?? "Edit this scene",
+    });
+  });
+}
+
+/**
+ * Absolute last resort: 4 template scenes the user can fill in.
+ */
+function createTemplateScenes(duration: number): VideoScene[] {
+  const configs: Array<Omit<VideoScene, "id" | "order">> = [
+    { duration: 3,  type: "hook",  script: "✏️ Write your hook here — the first 3 seconds must stop the scroll.", visual_prompt: "Bold close-up opener — high contrast, unexpected moment", shot_type: "close-up", on_screen_text: "Edit hook text", notes: "Critical — hook the viewer immediately" },
+    { duration: 5,  type: "setup", script: "✏️ Set up your story, problem, or topic here.", visual_prompt: "Wide or mid shot establishing context", shot_type: "wide",     on_screen_text: "", notes: "Frame the story / problem" },
+    { duration: Math.max(duration - 16, 8), type: "main", script: "✏️ Deliver your main content, insight, or demonstration here.", visual_prompt: "Mid-shot with energy — show the solution or key point", shot_type: "mid-shot", on_screen_text: "", notes: "Core value delivery" },
+    { duration: 8,  type: "cta",   script: "✏️ Write your call to action — follow, buy, click, or comment.", visual_prompt: "Direct eye contact to camera — confident, clear CTA visible", shot_type: "close-up", on_screen_text: "Edit CTA text", notes: "Drive the action" },
+  ];
+  return configs.map((c, i) => makeScene({ id: `scene_${i + 1}`, order: i + 1, ...c }));
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────────
 
 export function parseVideoScript(
   rawText: string,
   videoLength: string = "30",
 ): ParsedVideoScript {
-  const hook       = extractSection(rawText, "HOOK");
-  const concept    = extractSection(rawText, "CONCEPT");
-  const script_body = extractSection(rawText, "SCRIPT\\s*BODY");
-  const cta        = extractSection(rawText, "CTA");
-  const caption    = extractSection(rawText, "CAPTION");
+  const normalized = normalizeAiOutput(rawText);
 
-  const partial = { hook, concept, script_body, cta, caption };
-  const scenes = deriveScenesFromScript(partial, videoLength);
+  const hook        = extractSection(normalized, "HOOK");
+  const concept     = extractSection(normalized, "CONCEPT");
+  const script_body = extractSection(normalized, "SCRIPT\\s+BODY");
+  const cta         = extractSection(normalized, "CTA");
+  const caption     = extractSection(normalized, "CAPTION");
+
+  // For ad variant: if concept/script_body are empty, try ad-specific labels
+  const effectiveConcept    = concept    || extractSection(normalized, "PROBLEM");
+  const effectiveScriptBody = script_body || [
+    extractSection(normalized, "SOLUTION"),
+    extractSection(normalized, "PROOF\\s+POINT"),
+  ].filter(Boolean).join("\n\n");
+
+  const partial = {
+    hook,
+    concept:     effectiveConcept,
+    script_body: effectiveScriptBody,
+    cta,
+    caption:     caption || extractSection(normalized, "VISUAL\\s+DIRECTION"),
+  };
+
+  // Derive scenes from parsed content
+  let scenes = deriveScenesFromScript(partial, videoLength);
+
+  // Guaranteed fallback: never return 0 scenes
+  if (scenes.length === 0) {
+    const hasAnyContent = Object.values(partial).some((v) => v.length > 0);
+    scenes = hasAnyContent
+      ? createFallbackScenes(rawText, videoLength)
+      : createTemplateScenes(parseInt(videoLength, 10) || 30);
+  }
 
   return { ...partial, scenes };
 }
