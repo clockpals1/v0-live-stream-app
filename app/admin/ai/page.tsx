@@ -1,18 +1,10 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAiConfig, redactAiConfig } from "@/lib/ai/config";
-import { Button } from "@/components/ui/button";
 import { AiConfigPanel } from "@/components/admin/ai/ai-config-panel";
-import {
-  Radio,
-  ArrowLeft,
-  ShieldCheck,
-  Sparkles,
-  Check,
-  Circle,
-} from "lucide-react";
+import { Check, Circle } from "lucide-react";
+import { PageHeader } from "@/components/shell/page-header";
 
 export const dynamic = "force-dynamic";
 
@@ -66,47 +58,17 @@ export default async function AdminAiPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border">
-        <div className="container mx-auto flex items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Radio className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="font-bold text-foreground">Isunday Stream Live</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-sm font-medium text-primary">
-              <ShieldCheck className="h-4 w-4" />
-              Admin
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/admin">
-                <ArrowLeft className="mr-1.5 h-4 w-4" />
-                User management
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto max-w-5xl space-y-6 px-4 py-8">
-        {/* Breadcrumb + title */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Link href="/admin" className="hover:text-foreground">Admin</Link>
-            <span>/</span>
-            <span className="text-foreground">AI Configuration</span>
-          </div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Sparkles className="h-5 w-5" />
-            AI Configuration
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage AI provider API keys, capability routing, and God-mode agent settings
-            for the AI Automation Hub at <code className="font-mono text-xs">ai.isunday.me</code>.
-          </p>
-        </div>
+    <div className="flex flex-1 flex-col min-h-0">
+      <PageHeader
+        title="AI Configuration"
+        description="Manage AI provider API keys, capability routing, and agent settings."
+        breadcrumbs={[
+          { label: "Admin Center", href: "/admin" },
+          { label: "AI Configuration" },
+        ]}
+      />
+      <main className="flex-1 overflow-auto">
+      <div className="container mx-auto max-w-5xl space-y-6 px-4 py-8">
 
         {/* Quick stats */}
         {initialConfig && (
@@ -168,6 +130,7 @@ export default async function AdminAiPage() {
             ))}
           </div>
         </section>
+      </div>
       </main>
     </div>
   );

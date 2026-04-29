@@ -3,8 +3,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled } from "@/lib/billing/plans";
-import { STUDIO_NAV } from "@/lib/studio/nav";
-import { StudioSidebar, type StudioSidebarItem } from "@/components/studio/sidebar";
+import { STUDIO_NAV_GROUPS } from "@/lib/studio/nav";
+import { StudioShell } from "@/components/studio/studio-shell";
 import { isNextControlFlowSignal } from "@/lib/next/control-flow";
 import { ensureHostRow, type HostRow } from "@/lib/host/bootstrap";
 
@@ -127,17 +127,21 @@ async function renderStudioLayout({
 
   // Annotate nav items with gated state. Admins and grant holders see
   // everything unlocked because their synthetic plan flips every flag.
-  const items: ReadonlyArray<StudioSidebarItem> = STUDIO_NAV.map((item) => ({
-    ...item,
-    gated: !!item.gateKey && !featureEnabled(plan, item.gateKey),
+  const navGroups = STUDIO_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      gated: !!item.gateKey && !featureEnabled(plan, item.gateKey),
+    })),
   }));
 
   return (
     <div className="flex min-h-screen flex-col bg-background lg:flex-row">
-      <StudioSidebar
-        items={items}
-        hostName={host.display_name || host.email}
+      <StudioShell
+        navGroups={navGroups}
+        userName={host.display_name || host.email}
         planLabel={planLabel}
+        isAdmin={effective.isPlatformAdmin}
       />
       <div className="flex-1 min-w-0">{children}</div>
     </div>

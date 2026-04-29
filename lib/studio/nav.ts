@@ -1,4 +1,5 @@
 import type { FeatureKey } from "@/lib/billing/plans";
+import type { AppNavGroup } from "@/components/shell/app-sidebar";
 
 /**
  * Studio sidebar navigation.
@@ -40,45 +41,37 @@ export interface StudioNavItem {
 }
 
 export const STUDIO_NAV: ReadonlyArray<StudioNavItem> = [
+  { href: "/studio",              label: "Overview",        description: "Your creator dashboard at a glance.",              iconKey: "overview" },
+  { href: "/studio/replay",       label: "Replay Library",  description: "Recordings, publications, engagement.",            iconKey: "replay",       gateKey: "replay_publishing" },
+  { href: "/studio/distribution", label: "Distribution",    description: "YouTube, exports, archive destinations.",          iconKey: "distribution", gateKey: "distribution_export" },
+  { href: "/studio/audience",     label: "Audience CRM",    description: "Subscriber lists, segments, engagement history.", iconKey: "audience",     gateKey: "audience_crm" },
+  { href: "/studio/monetize",     label: "Monetization",    description: "Earnings, paywalls, premium content.",            iconKey: "monetize",     gateKey: "monetization_basic" },
+  { href: "/studio/insights",     label: "Insights",        description: "Viewer trends, chat activity, subscriber growth.", iconKey: "insights",    gateKey: "live_analytics" },
+];
+
+/**
+ * Grouped nav for the enterprise AppSidebar.
+ */
+export const STUDIO_NAV_GROUPS: ReadonlyArray<AppNavGroup & { items: (StudioNavItem & { badge?: string })[] }> = [
   {
-    href: "/studio",
     label: "Overview",
-    description: "Your creator dashboard at a glance.",
-    iconKey: "overview",
+    items: [
+      { href: "/studio", label: "Dashboard", description: "", iconKey: "overview" },
+    ],
   },
   {
-    href: "/studio/replay",
-    label: "Replay Library",
-    description: "Recordings, publications, engagement.",
-    iconKey: "replay",
-    gateKey: "replay_publishing",
+    label: "Content",
+    items: [
+      { href: "/studio/replay",       label: "Replay Library",  description: "", iconKey: "replay",       gateKey: "replay_publishing" },
+      { href: "/studio/distribution", label: "Distribution",    description: "", iconKey: "distribution", gateKey: "distribution_export" },
+    ],
   },
   {
-    href: "/studio/distribution",
-    label: "Distribution Hub",
-    description: "YouTube, exports, archive destinations.",
-    iconKey: "distribution",
-    gateKey: "distribution_export",
-  },
-  {
-    href: "/studio/audience",
-    label: "Audience CRM",
-    description: "Subscriber lists, segments, engagement history.",
-    iconKey: "audience",
-    gateKey: "audience_crm",
-  },
-  {
-    href: "/studio/monetize",
-    label: "Monetization",
-    description: "Earnings, paywalls, premium content.",
-    iconKey: "monetize",
-    gateKey: "monetization_basic",
-  },
-  {
-    href: "/studio/insights",
-    label: "Insights",
-    description: "Viewer trends, chat activity, subscriber growth.",
-    iconKey: "insights",
-    gateKey: "live_analytics",
+    label: "Audience & Growth",
+    items: [
+      { href: "/studio/audience", label: "Audience CRM",  description: "", iconKey: "audience", gateKey: "audience_crm" },
+      { href: "/studio/monetize", label: "Monetization",  description: "", iconKey: "monetize", gateKey: "monetization_basic" },
+      { href: "/studio/insights", label: "Insights",      description: "", iconKey: "insights", gateKey: "live_analytics" },
+    ],
   },
 ];

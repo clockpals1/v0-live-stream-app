@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { featureEnabled } from "@/lib/billing/plans";
-import { AI_NAV } from "@/lib/ai/nav";
-import { AiSidebar, type AiSidebarItem } from "@/components/ai/sidebar";
+import { AI_NAV_GROUPS } from "@/lib/ai/nav";
+import { AiShell } from "@/components/ai/ai-shell";
 import { ensureHostRow } from "@/lib/host/bootstrap";
 import { isNextControlFlowSignal } from "@/lib/next/control-flow";
 
@@ -85,17 +85,21 @@ async function renderAiLayout({ children }: { children: React.ReactNode }) {
   const plan = effective.plan;
   const planLabel = effective.isPlatformAdmin ? "Admin" : (plan?.name ?? "Free");
 
-  const items: ReadonlyArray<AiSidebarItem> = AI_NAV.map((item) => ({
-    ...item,
-    gated: !!item.gateKey && !featureEnabled(plan, item.gateKey),
+  const navGroups = AI_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      gated: !!item.gateKey && !featureEnabled(plan, item.gateKey),
+    })),
   }));
 
   return (
     <div className="flex min-h-screen flex-col bg-background lg:flex-row">
-      <AiSidebar
-        items={items}
-        hostName={host.display_name || host.email}
+      <AiShell
+        navGroups={navGroups}
+        userName={host.display_name || host.email}
         planLabel={planLabel}
+        isAdmin={effective.isPlatformAdmin}
       />
       <div className="flex-1 min-w-0">{children}</div>
     </div>

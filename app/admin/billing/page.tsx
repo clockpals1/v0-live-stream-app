@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBillingConfig, redactConfig } from "@/lib/billing/config";
 import { listAllPlans } from "@/lib/billing/plans";
-import { Button } from "@/components/ui/button";
-import { Radio, ArrowLeft, CreditCard, ShieldCheck, Layers, Users, Gift } from "lucide-react";
+import { CreditCard, ShieldCheck, Layers, Users, Gift } from "lucide-react";
+import { PageHeader } from "@/components/shell/page-header";
 import { ModeBanner } from "@/components/admin/billing/mode-banner";
 import { StripeConfigPanel } from "@/components/admin/billing/stripe-config";
 import { PlansEditor } from "@/components/admin/billing/plans-editor";
@@ -66,49 +65,17 @@ export default async function AdminBillingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border">
-        <div className="container mx-auto flex items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Radio className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="font-bold text-foreground">Isunday Stream Live</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-sm font-medium text-primary">
-              <ShieldCheck className="h-4 w-4" />
-              Admin
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/admin">
-                <ArrowLeft className="mr-1.5 h-4 w-4" />
-                User management
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto max-w-5xl space-y-6 px-4 py-8">
-        {/* Page header */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Link href="/admin" className="hover:text-foreground">
-              Admin
-            </Link>
-            <span>/</span>
-            <span className="text-foreground">Billing</span>
-          </div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <CreditCard className="h-5 w-5" />
-            Billing
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage subscription plans, Stripe credentials, and the active
-            payment environment.
-          </p>
-        </div>
+    <div className="flex flex-1 flex-col min-h-0">
+      <PageHeader
+        title="Plans & Billing"
+        description="Manage subscription plans, Stripe credentials, and the active payment environment."
+        breadcrumbs={[
+          { label: "Admin Center", href: "/admin" },
+          { label: "Plans & Billing" },
+        ]}
+      />
+      <main className="flex-1 overflow-auto">
+      <div className="container mx-auto max-w-5xl space-y-6 px-4 py-8">
 
         {/* Quick-stats row */}
         {initialConfig ? (
@@ -184,6 +151,7 @@ export default async function AdminBillingPage() {
           />
           <GrantsSection />
         </section>
+      </div>
       </main>
     </div>
   );
