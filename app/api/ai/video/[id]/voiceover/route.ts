@@ -111,6 +111,34 @@ export async function POST(
     }
   }
 
+  // ── Fall back to HuggingFace TTS (reuses the same HF token used for images)
+  if (!audioBuffer && cfg?.huggingface_api_key && cfg.huggingface_enabled) {
+    try {
+      const hfRes = await fetch(
+        "https://api-inference.huggingface.co/models/facebook/mms-tts-eng",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${cfg.huggingface_api_key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ inputs: text.trim().slice(0, 2000) }),
+        },
+      );
+      if (hfRes.ok) {
+        const ct = hfRes.headers.get("content-type") ?? "";
+        if (!ct.includes("application/json")) {
+          audioBuffer = await hfRes.arrayBuffer();
+          contentType = ct.includes("flac") ? "audio/flac"
+            : ct.includes("wav") ? "audio/wav"
+            : "audio/mpeg";
+        }
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
   // ── Fall back to StreamElements TTS (free, no key required) ──────
   if (!audioBuffer) {
     try {
@@ -141,7 +169,8 @@ export async function POST(
   }
 
   // ── Upload to R2 ───────────────────────────────────────────────────
-  const objectKey = `video-projects/${id}/voiceover.mp3`;
+  const ext = contentType.includes("flac") ? "flac" : contentType.includes("wav") ? "wav" : "mp3";
+  const objectKey = `video-projects/${id}/voiceover.${ext}`;
   let audioUrl: string;
 
   try {
