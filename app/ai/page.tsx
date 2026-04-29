@@ -81,31 +81,46 @@ async function renderPage() {
     video_project_status: string | null;
   };
 
-  // Fetch recent assets + join video_project id/status for short_video rows
-  const { data: recentAssets } = await admin
+  // Step 1: simple asset fetch — always works
+  const { data: rawAssets } = await admin
     .from("ai_generated_assets")
-    .select(`
-      id, asset_type, title, content, platform, created_at, is_starred,
-      video_projects!asset_id ( id, status )
-    `)
+    .select("id, asset_type, title, content, platform, created_at, is_starred")
     .eq("host_id", host.id)
     .is("archived_at", null)
     .order("created_at", { ascending: false })
-    .limit(6)
-    .then(({ data, error }) => ({
-      data: (data ?? []).map((row: Record<string, unknown>) => {
-        const vp = Array.isArray(row.video_projects)
-          ? (row.video_projects[0] as { id: string; status: string } | undefined)
-          : (row.video_projects as { id: string; status: string } | null | undefined);
-        return {
-          ...row,
-          video_projects: undefined,
-          video_project_id: vp?.id ?? null,
-          video_project_status: vp?.status ?? null,
-        } as AssetRow;
-      }),
-      error,
-    }));
+    .limit(6);
+
+  // Step 2: try to enrich short_video rows with video_project data.
+  // Gracefully skipped if the video_projects table doesn't exist yet.
+  const videoProjectMap: Record<string, { id: string; status: string }> = {};
+  const shortVideoIds = (rawAssets ?? [])
+    .filter((a) => a.asset_type === "short_video")
+    .map((a) => a.id);
+
+  if (shortVideoIds.length > 0) {
+    try {
+      const { data: vps } = await admin
+        .from("video_projects")
+        .select("id, status, asset_id")
+        .in("asset_id", shortVideoIds);
+      for (const vp of vps ?? []) {
+        if (vp.asset_id) {
+          videoProjectMap[vp.asset_id as string] = {
+            id: vp.id as string,
+            status: vp.status as string,
+          };
+        }
+      }
+    } catch {
+      // video_projects table not yet created — skip enrichment
+    }
+  }
+
+  const recentAssets: AssetRow[] = (rawAssets ?? []).map((a) => ({
+    ...a,
+    video_project_id: videoProjectMap[a.id]?.id ?? null,
+    video_project_status: videoProjectMap[a.id]?.status ?? null,
+  }));
 
   // Monthly usage count
   const startOfMonth = new Date();
