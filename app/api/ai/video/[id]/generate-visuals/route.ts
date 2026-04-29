@@ -116,96 +116,103 @@ export async function POST(
     apiKey = cfg.stability_api_key;
   }
 
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          "No image generation provider configured. Add a HuggingFace or Stability AI API key in Admin → AI Configuration.",
-      },
-      { status: 400 },
-    );
-  }
-
   // ── Generate image ─────────────────────────────────────────────────
-  let imageBuffer: ArrayBuffer;
+  let imageBuffer: ArrayBuffer | null = null;
   let contentType = "image/jpeg";
 
-  if (useHuggingFace) {
-    const res = await fetch(
-      `https://api-inference.huggingface.co/models/${HF_MODEL}`,
-      {
+  // 1. HuggingFace (when configured)
+  if (useHuggingFace && apiKey) {
+    try {
+      const res = await fetch(
+        `https://api-inference.huggingface.co/models/${HF_MODEL}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: prompt,
+            parameters: { num_inference_steps: 4 },
+          }),
+        },
+      );
+      if (res.ok) {
+        const ct = res.headers.get("content-type") ?? "image/jpeg";
+        if (!ct.includes("application/json")) {
+          imageBuffer = await res.arrayBuffer();
+          contentType = ct;
+        }
+      }
+    } catch {
+      // fall through to next provider
+    }
+  }
+
+  // 2. Stability AI (when configured and HF didn't work)
+  if (!imageBuffer && apiKey && !useHuggingFace) {
+    try {
+      const res = await fetch(STABILITY_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
         body: JSON.stringify({
-          inputs: prompt,
-          parameters: { num_inference_steps: 4 },
+          text_prompts: [{ text: prompt, weight: 1 }],
+          width: 896,
+          height: 512,
+          steps: 20,
+          samples: 1,
         }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          artifacts?: { base64?: string }[];
+        };
+        const b64 = json.artifacts?.[0]?.base64;
+        if (b64) {
+          const binary = atob(b64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++)
+            bytes[i] = binary.charCodeAt(i);
+          imageBuffer = bytes.buffer;
+          contentType = "image/png";
+        }
+      }
+    } catch {
+      // fall through to Pollinations
+    }
+  }
+
+  // 3. Pollinations.ai — free, no API key, always available
+  if (!imageBuffer) {
+    try {
+      const encodedPrompt = encodeURIComponent(
+        `${prompt}, high quality, cinematic, short video thumbnail`,
+      );
+      const polRes = await fetch(
+        `https://image.pollinations.ai/prompt/${encodedPrompt}?width=896&height=512&nologo=true&model=flux-schnell`,
+        { signal: AbortSignal.timeout(28_000) },
+      );
+      if (polRes.ok) {
+        imageBuffer = await polRes.arrayBuffer();
+        contentType = polRes.headers.get("content-type") ?? "image/jpeg";
+      }
+    } catch {
+      // fall through — will return error below
+    }
+  }
+
+  if (!imageBuffer) {
+    return NextResponse.json(
+      {
+        error:
+          "All image providers failed. Check your HuggingFace / Stability AI key in Admin → AI Configuration, or retry in 30s (model may be cold-starting).",
       },
+      { status: 502 },
     );
-    if (!res.ok) {
-      const text = await res.text().catch(() => String(res.status));
-      return NextResponse.json(
-        {
-          error: `Image generation failed: ${text.slice(0, 160)}. The model may still be loading — wait 20s and retry.`,
-        },
-        { status: 502 },
-      );
-    }
-    const ct = res.headers.get("content-type") ?? "image/jpeg";
-    if (ct.includes("application/json")) {
-      // HuggingFace returns JSON on rate-limit or loading errors
-      const json = (await res.json()) as { error?: string };
-      return NextResponse.json(
-        {
-          error:
-            json.error ?? "HuggingFace returned a non-image response — model may be loading, retry in 20s.",
-        },
-        { status: 502 },
-      );
-    }
-    imageBuffer = await res.arrayBuffer();
-    contentType = ct;
-  } else {
-    // Stability AI SDXL
-    const res = await fetch(STABILITY_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        text_prompts: [{ text: prompt, weight: 1 }],
-        width: 896,
-        height: 512,
-        steps: 20,
-        samples: 1,
-      }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => String(res.status));
-      return NextResponse.json(
-        { error: `Stability AI error: ${text.slice(0, 160)}` },
-        { status: 502 },
-      );
-    }
-    const json = (await res.json()) as {
-      artifacts?: { base64?: string }[];
-    };
-    const b64 = json.artifacts?.[0]?.base64;
-    if (!b64)
-      return NextResponse.json(
-        { error: "No image returned from Stability AI." },
-        { status: 502 },
-      );
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    imageBuffer = bytes.buffer;
-    contentType = "image/png";
   }
 
   // ── Upload to R2 ───────────────────────────────────────────────────
